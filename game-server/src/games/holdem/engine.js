@@ -1,5 +1,6 @@
 import { PUSH } from "../../messages.js";
 import { debit } from "../../wallet/index.js";
+import { memberListSeats, publicObserver, publicSeat } from "../../core/member.js";
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
@@ -38,34 +39,44 @@ export function createTexasTable(roomId, roomType, cfg) {
   };
 }
 
+function dzpkParams(table) {
+  return {
+    smallBlind: table.smallBlind,
+    bigBlind: table.bigBlind,
+    initialBet: table.bigBlind,
+    straddle: false,
+    delayLook: true,
+    openInsurance: false,
+    forceShowCard: table.forceShowCard,
+    forceShowType: table.forceShowCard ? 1 : 0,
+    carryMin: table.carryMin,
+    carryMax: -1,
+    betTime: table.betTime,
+    observed: true,
+    taxType: 0,
+    taxPercent: 0,
+    banTalk: false,
+    openAuditCarry: false,
+    openTaxNoLimit: true,
+  };
+}
+
 export function texasConf(table) {
+  const params = dzpkParams(table);
   return {
     roomType: gameConfig.confRoomType,
     minPeople: gameConfig.minPeople,
     maxPeople: gameConfig.maxPeople,
-    dzpkParams: {
-      smallBlind: table.smallBlind,
-      bigBlind: table.bigBlind,
-      initialBet: table.bigBlind,
-      straddle: false,
-      delayLook: true,
-      openInsurance: false,
-      forceShowCard: table.forceShowCard,
-      forceShowType: table.forceShowCard ? 1 : 0,
-      carryMin: table.carryMin,
-      carryMax: -1,
-      betTime: table.betTime,
-      observed: true,
-      taxType: 0,
-      taxPercent: 0,
-      banTalk: false,
-      openAuditCarry: true,
-      openTaxNoLimit: true,
+    dzpkParams: params,
+    dzpk: {
+      ...params,
+      gameName: gameConfig.name,
     },
-    playMode: table.playMode || 1,
+    playMode: Number(table.playMode) || 0,
     allowCarryOut: true,
     roomClassification: table.roomClassification,
     gameRoomConfigId: num(table.cfg, "game_room_config_id", 0),
+    hundredSwitch: false,
   };
 }
 
@@ -76,13 +87,15 @@ export function texasRoomInfo(table) {
     currentInning: table.currentInning,
     maxPeople: 7,
     roomState: table.phase === "playing" ? 2 : 1,
-    memberList: table.members.map(publicMember),
-    OBmemberList: table.observers,
+    memberList: memberListSeats(table.members, 7),
+    OBmemberList: (table.observers || []).map((item) => publicObserver(item)),
     dzpk: {
       gameName: gameConfig.name,
       smallBlind: table.smallBlind,
       bigBlind: table.bigBlind,
       carryMin: table.carryMin,
+      carryMax: -1,
+      betTime: table.betTime,
       forceShowCard: table.forceShowCard,
       openInsurance: false,
     },
@@ -92,23 +105,14 @@ export function texasRoomInfo(table) {
 }
 
 function publicMember(m) {
-  return {
-    uid: m.uid,
-    name: m.name,
-    pos: m.pos,
-    point: m.point,
-    state: m.folded ? 3 : m.state,
-    lastOperation: m.lastOperation || 0,
-    xiaZhuData: m.totalBet || 0,
-    banker: Boolean(m.dealer),
-  };
+  return publicSeat(m);
 }
 
 export function onTexasJoin(send, table, session, body) {
   const isOb = Boolean(body?.isOb);
   if (isOb) {
     if (!table.observers.some((item) => item.uid === session.userId)) {
-      table.observers.push({ uid: session.userId, name: session.name, point: session.wallet });
+      table.observers.push({ uid: session.userId, name: session.name, point: Number(session.wallet) || 0 });
     }
   } else if (!table.members.some((item) => item.uid === session.userId)) {
     const used = new Set(table.members.map((item) => item.pos));
@@ -151,29 +155,64 @@ export function onTexasLoginRoom(send, table, session) {
   }
 }
 
+export function onGtoReq(send, payload) {
+  let ops = [];
+  try {
+    ops = JSON.parse(payload?.tipsListStr || "[]");
+  } catch {
+    ops = [];
+  }
+  const keys = ops.filter((item) => item && item.operation != null);
+  const share = keys.length ? 1 / keys.length : 0;
+  const res = {};
+  for (const item of keys) {
+    res[String(item.operation)] = share;
+  }
+  send(PUSH.GTO_RES, res);
+}
+
 export const BOT_UID = gameConfig.botUid;
 
-export function ensureBot(table) {
-  const humans = table.members.filter((m) => !m.bot);
-  if (humans.length !== 1 || table.members.some((m) => m.bot)) {
-    return;
-  }
+function nextBotPos(table) {
   const used = new Set(table.members.map((item) => item.pos));
   let pos = 0;
   while (used.has(pos) && pos < 7) {
     pos += 1;
   }
-  table.members.push({
-    uid: BOT_UID,
-    name: gameConfig.botName,
-    point: Math.max(table.carryMin, table.bigBlind * gameConfig.buyInBb),
-    pos,
-    state: 1,
-    lastOperation: 0,
-    totalBet: 0,
-    dealer: false,
-    bot: true,
-  });
+  return pos;
+}
+
+export function ensureBots(table, count) {
+  const maxPeople = 7;
+  if (table.botTarget == null) {
+    const n = count == null ? 3 + Math.floor(Math.random() * 4) : Number(count);
+    table.botTarget = Math.min(Math.max(Math.floor(n), 0), maxPeople - 1);
+  }
+  const point = Math.max(Number(table.carryMin) || 0, Number(table.bigBlind) * gameConfig.buyInBb);
+  while (table.members.filter((m) => m.bot).length < table.botTarget && table.members.length < maxPeople) {
+    const pos = nextBotPos(table);
+    if (pos >= maxPeople) {
+      break;
+    }
+    const index = table.members.filter((m) => m.bot).length;
+    table.members.push({
+      uid: BOT_UID + index,
+      name: index === 0 ? gameConfig.botName : `${gameConfig.botName}${index + 1}`,
+      point,
+      pos,
+      state: 1,
+      lastOperation: 0,
+      totalBet: 0,
+      streetBet: 0,
+      dealer: false,
+      bot: true,
+      clubId: 0,
+    });
+  }
+}
+
+export function ensureBot(table, count) {
+  ensureBots(table, count);
 }
 
 export function botChoose(table, actor) {
@@ -303,12 +342,10 @@ export function beginHand(io, table) {
     table.hand.deckPos += 2;
   }
   io.forEachPlayer((session) => {
-    for (const p of players) {
-      io.send(session.ws, PUSH.DZPK_DEAL_DI_PUSH, {
-        uid: p.uid,
-        cardList: session.userId === p.uid ? p.hole : [-1, -1],
-      });
-    }
+    io.send(session.ws, PUSH.DZPK_DEAL_DI_PUSH, players.map((p) => ({
+      uid: p.uid,
+      cardList: session.userId === p.uid ? p.hole : [-1, -1],
+    })));
     const self = players.find((p) => p.uid === session.userId);
     if (self) {
       io.send(session.ws, PUSH.DZPK_CARDTYPE_PUSH, holeType(self.hole));
@@ -564,11 +601,11 @@ function actionOptions(table, actor) {
 function pushAction(io, table, player, operation) {
   io.broadcast(PUSH.DZPK_ACTION_BET_PUSH, {
     uid: player.uid,
-    currentBetScore: player.streetBet,
-    totalBetScore: player.totalBet,
+    currentBetScore: Number(player.streetBet) || 0,
+    totalBetScore: Number(player.totalBet) || 0,
     operation,
-    point: player.point,
-    pot: table.hand.pot,
+    point: Number(player.point) || 0,
+    pot: Number(table.hand?.pot) || 0,
   });
 }
 

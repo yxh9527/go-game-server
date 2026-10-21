@@ -1,0 +1,37 @@
+{
+   "action": {
+      "default_icon": "icons/iconDisabled16.png",
+      "default_title": "Avira Safe Shopping"
+   },
+   "background": {
+      "service_worker": "background.js"
+   },
+   "content_scripts": [ {
+      "js": [ "contentScript.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_start"
+   }, {
+      "css": [ "css/fonts.css" ],
+      "matches": [ "https://*/*", "http://*/*" ],
+      "run_at": "document_start"
+   } ],
+   "default_locale": "en",
+   "description": "__MSG_extensionDescription__",
+   "host_permissions": [ "\u003Call_urls>" ],
+   "icons": {
+      "128": "icons/icon128.png",
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvvsrDBQzkSUKEBXcrAMkAOWAr8C/Ye9sPQCFsf88wLthAVla9PKKagy+IChk/0kBsl100TzY7sFnnEowxcub78AyLlGVW5LpsHVukVL1e+8m7mYweRUQEa3QueCpQd8ccfkObehrLAA6NQl2STz1vZpdUxxEyAi3zWHDNPoNgzpgskmCqplgdfLNwr70WrcR2fvRfvHIdaooz2yKfpNrQDUr+bZ3wWwhmS+WlGOXwXd8N5hBLTbXmr+wGS3lbSDrghjPjS1YxbcfJOdN8RmlHPZQPUKXirOok1C9QQ49EreoxiShBy11Zt8t9uhtonRT/jJ77ocaljKAJIIUKptPiwIDAQAB",
+   "manifest_version": 3,
+   "name": "Avira Safe Shopping",
+   "permissions": [ "storage", "alarms", "webRequest", "scripting", "webNavigation", "tabs" ],
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "8.8.0.929",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "siteScript.js", "redirectionChainSiteScript.js", "*.js.map", "*.css", "*.css.map", "fonts/*", "*.svg" ]
+   } ]
+}

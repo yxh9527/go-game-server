@@ -1,0 +1,187 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
+import test from "node:test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { clientVersion, langModuleFiles } from "./app.js";
+import { CLIENT_DEV_PATCH } from "./dev-patch.js";
+
+test("client version reads static/client", () => {
+  assert.equal(clientVersion(), "2.0.1279");
+});
+
+test("langModuleFiles finds hashed common bundle files", () => {
+  const clientDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../static/client/2.0.1279");
+  const files = langModuleFiles(clientDir, "common");
+  assert.ok(files);
+  assert.equal(files.config, "config.cc744.json");
+  assert.equal(files.index, "index.cc744.js");
+});
+
+test("client dev patch remaps language bundles and keeps console", () => {
+  assert.match(CLIENT_DEV_PATCH, /holdemGame_/);
+  assert.match(CLIENT_DEV_PATCH, /keepConsole/);
+  assert.match(CLIENT_DEV_PATCH, /force webHallOb/);
+  assert.match(CLIENT_DEV_PATCH, /installBundle/);
+  assert.match(CLIENT_DEV_PATCH, /mappedBundle/);
+  assert.match(CLIENT_DEV_PATCH, /flushOpenGame|deliver handleOpenGame/);
+  assert.match(CLIENT_DEV_PATCH, /rewriteAssetUrl/);
+  assert.match(CLIENT_DEV_PATCH, /peekOpenGame/);
+  assert.match(CLIENT_DEV_PATCH, /findHandleOpenGame|getClassByName/);
+  assert.match(CLIENT_DEV_PATCH, /capture openGame/);
+  assert.match(CLIENT_DEV_PATCH, /scene\.name === "webHallOb"/);
+  assert.match(CLIENT_DEV_PATCH, /WebHallOb\.start|afterStart/);
+  assert.match(CLIENT_DEV_PATCH, /post gameLoaded/);
+  assert.match(CLIENT_DEV_PATCH, /loadScene/);
+  assert.match(CLIENT_DEV_PATCH, /loadSceneDirect/);
+  assert.match(CLIENT_DEV_PATCH, /runSceneImmediate/);
+  assert.match(CLIENT_DEV_PATCH, /api\\.pansu\\.xyz/);
+  assert.match(CLIENT_DEV_PATCH, /lobby\.localhost/);
+  assert.match(CLIENT_DEV_PATCH, /hide persist|hideBairenOverlay/);
+  assert.match(CLIENT_DEV_PATCH, /addPersistRootNode/);
+  assert.match(CLIENT_DEV_PATCH, /_persistRootNodes/);
+  assert.match(CLIENT_DEV_PATCH, /loadedSends/);
+  assert.match(CLIENT_DEV_PATCH, /persist hook/);
+  assert.match(CLIENT_DEV_PATCH, /hide launch overlay/);
+  assert.match(CLIENT_DEV_PATCH, /launchOverlayHidden/);
+  assert.match(CLIENT_DEV_PATCH, /launch-new-api/);
+  assert.match(CLIENT_DEV_PATCH, /isBairenPersist/);
+  assert.match(CLIENT_DEV_PATCH, /connectTips/);
+  assert.match(CLIENT_DEV_PATCH, /hideConnectTips|isLoadingPersist/);
+  assert.match(CLIENT_DEV_PATCH, /joinRoom\.isOb = true/);
+  assert.match(CLIENT_DEV_PATCH, /scheduleHoldemScene/);
+  assert.match(CLIENT_DEV_PATCH, /scene already active/);
+  assert.match(CLIENT_DEV_PATCH, /skip duplicate scene/);
+  assert.match(CLIENT_DEV_PATCH, /sceneReady/);
+  assert.match(CLIENT_DEV_PATCH, /GameCanvas/);
+  assert.match(CLIENT_DEV_PATCH, /pointerEvents/);
+  assert.doesNotMatch(CLIENT_DEV_PATCH, /canvas\.style\.position/);
+  assert.match(CLIENT_DEV_PATCH, /__gogameFrozen/);
+  assert.match(CLIENT_DEV_PATCH, /showLoading hook|block showLoading|GameUtils showLoading hook/);
+  assert.match(CLIENT_DEV_PATCH, /__gogameLaunchObs/);
+});
+
+test("webHallEarly exposes peek without consuming cache", () => {
+  const src = fs.readFileSync(new URL("../../static/client/2.0.1279/js/webHallEarly.js", import.meta.url), "utf8");
+  assert.match(src, /function peek\(/);
+  assert.match(src, /take: take, peek: peek/);
+});
+
+test("direct scene fallback skips a scene that the client entered while loading", () => {
+  let activeScene = { name: "webHallOb" };
+  let loadSceneCalls = 0;
+  let runSceneImmediateCalls = 0;
+  const loadedMessages = [];
+  const gameScene = { name: "gameHoldem" };
+  const bundle = {
+    loadScene(_name, _progress, complete) {
+      loadSceneCalls += 1;
+      activeScene = gameScene;
+      complete(null, gameScene);
+    },
+  };
+  const cc = {
+    js: { getClassByName: () => null, _nameToClass: {} },
+    assetManager: { getBundle: () => bundle, bundles: { forEach() {} } },
+    director: {
+      getScene: () => activeScene,
+      runSceneImmediate() {
+        runSceneImmediateCalls += 1;
+      },
+    },
+  };
+  const window = {
+    cc,
+    location: { href: "http://www.localhost:11042/2.0.1279/?userId=10001&openId=10001&isWebHall=1" },
+    parent: { postMessage(message) { loadedMessages.push(message); } },
+    WebSocket: class WebSocket {},
+    addEventListener() {},
+  };
+  const context = {
+    window,
+    cc,
+    location: window.location,
+    document: { getElementById: () => null },
+    history: { replaceState() {} },
+    URL,
+    URLSearchParams,
+    XMLHttpRequest: class XMLHttpRequest { open() {} },
+    console: { log() {}, warn() {}, error() {} },
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout: () => 1,
+  };
+  const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+
+  vm.runInNewContext(patch, context);
+  context.console.warn("进入游戏", "gameHoldem");
+
+  assert.equal(loadSceneCalls, 1);
+  assert.equal(activeScene.name, "gameHoldem");
+  assert.equal(runSceneImmediateCalls, 0);
+  assert.equal(loadedMessages.filter((message) => message.type === "gameLoaded").length, 1);
+});
+
+test("runtime SceneManager module is preferred over the direct scene fallback", async () => {
+  let activeScene = { name: "webHallOb" };
+  let loadSceneCalls = 0;
+  let runSceneCalls = 0;
+  const loadedMessages = [];
+  const gameScene = { name: "gameHoldem" };
+  const sceneManager = {
+    currentOptions: { module: "", scene: "" },
+    loadScene(options) {
+      loadSceneCalls += 1;
+      assert.equal(options.module, "Holdem");
+      assert.equal(options.scene, "gameHoldem");
+      return Promise.resolve({ sceneAsset: gameScene, options });
+    },
+    runScene(pack) {
+      runSceneCalls += 1;
+      activeScene = pack.sceneAsset;
+      this.currentOptions = pack.options;
+      return Promise.resolve();
+    },
+  };
+  const cc = {
+    js: { getClassByName: () => null, _nameToClass: {} },
+    assetManager: { getBundle: () => null, bundles: { forEach() {} } },
+    director: { getScene: () => activeScene },
+  };
+  const window = {
+    cc,
+    __require(name) {
+      assert.equal(name, "SceneManager");
+      return { default: { instance: sceneManager } };
+    },
+    location: { href: "http://www.localhost:11042/2.0.1279/?userId=10001&openId=10001&isWebHall=1" },
+    parent: { postMessage(message) { loadedMessages.push(message); } },
+    WebSocket: class WebSocket {},
+    addEventListener() {},
+  };
+  const context = {
+    window,
+    cc,
+    location: window.location,
+    document: { getElementById: () => null },
+    history: { replaceState() {} },
+    URL,
+    URLSearchParams,
+    XMLHttpRequest: class XMLHttpRequest { open() {} },
+    console: { log() {}, warn() {}, error() {} },
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout: (fn) => { fn(); return 1; },
+  };
+  const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+
+  vm.runInNewContext(patch, context);
+  context.console.warn("进入游戏", "gameHoldem");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(loadSceneCalls, 1);
+  assert.equal(runSceneCalls, 1);
+  assert.equal(activeScene.name, "gameHoldem");
+  assert.ok(loadedMessages.filter((message) => message.type === "gameLoaded").length >= 1);
+});

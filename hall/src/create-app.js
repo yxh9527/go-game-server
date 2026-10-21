@@ -6,9 +6,27 @@ export async function createApp(runtime) {
   const decode = await rel(import.meta.url, "./decode.js", v);
   const toClient = await rel(import.meta.url, "./to-client.js", v);
   const roomMod = await rel(import.meta.url, "./rooms.js", v);
+  const web = await rel(import.meta.url, "./web.js", v);
   const rooms = roomMod.createRoomLogic(decode);
 
   const app = express();
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    } else {
+      res.set("Access-Control-Allow-Origin", "*");
+    }
+    res.set("Access-Control-Allow-Credentials", "true");
+    res.set("Access-Control-Allow-Headers", req.headers["access-control-request-headers"] || "Content-Type, Authorization, X-Requested-With, token");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
   app.get("/health", (_req, res) => {
     res.json({
@@ -31,11 +49,11 @@ export async function createApp(runtime) {
     };
     const op = decode.num(params.op, 0);
     const userId = decode.num(params.userId ?? req.query.userId, 0);
-    const data = await dispatch(op, params, userId);
+    const data = await dispatch(op, params, userId, req);
     res.set("Cache-Control", "no-store").json({ msgCode: 200, errMsg: null, data });
   }
 
-  async function dispatch(op, params, userId) {
+  async function dispatch(op, params, userId, req) {
     switch (op) {
       case 35:
         return listMatches(params, userId);
@@ -50,7 +68,9 @@ export async function createApp(runtime) {
       case 63:
         return [];
       case 45:
-        return enterRoom(params);
+        return enterRoom(params, req);
+      case 49:
+        return { clubId: 0, type: decode.num(params.type, 1), roomType: decode.num(params.roomType, 0), itemList: [] };
       case 53:
         return loginInfo(params, userId);
       case 54:
@@ -99,12 +119,17 @@ export async function createApp(runtime) {
     }];
   }
 
-  function enterRoom(params) {
+  function enterRoom(params, req) {
     const row = rooms.findRoom(runtime.roomStore.list(), params);
     if (!row) {
       return [];
     }
-    return rooms.enterRoomPayload(row, params, runtime.config);
+    const domain = web.publicWsHost(req, runtime.config, runtime.env);
+    return rooms.enterRoomPayload(row, params, {
+      ...runtime.config,
+      game_server: domain,
+      hundred_server: domain,
+    });
   }
 
   async function wallet(userId) {
@@ -143,9 +168,10 @@ export async function createApp(runtime) {
       userId: uid,
       uid,
       name: userName,
-      userToken: token,
+      userToken: token || `dev-${uid}`,
+      openId: params.openId || String(uid || ""),
       clubId: decode.num(params.clubId, 0),
-      gameIp: runtime.config.game_server || "",
+      hideGameMenus: null,
       walletAmount: w.walletAmount,
       ticketNums: w.ticketNums,
     };
@@ -156,6 +182,7 @@ export async function createApp(runtime) {
   };
   app.get("/internal/v1/do", wrap(handleDo));
   app.get("/api/internal/v1/do", wrap(handleDo));
+  web.mountWeb(app, runtime);
   app.use((err, _req, res, _next) => {
     runtime.log.error(err);
     res.status(500).json({ msgCode: 500, errMsg: err.message || "error", data: null });

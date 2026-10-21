@@ -4,15 +4,18 @@
   "type": "module",
   "workspaces": [
     "hall",
+    "client-web",
     "game-server",
     "match",
     "mock-server"
   ],
   "scripts": {
+    "dev": "node scripts/dev.js",
     "hall": "node hall/src/boot.js",
+    "client-web": "node client-web/src/boot.js",
     "game-server": "node game-server/src/boot.js",
     "match": "node match/src/boot.js",
-    "test": "node --test shared/rpc/rpc.test.js hall/src/**/*.test.js game-server/src/**/*.test.js match/src/**/*.test.js"
+    "test": "node --test shared/rpc/rpc.test.js hall/src/**/*.test.js client-web/src/**/*.test.js game-server/src/**/*.test.js match/src/**/*.test.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.6",

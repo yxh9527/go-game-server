@@ -20,6 +20,7 @@ env: dev
 data_center: "127.0.0.1:50051"
 server_ip: "0.0.0.0"
 server_port: 11042
+client_web_port: 4000
 game_server: "127.0.0.1:11041"
 hundred_server: "127.0.0.1:11041"
 log: ""

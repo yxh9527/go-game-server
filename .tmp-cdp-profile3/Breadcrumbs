@@ -1,0 +1,50 @@
+0:02:26 Tab1 PageLoad
+0:02:30 Memory Pressure: Moderate
+0:02:31 Tab1 StartNav24 #renderer-user #link
+0:02:31 Tab1 FinishNav24
+0:02:40 Memory Pressure: Critical
+0:02:45 Memory Pressure: Critical
+0:02:50 Memory Pressure: Moderate
+0:02:55 Memory Pressure: Critical
+0:03:00 Memory Pressure: Critical
+0:03:05 Memory Pressure: Moderate
+0:03:08 Tab1 StartNav25 #typed
+0:03:08 Tab1 FinishNav25
+0:03:08 Tab1 StartNav26 #renderer-script #link
+0:03:08 Tab1 FinishNav26
+0:03:08 Tab1 StartNav27 #renderer-script #link
+0:03:08 Tab1 FinishNav27
+0:03:08 Tab1 PageLoad
+0:03:09 Tab1 StartNav28 #renderer-script #auto_subframe
+0:03:09 Tab1 FinishNav28
+0:03:09 Tab1 StartNav29 #renderer-script #auto_subframe
+0:03:09 Tab1 FinishNav29
+0:03:09 Tab1 PageLoad
+0:03:10 Tab1 PageLoad
+0:03:15 Memory Pressure: Moderate
+0:03:15 Tab1 StartNav30 #renderer-user #link
+0:03:15 Tab1 FinishNav30
+0:03:25 Memory Pressure: Moderate
+0:03:35 Memory Pressure: Critical
+0:03:40 Memory Pressure: Moderate
+0:03:50 Memory Pressure: Moderate
+0:04:00 Memory Pressure: Moderate
+0:04:10 Memory Pressure: Moderate
+0:04:20 Memory Pressure: Moderate
+0:04:25 Memory Pressure: None
+0:08:05 Tab1 StartNav31 #typed
+0:08:05 Tab1 FinishNav31
+0:08:05 Tab1 StartNav32 #renderer-script #link
+0:08:05 Tab1 FinishNav32
+0:08:05 Tab1 PageLoad
+0:08:05 Tab1 StartNav33 #renderer-script #link
+0:08:05 Tab1 FinishNav33
+0:08:06 Tab1 StartNav34 #renderer-script #auto_subframe
+0:08:06 Tab1 FinishNav34
+0:08:06 Tab1 StartNav35 #renderer-script #auto_subframe
+0:08:06 Tab1 FinishNav35
+0:08:06 Tab1 PageLoad
+0:08:06 Tab1 PageLoad
+0:08:12 Tab1 StartNav36 #renderer-user #link
+0:08:12 Tab1 FinishNav36
+0:11:43 Browser1 Close Tab1 at 0

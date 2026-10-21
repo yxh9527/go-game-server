@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as decode from "./decode.js";
 import { createRoomLogic } from "./rooms.js";
+import { publicWsHost } from "./web.js";
 
 const rooms = createRoomLogic(decode);
 const rows = [
@@ -22,5 +23,22 @@ test("find room by blinds and return enter payload", () => {
   assert.equal(payload.roomId, rooms.assignRoomId(row));
   assert.equal(payload.roomType, 19);
   assert.equal(payload.domain, "127.0.0.1:11041");
+  assert.equal(payload.hundredDomain, "");
+  assert.equal(payload.playMode, 0);
+  assert.equal(payload.smallBlind, 10);
+});
+
+test("hundred rooms keep hundredDomain", () => {
+  const row = { game_type: 50, room_type: 50, game_room_config_id: 1, play_mode: 1, room_index: 0, small_blind: 0, big_blind: 0, force_show_card: 0 };
+  const payload = rooms.enterRoomPayload(row, { roomType: 50 }, { game_server: "127.0.0.1:11041", hundred_server: "127.0.0.1:11041" });
   assert.equal(payload.hundredDomain, "127.0.0.1:11041");
+});
+
+test("dev public ws host rewrites lobby.localhost to www.localhost", () => {
+  const host = publicWsHost(
+    { headers: { host: "lobby.localhost:11042" } },
+    { game_server: "127.0.0.1:11041" },
+    "dev",
+  );
+  assert.equal(host, "www.localhost:11042");
 });

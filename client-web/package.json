@@ -1,0 +1,9 @@
+{
+  "name": "gogame-client-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/boot.js",
+    "test": "node --test ./src/app.test.js"
+  }
+}

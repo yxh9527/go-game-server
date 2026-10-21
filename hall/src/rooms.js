@@ -1,5 +1,11 @@
+const HUNDRED_ROOM_TYPES = new Set([50, 51, 52]);
+
 export function createRoomLogic(decode) {
   const { num, truthy } = decode;
+
+  function isHundredRoom(roomType) {
+    return HUNDRED_ROOM_TYPES.has(num(roomType, 0));
+  }
 
   function filterRooms(rows, params = {}) {
     const gameType = num(params.gameType, undefined);
@@ -68,11 +74,24 @@ export function createRoomLogic(decode) {
   }
 
   function enterRoomPayload(row, params, config) {
+    const roomType = num(params.roomType, num(row.room_type, 0));
+    const playMode = num(params.playMode, num(row.play_mode, 0));
+    const roomIndex = num(params.roomIndex, num(row.room_index, 0));
+    const smallBlind = num(params.smallBlind, num(row.small_blind, 0));
+    const bigBlind = num(params.bigBlind, num(row.big_blind, 0));
     return {
       roomId: assignRoomId(row),
-      roomType: num(params.roomType, num(row.room_type, 0)),
+      roomType,
+      playMode,
+      roomIndex,
+      smallBlind,
+      bigBlind,
+      carryMin: num(params.carryMin, num(row.carry_min, 0)),
+      forceShowCard: row.force_show_card,
+      gameRoomConfigId: num(row.game_room_config_id, 0),
+      key: `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",
-      hundredDomain: config.hundred_server || config.game_server || "",
+      hundredDomain: isHundredRoom(roomType) ? (config.hundred_server || config.game_server || "") : "",
     };
   }
 

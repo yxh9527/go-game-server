@@ -1,7 +1,10 @@
 import { SeatGame } from "../../core/SeatGame.js";
 import { SEND, PUSH } from "../../messages.js";
+import { rel } from "../../rel.js";
 import config from "./config.js";
-import * as engine from "./engine.js";
+
+const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const engine = await rel(import.meta.url, "./engine.js", v);
 
 export class HoldemGame extends SeatGame {
   constructor() {
@@ -35,6 +38,8 @@ export class HoldemGame extends SeatGame {
         smallBlind: table.smallBlind,
         bigBlind: table.bigBlind,
         carryMin: table.carryMin,
+        carryMax: -1,
+        betTime: table.betTime,
         forceShowCard: table.forceShowCard,
         openInsurance: this.config.openInsurance,
       },
@@ -49,12 +54,15 @@ export class HoldemGame extends SeatGame {
   }
 
   afterSit(table) {
-    engine.ensureBot(table);
+    engine.ensureBots(table);
+    this.queueStart(table);
   }
 
   onJoin(ctx) {
     super.onJoin(ctx);
-    ctx.send(PUSH.DZPK_PUSH_WATCHGAME, ctx.table.observers);
+    engine.ensureBots(ctx.table);
+    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
+    ctx.send(PUSH.DZPK_PUSH_WATCHGAME, this.roomInfo(ctx.table).OBmemberList);
   }
 
   onLoginRoom(ctx) {
@@ -67,12 +75,19 @@ export class HoldemGame extends SeatGame {
   }
 
   onMessage(ctx, msgid, payload) {
+    if (super.onMessage(ctx, msgid, payload)) {
+      return true;
+    }
     if (msgid === SEND.LOGIN_ROOM) {
       this.onLoginRoom(ctx);
       return true;
     }
     if (msgid === SEND.DZPK_SEND_ACTION) {
       engine.onTexasAction(ctx.io, ctx.table, ctx.session, payload || {});
+      return true;
+    }
+    if (msgid === SEND.GTO_REQ) {
+      engine.onGtoReq(ctx.send, payload || {});
       return true;
     }
     return false;

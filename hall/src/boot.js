@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { closeRpc, env, initRpc } from "../../shared/rpc/index.js";
 import { createRpcWallet } from "../../game-server/src/wallet/rpcWallet.js";
+import { attachGameProxy } from "./game-proxy.js";
+import { isGameStaticHost, isHallApiPath, proxyToClientWeb } from "./static-proxy.js";
 import { watchHot } from "./hot.js";
 import { createMatchStore, createRoomStore } from "./store.js";
 
@@ -69,7 +71,17 @@ async function main() {
     res.statusCode = 503;
     res.end("hall loading");
   };
-  const server = http.createServer((req, res) => app(req, res));
+  const clientWeb = config.client_web || `127.0.0.1:${config.client_web_port || 4000}`;
+  const server = http.createServer((req, res) => {
+    if (env.isDev && isGameStaticHost(req.headers.host) && !isHallApiPath(req.url)) {
+      proxyToClientWeb(req, res, clientWeb, log);
+      return;
+    }
+    app(req, res);
+  });
+  if (env.isDev) {
+    attachGameProxy(server, config.game_server || "127.0.0.1:11041", log);
+  }
 
   async function apply(mod, version, reason) {
     runtime.hotVersion = version;
@@ -86,7 +98,7 @@ async function main() {
   const reload = watchHot({
     dir: here,
     entry: path.join(here, "create-app.js"),
-    skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("store.js"),
+    skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("store.js") || rel.endsWith("game-proxy.js") || rel.endsWith("static-proxy.js"),
     onReload: apply,
     log,
   });
@@ -95,7 +107,10 @@ async function main() {
   const port = config.server_port || 11042;
   const host = config.server_ip || "0.0.0.0";
   await new Promise((resolve) => server.listen(port, host, resolve));
-  log.info(`[hall] listening ${host}:${port} env=${runtime.env}`);
+  log.info(`[hall] listening http://${host}:${port} env=${runtime.env}`);
+  if (env.isDev) {
+    log.info(`[hall] open http://lobby.localhost:${port}/21/0?userId=10001&userToken=dev&openId=10001&v=2.0.1279`);
+  }
 
   const shutdown = async () => {
     server.close();

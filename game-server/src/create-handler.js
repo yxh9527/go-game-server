@@ -81,9 +81,11 @@ export async function createHandler(runtime) {
   async function onMessage(ws, data) {
     const frame = codec.decodeFrame(data);
     if (!frame) {
+      runtime.log.warn?.("[game-server] drop undecoded frame", Buffer.isBuffer(data) ? data.length : typeof data);
       return;
     }
     const { msgid, payload } = frame;
+    runtime.log.info?.(`[game-server] << ${msgid}`, payload && typeof payload === "object" ? Object.keys(payload) : payload);
     let session = runtime.registry.session(ws);
     if (msgid === SEND.PING || msgid === SEND.ROOM_PING) {
       send(ws, msgid === SEND.ROOM_PING ? PUSH.ROOM_PING : PUSH.PING);
@@ -115,6 +117,7 @@ export async function createHandler(runtime) {
       send(ws, PUSH.ROOM_LOGIN, {
         serverTime: Date.now(),
         clubId: session.clubId,
+        roomId: session.roomId,
         enableLog: false,
         opType: 0,
         exchangeRate: 1,
@@ -122,9 +125,18 @@ export async function createHandler(runtime) {
         isOpenQuickChange: false,
         openHundredGame: Boolean(body.openHundredGame),
       });
+      runtime.log.info?.(`[game-server] room login uid=${session.userId} roomId=${session.roomId}`);
       return;
     }
     if (!session) {
+      return;
+    }
+    if (msgid === SEND.LOGIN_ROOM) {
+      const table = runtime.registry.getTable(session.roomId);
+      const game = table ? gameOf(table.roomType) : null;
+      if (table && game) {
+        game.onLoginRoom(ctxOf(ws, session, table, payload || {}));
+      }
       return;
     }
     if (msgid === SEND.SEND_JOIN_ROOM) {
@@ -156,6 +168,9 @@ export async function createHandler(runtime) {
     }
     if (msgid === SEND.SEND_GAME_SETTING) {
       send(ws, PUSH.DZPK_PUSH_GAME_SETTING, { result: true, type: Number(payload?.type || 0) });
+      if (typeof game.onLoginRoom === "function") {
+        game.onLoginRoom(ctxOf(ws, session, table, payload || {}));
+      }
       return;
     }
     if (msgid === SEND.COMMON_SWITCH_REQ) {
@@ -169,7 +184,7 @@ export async function createHandler(runtime) {
       return;
     }
     const handled = game.onMessage(ctxOf(ws, session, table), msgid, payload || {});
-    if (handled && msgid === SEND.GGL_BUY) {
+    if (handled && (msgid === SEND.GGL_BUY || msgid === SEND.SEND_CARRY_SCORE || msgid === SEND.SEND_STANDUP)) {
       pushPoint(ws, session);
       await persist(session);
     }
