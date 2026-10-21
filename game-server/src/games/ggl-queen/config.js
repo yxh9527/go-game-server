@@ -1,0 +1,22 @@
+export default {
+  id: "ggl-queen",
+  name: "赏金女王",
+  kind: "slots",
+  roomTypes: [63],
+  confRoomType: "scnw",
+  gameName: "刮刮乐",
+  title: "赏金女王",
+  defaultConfigId: 6301,
+  defaultRoomIndex: 26,
+  defaultMaxBet: 100000000,
+  maskSize: 20,
+  winMultipliers: [0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 100, 150, 200, 300, 500, 1000, 2000, 5000, 10000],
+  denominations: [100, 200, 500, 1000, 2000, 3000, 5000, 10000],
+  prizeTiers: [
+    { min: 8, multiplier: 50, tier: "S" },
+    { min: 6, multiplier: 10, tier: "A" },
+    { min: 5, multiplier: 5, tier: "B" },
+    { min: 4, multiplier: 2, tier: "C" },
+    { min: 3, multiplier: 1, tier: "D" },
+  ],
+};

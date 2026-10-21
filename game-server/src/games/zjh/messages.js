@@ -1,0 +1,26 @@
+export const ZJH_SEND = {
+  ACTION: 3562,
+};
+
+export const ZJH_PUSH = {
+  OPERATION: 3726,
+  DEAL_DI: 3727,
+  ZHUANG: 3731,
+  INNING_RESULT: 3732,
+  OPERATION_PLAYER: 3733,
+  ACTION_BET: 3740,
+  SHOWCARD: 3741,
+  BIPAI_RESULT: 3754,
+  ROUND_INFO: 3756,
+  PRE_OPERATION: 3780,
+};
+
+export const ZJH_OP = {
+  ANTE: 1,
+  FOLD: 2,
+  CALL: 3,
+  LOOK: 4,
+  RAISE: 7,
+  COMPARE: 8,
+  FOLD2: 10,
+};

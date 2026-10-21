@@ -1,0 +1,26 @@
+{
+  "name": "gogame",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "hall",
+    "game-server",
+    "match",
+    "mock-server"
+  ],
+  "scripts": {
+    "hall": "node hall/src/boot.js",
+    "game-server": "node game-server/src/boot.js",
+    "match": "node match/src/boot.js",
+    "test": "node --test shared/rpc/rpc.test.js hall/src/**/*.test.js game-server/src/**/*.test.js match/src/**/*.test.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
+    "@grpc/proto-loader": "^0.8.1",
+    "express": "^4.21.2",
+    "ioredis": "^5.8.1",
+    "js-yaml": "^4.1.0",
+    "mysql2": "^3.15.3",
+    "ws": "^8.22.0"
+  }
+}

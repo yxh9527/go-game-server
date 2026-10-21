@@ -1,0 +1,9 @@
+{
+  "name": "gogame-hall",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/boot.js",
+    "test": "node --test ./src/decode.test.js ./src/to-client.test.js ./src/rooms.test.js ./src/store.test.js"
+  }
+}

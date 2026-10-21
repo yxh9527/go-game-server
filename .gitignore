@@ -1,2 +1,4 @@
-static
-mock-server
+node_modules/
+logs/
+*.log
+.DS_Store

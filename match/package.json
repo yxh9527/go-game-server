@@ -1,0 +1,9 @@
+{
+  "name": "gogame-match",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/boot.js",
+    "test": "node --test ./src/constants.test.js ./src/envelope.test.js ./src/award.test.js"
+  }
+}
