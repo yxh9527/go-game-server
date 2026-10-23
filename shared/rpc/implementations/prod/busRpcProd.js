@@ -19,6 +19,17 @@ export class BusRpcProd {
     await this.redis.publish(channel, payload);
   }
 
+  async getCache(key) {
+    return this.redis ? this.redis.get(String(key)) : null;
+  }
+
+  async setCache(key, value, ttlSeconds) {
+    if (!this.redis) return false;
+    const ttl = Math.max(1, Math.floor(Number(ttlSeconds) || 1));
+    await this.redis.set(String(key), String(value), "EX", ttl);
+    return true;
+  }
+
   subscribe(channel, fn) {
     const list = this.handlers.get(channel) || [];
     list.push(fn);

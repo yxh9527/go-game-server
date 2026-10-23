@@ -72,10 +72,25 @@ export class HoldemGame extends SeatGame {
 
   onJoin(ctx) {
     super.onJoin(ctx);
-    engine.ensureBots(ctx.table);
-    this.queueStart(ctx.table);
+    // Cash-table bots run their own hands while real players watch. The bots
+    // use the same turn/action/settlement loop as seated players.
+    if (Number(ctx.table.roomType) === 19) {
+      engine.ensureBots(ctx.table);
+      this.queueStart(ctx.table);
+    }
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
     ctx.send(PUSH.DZPK_PUSH_WATCHGAME, this.roomInfo(ctx.table).OBmemberList);
+  }
+
+  onSitDown(ctx) {
+    super.onSitDown(ctx);
+    // Fill the table with bots only after a real player explicitly asks to sit.
+    // Bots occupy empty chairs while the client completes its buy-in panel;
+    // they cannot start a hand without a funded human seat.
+    if (ctx.table.members.some((member) => Number(member.uid) === Number(ctx.session.userId))) {
+      engine.ensureBots(ctx.table);
+      ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
+    }
   }
 
   onLoginRoom(ctx) {
@@ -89,13 +104,6 @@ export class HoldemGame extends SeatGame {
 
   onLeave(ctx) {
     const cash = super.onLeave(ctx);
-    const table = ctx.table;
-    if (!table.observers.length && !table.members.some((member) => !member.bot)) {
-      table.members = [];
-      table.hand = null;
-      table.phase = "idle";
-      table.startAt = 0;
-    }
     return cash;
   }
 
@@ -113,6 +121,16 @@ export class HoldemGame extends SeatGame {
     }
     if (msgid === SEND.GTO_REQ) {
       engine.onGtoReq(ctx.send, payload || {});
+      return true;
+    }
+    if (msgid === SEND.DZPK_SEND_GAME_BACK_REQ) {
+      // Only development has room-local in-memory history. Production replay
+      // must be served through data-center/Redis once its replay query contract
+      // is available; never expose a process-local partial history there.
+      const table = ctx.runtime?.env === "dev"
+        ? ctx.table
+        : { ...ctx.table, history: [] };
+      ctx.send(PUSH.DZPK_PUSH_GAME_BACK_MSG, engine.texasHistoryPayload(table, payload || {}));
       return true;
     }
     return false;

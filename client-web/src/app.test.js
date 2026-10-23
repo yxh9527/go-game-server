@@ -32,6 +32,18 @@ test("client app serves local avatar files by avatar ID", async () => {
   }
 });
 
+test("client app injects runtime fixes into the served game page", async () => {
+  const server = http.createServer(createClientApp());
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/2.0.1279/`);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /skip hundred cleanup without hundredDomain/);
+  } finally {
+    await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
+  }
+});
+
 test("client dev patch remaps language bundles and keeps console", () => {
   assert.match(CLIENT_DEV_PATCH, /holdemGame_/);
   assert.match(CLIENT_DEV_PATCH, /keepConsole/);
@@ -87,7 +99,8 @@ test("hundred-game cleanup does not block ordinary room exit without a hundred d
   }
   const classes = { BairenMultyBetViewModel };
   const cc = {
-    js: { getClassByName: (name) => classes[name] || null, _nameToClass: classes },
+    // Some packaged Cocos builds only retain this internal registry.
+    js: { _nameToClass: classes },
     assetManager: { bundles: { forEach() {} } },
     director: { getScene: () => ({ name: "webHallOb" }) },
   };
@@ -119,6 +132,58 @@ test("hundred-game cleanup does not block ordinary room exit without a hundred d
   await BairenMultyBetViewModel.prototype.sendUnregRoomsReq();
 
   assert.equal(cleanupCalls, 1);
+});
+
+test("observer snapshot enables the client's gated empty-seat request", () => {
+  const intervalCallbacks = [];
+  const sent = [];
+  const room = {
+    params: {},
+    getIsOb() { return false; },
+    getMyObMemberInfo() { return { uid: 77, userInfo: { uid: 77 } }; },
+  };
+  const seatLayer = {
+    _components: [{
+      clickSeatDown() {
+        if (room.getIsOb()) sent.push({ msgid: 5003, position: 6 });
+      },
+    }],
+    children: [],
+  };
+  const cc = {
+    app: { gameRoom: room },
+    js: { getClassByName: () => null, _nameToClass: {} },
+    assetManager: { bundles: { forEach() {} } },
+    director: { getScene: () => ({ name: "gameHoldem", children: [seatLayer] }) },
+  };
+  const window = {
+    cc,
+    location: { href: "http://www.localhost:11042/2.0.1279/?userId=77&openId=77&isWebHall=1" },
+    parent: { postMessage() {} },
+    WebSocket: class WebSocket {},
+    addEventListener() {},
+  };
+  const context = {
+    window,
+    cc,
+    location: window.location,
+    document: { documentElement: {}, getElementById: () => null },
+    history: { replaceState() {} },
+    URL,
+    URLSearchParams,
+    XMLHttpRequest: class XMLHttpRequest { open() {} },
+    console: { log() {}, warn() {}, error() {} },
+    setInterval: (fn) => { intervalCallbacks.push(fn); return intervalCallbacks.length; },
+    clearInterval() {},
+    setTimeout: () => 1,
+  };
+  const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+
+  vm.runInNewContext(patch, context);
+  for (const callback of intervalCallbacks) callback();
+  seatLayer._components[0].clickSeatDown();
+
+  assert.deepEqual(sent, [{ msgid: 5003, position: 6 }]);
 });
 
 test("Holdem patch leaves game nodes and their input events untouched", () => {

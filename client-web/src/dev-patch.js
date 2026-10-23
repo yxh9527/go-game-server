@@ -226,10 +226,18 @@ export const CLIENT_DEV_PATCH = `<script>
 
   function getClass(name) {
     try {
-      return cc.js && typeof cc.js.getClassByName === "function" ? cc.js.getClassByName(name) : null;
-    } catch (e) {
-      return null;
-    }
+      if (cc.js && typeof cc.js.getClassByName === "function") {
+        var registered = cc.js.getClassByName(name);
+        if (registered) return registered;
+      }
+    } catch (e) {}
+    // Cocos builds do not always expose every decorated class through
+    // getClassByName. The minified game bundles still register them here.
+    try {
+      var classes = cc.js && (cc.js._nameToClass || cc.js._registeredClassNames);
+      if (classes && classes[name]) return classes[name];
+    } catch (e2) {}
+    return null;
   }
 
   function instOf(Cls) {
@@ -669,6 +677,42 @@ export const CLIENT_DEV_PATCH = `<script>
       step("GameUtils showLoading hook");
     } catch (e) {}
   }
+  function hookObserverSeatDown() {
+    try {
+      if (!isHoldemScene() || !cc.app || !cc.app.gameRoom) return;
+      var room = cc.app.gameRoom;
+      if (!room.__gogameObserverSeatHook && typeof room.getIsOb === "function") {
+        var originalGetIsOb = room.getIsOb;
+        room.getIsOb = function (uid) {
+          // The 2.0.1279 client gates empty-seat clicks on getIsOb(). Its
+          // params.observed can be missing even while the authoritative room
+          // snapshot lists this player in OBmemberList. Preserve the client's
+          // normal check, but trust that explicit self observer entry.
+          if ((uid === undefined || uid === null) &&
+              typeof this.getMyObMemberInfo === "function" && this.getMyObMemberInfo()) {
+            return true;
+          }
+          return originalGetIsOb.apply(this, arguments);
+        };
+        room.__gogameObserverSeatHook = true;
+        step("observer seat state hook");
+      }
+      var scene = cc.director && cc.director.getScene();
+      walkNodes(scene, function (node) {
+        var comps = node && node._components || [];
+        for (var i = 0; i < comps.length; i++) {
+          var comp = comps[i];
+          if (!comp || typeof comp.clickSeatDown !== "function" || comp.__gogameSeatClickHook) continue;
+          var originalClick = comp.clickSeatDown;
+          comp.clickSeatDown = function () {
+            step("seat down click");
+            return originalClick.apply(this, arguments);
+          };
+          comp.__gogameSeatClickHook = true;
+        }
+      });
+    } catch (e) {}
+  }
   function hookHundredCleanup() {
     try {
       var Cls = getClass("BairenMultyBetViewModel");
@@ -723,6 +767,7 @@ export const CLIENT_DEV_PATCH = `<script>
     hookWebHallOb();
     hookPersist();
     hookGameUtils();
+    hookObserverSeatDown();
     hookHundredCleanup();
     watchLaunchOverlay();
     var scene = cc.director.getScene();

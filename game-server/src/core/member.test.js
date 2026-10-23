@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptySeat, memberListSeats, publicObserver, publicSeat } from "./member.js";
+import { emptySeat, memberListSeats, publicObserver, publicSeat, userInfoOf } from "./member.js";
 
 test("publicSeat nests uid under userInfo", () => {
   const seat = publicSeat({ uid: 10001, name: "dev", pos: 0, point: 2000, state: 1 });
@@ -15,6 +15,11 @@ test("publicObserver nests userInfo.uid", () => {
   const ob = publicObserver({ uid: 10001, name: "dev", point: 999 });
   assert.equal(ob.userInfo.uid, 10001);
   assert.equal(ob.point, 999);
+});
+
+test("numeric avatar IDs resolve to existing local avatar files", () => {
+  assert.equal(userInfoOf({ uid: 10001, icon: 90024 }).icon, "/avator/90024.png");
+  assert.equal(userInfoOf({ uid: 10001, icon: "/avator/90024" }).icon, "/avator/90024.png");
 });
 
 test("memberListSeats fills empty chairs up to maxPeople", () => {

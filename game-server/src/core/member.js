@@ -6,6 +6,7 @@ const avatarDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const avatarFiles = fs.existsSync(avatarDir)
   ? fs.readdirSync(avatarDir).filter((file) => /^\d+\.(?:png|jpe?g|webp)$/i.test(file)).sort()
   : [];
+const avatarFilesById = new Map(avatarFiles.map((file) => [path.parse(file).name, file]));
 
 function avatarFor(uid) {
   if (!avatarFiles.length) return "";
@@ -17,11 +18,21 @@ function avatarFor(uid) {
   return `/avator/${avatarFiles[hash % avatarFiles.length]}`;
 }
 
+function normalizeAvatar(icon, uid) {
+  const value = String(icon ?? "").trim();
+  const match = value.match(/^(?:\/?avator[\\/])?(\d+)(?:\.(?:png|jpe?g|webp))?$/i);
+  if (match) {
+    const file = avatarFilesById.get(match[1]);
+    return file ? `/avator/${file}` : avatarFor(uid);
+  }
+  return value || avatarFor(uid);
+}
+
 export function userInfoOf(member) {
   return {
     uid: member.uid,
     name: String(member.name ?? member.uid),
-    icon: member.icon || avatarFor(member.uid),
+    icon: normalizeAvatar(member.icon, member.uid),
     sex: 0,
     level: 0,
     isOnLine: true,

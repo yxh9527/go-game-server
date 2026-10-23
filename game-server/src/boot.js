@@ -58,6 +58,7 @@ async function main() {
       log.error("reload room config failed", err.message);
     }
     handler = await mod.createHandler(runtime);
+    runtime.getDevHoldemRecordDetail = handler.getDevHoldemRecordDetail;
     log.info(`[game-server] hot loaded v=${version} reason=${reason || "boot"}`);
   }
 
@@ -70,7 +71,18 @@ async function main() {
   });
   await reload("boot");
 
-  const server = http.createServer((_req, res) => {
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    if (runtime.env === "dev" && req.method === "GET" && url.pathname === "/internal/dev/holdem-record-detail") {
+      const roomId = Number(url.searchParams.get("roomId")) || 0;
+      const inningNum = Number(url.searchParams.get("inningNum")) || 0;
+      const data = runtime.getDevHoldemRecordDetail?.(roomId, inningNum) || null;
+      res.statusCode = data ? 200 : 404;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Cache-Control", "no-store");
+      res.end(JSON.stringify(data ? { code: 0, data } : { code: 404, data: null }));
+      return;
+    }
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({
       code: 0,

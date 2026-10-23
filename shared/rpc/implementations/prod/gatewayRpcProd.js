@@ -37,4 +37,28 @@ export class GatewayRpcProd {
     });
     return Boolean(resp.valid);
   }
+
+  async getRecords(query = {}) {
+    const client = await getDataCenterClient();
+    return client.getRecords({
+      UserId: Number(query.userId) || 0,
+      Symbol: String(query.symbol || ""),
+      Hash: String(query.hash || ""),
+      Currency: String(query.currency || ""),
+      GameId: Number(query.gameId) || 0,
+      StartTime: Number(query.startTime) || 0,
+      EndTime: Number(query.endTime) || 0,
+      Page: Math.max(1, Number(query.page) || 1),
+      Size: Math.min(100, Math.max(1, Number(query.size) || 20)),
+    });
+  }
+
+  async getRecordDetail(query = {}) {
+    const client = await getDataCenterClient();
+    return client.getRecordDetail({
+      recordId: String(query.recordId || ""),
+      userId: Number(query.userId) || 0,
+      gameId: Number(query.gameId) || 0,
+    });
+  }
 }

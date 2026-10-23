@@ -14,7 +14,9 @@ export default {
   defaultCarryMin: 500,
   buyInBb: 100,
   startDelayMs: 3000,
-  nextHandDelayMs: 4000,
+  // The client settle sequence takes about four seconds (winner/card/coin
+  // animations followed by table reset). Leave a buffer before dealing again.
+  nextHandDelayMs: 6000,
   botActDelayMs: 400,
   openInsurance: false,
   taxType: 0,

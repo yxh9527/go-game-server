@@ -174,7 +174,12 @@ export class SeatGame extends GameBase {
       }
       send(PUSH.JOIN_ROOM, this.publicMember(member));
     }
-    const amount = Math.max(Number(body?.carryIn) || 0, 0);
+    // The online client sends carryIn in display units (score / 100). Room
+    // configuration, wallet balances and member points are stored in score units.
+    const requestedCarryIn = Number(body?.carryIn);
+    const amount = Number.isFinite(requestedCarryIn) && requestedCarryIn > 0
+      ? Math.round(requestedCarryIn * 100)
+      : 0;
     const min = Number(table.carryMin) || 0;
     if (amount < min) {
       send(PUSH.CARRY_SCORE_RESULT, {
@@ -235,15 +240,10 @@ export class SeatGame extends GameBase {
   }
 
   onJoin(ctx) {
-    const { table, session, body, send } = ctx;
-    if (body?.isOb) {
-      this.watch(table, session);
-    } else {
-      const member = this.sit(table, session, ctx);
-      if (member) {
-        send(PUSH.JOIN_ROOM, this.publicMember(member));
-      }
-    }
+    const { table, session } = ctx;
+    // Entering a seat game is always spectating. The player must explicitly
+    // request a seat and complete the carry-in flow before joining a hand.
+    this.watch(table, session);
     super.onJoin(ctx);
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
   }
@@ -279,12 +279,23 @@ export class SeatGame extends GameBase {
   tick(ctx) {
     const table = ctx.table;
     const now = Date.now();
+    if (table.retireWhenHandEnds && !table.members.some((item) => !item.bot) && !(table.observers || []).length && table.phase !== "playing") {
+      table.members = [];
+      table.hand = null;
+      table.phase = "idle";
+      table.startAt = 0;
+      table.retired = true;
+      return;
+    }
     if (table.phase === "starting" && now >= table.startAt) {
       this.startRound(ctx);
       return;
     }
     if (table.phase === "playing") {
       this.playTick(ctx, now);
+    }
+    if (table.retireWhenHandEnds && table.phase !== "playing" && table.phase !== "starting") {
+      table.retired = true;
     }
   }
 
@@ -300,20 +311,31 @@ export class SeatGame extends GameBase {
     const member = table.members.find((item) => item.uid === uid);
     if (!member) {
       table.observers = (table.observers || []).filter((item) => item.uid !== uid);
+      this.scheduleRetirementIfEmpty(table);
       return 0;
     }
     this.abandonIfPlaying(ctx, member);
     const cash = member.point || 0;
     table.members = table.members.filter((item) => item.uid !== uid);
     table.observers = (table.observers || []).filter((item) => item.uid !== uid);
-    if (!table.members.some((item) => !item.bot)) {
-      table.members = table.members.filter((item) => !item.bot);
-      table.phase = "idle";
-      table.hand = null;
-    }
+    this.scheduleRetirementIfEmpty(table);
     ctx.io.broadcast(PUSH.USER_STANDUP_ROOM, uid);
     ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
     return cash;
+  }
+
+  scheduleRetirementIfEmpty(table) {
+    const hasHuman = table.members.some((item) => !item.bot) || (table.observers || []).length > 0;
+    if (hasHuman) return;
+    if (table.phase === "playing") {
+      table.retireWhenHandEnds = true;
+      return;
+    }
+    if (table.phase === "starting") {
+      table.phase = "idle";
+      table.startAt = 0;
+    }
+    table.retired = true;
   }
 }

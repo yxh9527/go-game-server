@@ -48,9 +48,33 @@ export async function createApp(runtime) {
       ...req.query,
     };
     const op = decode.num(params.op, 0);
+    if (op === 46 && runtime.env === "dev") {
+      const gameRoomId = decode.num(params.gameRoomId, 0);
+      const inningNum = decode.num(params.inningNum, 0);
+      const data = await getDevHoldemRecordDetail(gameRoomId, inningNum);
+      res.set("Cache-Control", "no-store").json(data
+        ? { msgCode: 200, errMsg: null, data }
+        : { msgCode: 404, errMsg: "开发环境没有找到这局牌的详情记录", data: null });
+      return;
+    }
     const userId = decode.num(params.userId ?? req.query.userId, 0);
     const data = await dispatch(op, params, userId, req);
     res.set("Cache-Control", "no-store").json({ msgCode: 200, errMsg: null, data });
+  }
+
+  async function getDevHoldemRecordDetail(gameRoomId, inningNum) {
+    if (!gameRoomId || !inningNum) return null;
+    const configured = String(runtime.config.game_server || "127.0.0.1:11041");
+    const base = /^https?:\/\//i.test(configured) ? configured : `http://${configured}`;
+    const endpoint = new URL("/internal/dev/holdem-record-detail", base);
+    endpoint.searchParams.set("roomId", String(gameRoomId));
+    endpoint.searchParams.set("inningNum", String(inningNum));
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return body?.code === 0 && Array.isArray(body.data?.exploitsInfoMsgs) && body.data.exploitsInfoMsgs.length
+      ? body.data
+      : null;
   }
 
   async function dispatch(op, params, userId, req) {

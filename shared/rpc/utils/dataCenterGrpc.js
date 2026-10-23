@@ -53,6 +53,12 @@ export async function getDataCenterClient() {
     getPlayer(req) {
       return unary(client, "GetPlayer", req);
     },
+    getRecords(req) {
+      return unary(client, "GetRecords", req);
+    },
+    getRecordDetail(req) {
+      return unary(client, "GetRecordDetail", req);
+    },
     close() {
       client.close?.();
       cached = null;

@@ -5,6 +5,7 @@ export async function createHandler(runtime) {
   const codec = await rel(import.meta.url, "./codec.js", v);
   const messages = await rel(import.meta.url, "./messages.js", v);
   const catalog = await rel(import.meta.url, "./games/catalog.js", v);
+  const holdemEngine = await rel(import.meta.url, "./games/holdem/engine.js", v);
   const games = await catalog.loadGames(v);
   const { SEND, PUSH } = messages;
 
@@ -25,7 +26,7 @@ export async function createHandler(runtime) {
       broadcast(msgid, payload) {
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.roomId === table.roomId) {
+          if (session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId)) {
             send(ws, msgid, payload);
           }
         }
@@ -40,14 +41,14 @@ export async function createHandler(runtime) {
         }
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.roomId === table.roomId && Number(session.userId) === Number(uid)) {
+          if (session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId) && Number(session.userId) === Number(uid)) {
             send(ws, msgid, payload);
           }
         }
       },
       forEachPlayer(fn) {
         for (const [ws, session] of runtime.registry.sessions) {
-          if (session?.roomId === table.roomId) {
+          if (session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId)) {
             fn({ ...session, ws });
           }
         }
@@ -79,18 +80,20 @@ export async function createHandler(runtime) {
     }
   }
 
-  function ensureTable(roomId, roomType) {
-    let table = runtime.registry.getTable(roomId);
-    if (table) {
-      return table;
-    }
+  function ensureTable(roomId, roomType, agentId = 0) {
     const cfg = runtime.findConfig(runtime.configs, roomId, roomType);
     const game = gameOf(roomType) || gameOf(cfg?.room_type);
+    let table = game ? runtime.registry.getTable(roomId, agentId, game.id) : null;
+    if (table) {
+      if (table.agentId == null) table.agentId = Number(agentId) || 0;
+      return table;
+    }
     if (!game) {
       throw new Error(`no game for roomType=${roomType}`);
     }
     table = game.createTable(roomId, roomType || cfg?.room_type, cfg);
-    return runtime.registry.setTable(roomId, table);
+    table.agentId = Number(agentId) || 0;
+    return runtime.registry.setTable(roomId, table, agentId, game.id);
   }
 
   async function onMessage(ws, data) {
@@ -114,6 +117,8 @@ export async function createHandler(runtime) {
         clubId: Number(body.clubId || 0),
         roomId: Number(body.roomId || 0),
         wallet: 0,
+        agentId: 0,
+        topAgentId: 0,
         accumulatedWin: 0,
         accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
       });
@@ -126,6 +131,12 @@ export async function createHandler(runtime) {
           }
         }
         await runtime.wallet.load(session);
+        if (runtime.gateway?.getLoginData) {
+          const profile = await runtime.gateway.getLoginData(session.userId);
+          session.agentId = Number(profile?.agentId) || 0;
+          session.topAgentId = Number(profile?.topAgentId) || 0;
+          if (profile?.userName) session.name = String(profile.userName);
+        }
       } catch (err) {
         runtime.log.error("login wallet query failed", err.message);
       }
@@ -147,7 +158,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (msgid === SEND.LOGIN_ROOM) {
-      const table = runtime.registry.getTable(session.roomId);
+      const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
       const game = table ? gameOf(table.roomType) : null;
       if (table && game) {
         game.onLoginRoom(ctxOf(ws, session, table, payload || {}));
@@ -159,7 +170,8 @@ export async function createHandler(runtime) {
       const roomId = Number(body.roomId || session.roomId);
       const roomType = Number(body.roomType || 0);
       session.roomId = roomId;
-      const table = ensureTable(roomId, roomType);
+      const table = ensureTable(roomId, roomType, session.agentId);
+      session.gameId = table.gameId;
       const game = gameOf(table.roomType);
       game.onJoin(ctxOf(ws, session, table, body));
       if (game.kind === "normal") {
@@ -168,7 +180,7 @@ export async function createHandler(runtime) {
       }
       return;
     }
-    const table = runtime.registry.getTable(session.roomId);
+    const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
     if (!table) {
       return;
     }
@@ -218,6 +230,7 @@ export async function createHandler(runtime) {
       if (game) {
         game.tick({ runtime, io: tableIo(table), table });
       }
+      if (table.retired) runtime.registry.removeTable(table.roomId, table.agentId, table.gameId);
     }
   }
 
@@ -227,7 +240,7 @@ export async function createHandler(runtime) {
       runtime.registry.drop(ws);
       return;
     }
-    const table = runtime.registry.getTable(session.roomId);
+    const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
     const game = table ? gameOf(table.roomType) : null;
     if (table && game) {
       await leaveTable(ws, session, table, game);
@@ -237,5 +250,11 @@ export async function createHandler(runtime) {
     runtime.registry.drop(ws);
   }
 
-  return { onMessage, tick, onClose, games };
+  function getDevHoldemRecordDetail(roomId, inningNum) {
+    if (runtime.env !== "dev") return null;
+    const table = runtime.registry.listByRoomType(19).find((item) => Number(item.roomId) === Number(roomId));
+    return table ? holdemEngine.texasHistoryDetail(table, inningNum) : null;
+  }
+
+  return { onMessage, tick, onClose, games, getDevHoldemRecordDetail };
 }

@@ -1,6 +1,6 @@
 import { PUSH } from "../../messages.js";
 import { debit } from "../../wallet/index.js";
-import { memberListSeats, publicObserver, publicSeat } from "../../core/member.js";
+import { memberListSeats, publicObserver, publicSeat, userInfoOf } from "../../core/member.js";
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
@@ -9,6 +9,156 @@ function num(row, key, fallback = 0) {
   const value = row?.[key];
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// Holdem history in the client uses the numeric GameState enum. These values
+// are also used by the client's replay timeline (BET_PERFLOP=4, BET_FLOP=6,
+// BET_TURN=8, BET_RIVER=10).
+const REPLAY_GAME_STATE = {
+  BET_FRONT: 1,
+  BET_BLIND: 2,
+  DEAL_FLOP: 5,
+  BET_PERFLOP: 4,
+  DEAL_TURN: 7,
+  BET_FLOP: 6,
+  DEAL_RIVER: 9,
+  BET_TURN: 8,
+  BET_RIVER: 10,
+};
+
+function positionNames(playerCount) {
+  const byCount = {
+    2: [1, 3],
+    3: [1, 2, 3],
+    4: [1, 2, 3, 10],
+    5: [1, 2, 3, 5, 10],
+    6: [1, 2, 3, 5, 9, 10],
+    7: [1, 2, 3, 5, 6, 9, 10],
+    8: [1, 2, 3, 5, 6, 8, 9, 10],
+    9: [1, 2, 3, 5, 6, 7, 8, 9, 10],
+    10: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  };
+  return byCount[playerCount] || Array.from({ length: playerCount }, (_, index) => index + 1);
+}
+
+function hasVisibleHoleCards(cards) {
+  return Array.isArray(cards) && cards.length >= 2
+    && cards.slice(0, 2).every((card) => card != null && Number(card) !== -1);
+}
+
+function historyPlayerHoleCards(player) {
+  if (Array.isArray(player?.showCards)) return player.showCards.slice(0, 2);
+  const cards = Array.isArray(player?.cards) ? player.cards : [];
+  if (hasVisibleHoleCards(cards)) return cards.slice(0, 2);
+  const dealt = (Array.isArray(player?.operateList) ? player.operateList : [])
+    .find((action) => Number(action?.gameState) === 3 && hasVisibleHoleCards(action?.cards));
+  if (hasVisibleHoleCards(dealt?.cards)) return dealt.cards.slice(0, 2);
+  return hasVisibleHoleCards(player?.handPais) && player.handPais.length === 2
+    ? player.handPais.slice()
+    : [];
+}
+
+function historyPlayerHasFolded(player) {
+  if (player?.folded) return true;
+  return (Array.isArray(player?.operateList) ? player.operateList : []).some((action) =>
+    Number(action?.operate ?? action?.operationType) === OP.ABANDON);
+}
+
+function historyPlayerCanShowCards(player, forceShowCard) {
+  if (forceShowCard) return true;
+  if (Array.isArray(player?.showCards)) return hasVisibleHoleCards(player.showCards);
+  if (player?.showCards != null) return Boolean(player.showCards);
+  return !historyPlayerHasFolded(player) && hasVisibleHoleCards(historyPlayerHoleCards(player));
+}
+
+function historyPlayerForClient(player, index, forceShowCard) {
+  const uid = Number(player?.uid) || 0;
+  const score = Number(player?.score) || 0;
+  const canShowCards = historyPlayerCanShowCards(player, forceShowCard);
+  const holeCards = historyPlayerHoleCards(player);
+  const visibleHoleCards = canShowCards && holeCards.length === 2 ? holeCards : [-1, -1];
+  const fullCards = Array.isArray(player?.cards) ? player.cards.slice() : [];
+  const commonPoker = Array.isArray(player?.commonPoker) && player.commonPoker.length
+    ? player.commonPoker.slice()
+    : (fullCards.length >= 7 ? fullCards.slice(2, 7) : []);
+  const cardTypeInfo = player?.cardTypeInfo || {};
+  const evaluatedHand = canShowCards && holeCards.length === 2 && commonPoker.length >= 5
+    ? evaluate7([...holeCards, ...commonPoker.slice(0, 5)])
+    : null;
+  const storedBestHand = Array.isArray(cardTypeInfo.handCardList) && cardTypeInfo.handCardList.length
+    ? cardTypeInfo.handCardList
+    : (Array.isArray(player?.cardTypePokers) && player.cardTypePokers.length
+      ? player.cardTypePokers
+      : null);
+  const bestHand = storedBestHand
+    ? storedBestHand.slice()
+    : (evaluatedHand?.best5 || (Array.isArray(player?.handPais) ? player.handPais.slice() : []));
+  const storedCardTypeId = Number(cardTypeInfo.cardTypeId ?? player?.cardTypeId);
+  const cardTypeId = canShowCards
+    ? (storedCardTypeId > 0 ? storedCardTypeId : (evaluatedHand?.cardTypeId || 0))
+    : -1;
+  const sourceUserInfo = player?.userInfo || {};
+  const userInfo = userInfoOf({
+    uid,
+    name: player?.userName ?? sourceUserInfo.userName ?? sourceUserInfo.name ?? player?.name,
+    icon: player?.userIcon ?? player?.icon ?? sourceUserInfo.userIcon ?? sourceUserInfo.icon,
+  });
+  const posName = Number(player?.posName);
+  const seatPos = Number(player?.pos);
+  const actions = (Array.isArray(player?.operateList) ? player.operateList : [])
+    .filter((action) => ![3, 5, 7, 9].includes(Number(action?.gameState)))
+    .map((action) => {
+      const { cards, replayOrder, ...row } = action || {};
+      const operation = Number(row.operate ?? row.operationType) || 0;
+      return {
+        ...row,
+        operate: operation,
+        operationType: Number(row.operationType ?? row.operate) || operation,
+      };
+    });
+  const cardStages = [
+    { operate: 0, operationType: 0, gameState: 3, cards: visibleHoleCards },
+  ];
+  if (commonPoker.length >= 3) {
+    cardStages.push({ operate: 0, operationType: 0, gameState: 5, cards: commonPoker.slice(0, 3) });
+  }
+  if (commonPoker.length >= 4) {
+    cardStages.push({ operate: 0, operationType: 0, gameState: 7, cards: [commonPoker[3]] });
+  }
+  if (commonPoker.length >= 5) {
+    cardStages.push({ operate: 0, operationType: 0, gameState: 9, cards: [commonPoker[4]] });
+  }
+  const summary = { ...player };
+  for (const key of ["openingPoint", "cardTypeInfo", "icon", "userIcon", "posName", "showCards", "cards", "handPais", "commonPoker", "operateList"]) {
+    delete summary[key];
+  }
+  const cards = fullCards.length
+    ? fullCards
+    : [...holeCards, ...commonPoker];
+  if (!canShowCards) {
+    cards[0] = -1;
+    cards[1] = -1;
+  }
+  const isWin = player?.isWin == null ? score > 0 : Boolean(player.isWin);
+  return {
+    ...summary,
+    uid,
+    userName: userInfo.name,
+    userIcon: userInfo.icon,
+    userInfo: { ...userInfo, userName: userInfo.name, userIcon: userInfo.icon },
+    posName: Number.isInteger(posName) && posName >= 1 && posName <= 10
+      ? posName
+      : (Number.isInteger(seatPos) && seatPos >= 0 && seatPos < 10 ? seatPos : index % 10) + 1,
+    score,
+    isWin,
+    cardTypeId,
+    cardTypePokers: canShowCards ? bestHand : [],
+    handPais: canShowCards ? bestHand : [],
+    showCards: visibleHoleCards,
+    cards,
+    commonPoker,
+    operateList: [...actions, ...cardStages],
+  };
 }
 
 export function createTexasTable(roomId, roomType, cfg) {
@@ -25,6 +175,7 @@ export function createTexasTable(roomId, roomType, cfg) {
     roomState: 0,
     members: [],
     observers: [],
+    history: [],
     smallBlind,
     bigBlind,
     carryMin: num(cfg, "carry_min", gameConfig.defaultCarryMin),
@@ -172,6 +323,221 @@ export function onGtoReq(send, payload) {
   send(PUSH.GTO_RES, res);
 }
 
+// Development history is volatile and scoped to the room's in-memory table.
+export function texasHistoryPayload(table, request = {}) {
+  const roomId = Number(request.roomId);
+  const begin = Number(request.beginNum);
+  const end = Number(request.endNum);
+  const excellentGame = Boolean(request.excellentGame);
+  const available = (table.history || []).filter((item) =>
+    (!roomId || Number(item.gameRoomId) === roomId)
+    && (!excellentGame || item.firstGameList.some((player) =>
+      player.operateList.some((action) => action.operate === OP.ALL_IN))),
+  ).sort((a, b) => Number(a.currentInningNum) - Number(b.currentInningNum));
+
+  // The online client sends inningNum - 1 in beginNum/endNum. Negative bounds
+  // request the latest page; excellent mode's 0/0 request asks for all matches.
+  const excellentAll = excellentGame && begin === 0 && end === 0;
+  const latestPage = (!Number.isFinite(begin) || begin < 0)
+    && (!Number.isFinite(end) || end < 0);
+  let list;
+  if (excellentAll) {
+    list = available;
+  } else if (latestPage) {
+    list = available.slice(-20);
+  } else {
+    const firstInning = Number.isFinite(begin) && begin >= 0 ? Math.trunc(begin) + 1 : Number.MIN_SAFE_INTEGER;
+    const lastInning = Number.isFinite(end) && end >= 0 ? Math.trunc(end) + 1 : Number.MAX_SAFE_INTEGER;
+    list = available.filter((item) =>
+      Number(item.currentInningNum) >= firstInning
+      && Number(item.currentInningNum) <= lastInning);
+    list = list.slice(0, 20);
+  }
+  const totalNum = available.reduce((max, item) => Math.max(max, Number(item.currentInningNum) || 0), 0);
+  return {
+    excellentGame,
+    isOfflineData: false,
+    smallBlind: table.smallBlind,
+    bigBlind: table.bigBlind,
+    initialBet: table.bigBlind,
+    beginNum: list.length ? list[0].currentInningNum : 0,
+    endNum: list.length ? list[list.length - 1].currentInningNum : 0,
+    totalNum,
+    roomTypeName: "dzpk",
+    // The client's HistoryModel.getBlind parses this field as JSON, then
+    // formats the score values into display units.
+    blind: JSON.stringify({
+      smallBlind: table.smallBlind,
+      bigBlind: table.bigBlind,
+      initialBet: table.bigBlind,
+      isStraddle: false,
+    }),
+    gameRoomId: table.roomId,
+    playBackList: list.map(({ roundEvents, forceShowCard, ...item }) => ({
+      ...item,
+      firstGameList: (item.firstGameList || []).map((player, index) =>
+        historyPlayerForClient(player, index, forceShowCard)),
+      secondGameList: (item.secondGameList || []).map((player, index) =>
+        historyPlayerForClient(player, index, forceShowCard)),
+    })),
+  };
+}
+
+// Adapt the volatile development replay into the same detail envelope the
+// Holdem history panel reads from hall op=46. Production detail remains owned
+// by data-center and is intentionally not served from this room memory.
+export function texasHistoryDetail(table, inningNum) {
+  const inning = Number(inningNum);
+  const replay = (table.history || []).find((item) => Number(item.currentInningNum) === inning);
+  if (!replay) return null;
+  const players = replay.firstGameList || [];
+  const forceShowCard = Boolean(replay.forceShowCard ?? table.forceShowCard);
+  const fallbackActions = players.flatMap((player) => {
+    return (player.operateList || []).map((action) => ({
+      ...action,
+      uid: Number(player.uid),
+    }));
+  });
+  const hasRecordedTimeline = Array.isArray(replay.roundEvents);
+  let events = hasRecordedTimeline
+    ? replay.roundEvents.map((event) => ({ ...event }))
+    : fallbackActions;
+  if (!hasRecordedTimeline) {
+    // Older in-memory histories lack cross-player order; reconstruct street and
+    // pot progression as the best available fallback. New hands record sequence.
+    events.sort((a, b) => Number(a.gameState || 0) - Number(b.gameState || 0)
+      || Number(a.pot || 0) - Number(b.pot || 0));
+    const board = players.find((player) => Array.isArray(player.commonPoker))?.commonPoker || [];
+    const deals = [
+      { gameState: REPLAY_GAME_STATE.DEAL_FLOP, cardCount: 3 },
+      { gameState: REPLAY_GAME_STATE.DEAL_TURN, cardCount: 4 },
+      { gameState: REPLAY_GAME_STATE.DEAL_RIVER, cardCount: 5 },
+    ].filter((deal) => board.length >= deal.cardCount).map((deal) => {
+      const nextAction = events.find((event) => Number(event.gameState) > deal.gameState);
+      return {
+        ...deal,
+        uid: 0,
+        operationType: 0,
+        pot: Math.max(0, Number(nextAction
+          ? Number(nextAction.pot || 0) - Number(nextAction.currentBetScore ?? nextAction.bet ?? 0)
+          : replay.pot) || 0),
+        board: board.slice(0, deal.cardCount),
+      };
+    });
+    let nextDeal = 0;
+    const timeline = [];
+    for (const event of events) {
+      while (nextDeal < deals.length && deals[nextDeal].gameState < Number(event.gameState)) {
+        timeline.push(deals[nextDeal]);
+        nextDeal += 1;
+      }
+      timeline.push(event);
+    }
+    timeline.push(...deals.slice(nextDeal));
+    events = timeline;
+  }
+  events.forEach((event, index) => {
+    if (!Number.isFinite(Number(event.replayOrder))) event.replayOrder = index;
+  });
+  let replayOrder = events.reduce((max, event) => Number.isFinite(Number(event.replayOrder))
+    ? Math.max(max, Number(event.replayOrder)) : max, -1) + 1;
+  players.forEach((player, index) => {
+    if (!historyPlayerCanShowCards(player, forceShowCard)) return;
+    const clientPlayer = historyPlayerForClient(player, index, forceShowCard);
+    events.push({
+      replayOrder: replayOrder++,
+      uid: Number(player.uid),
+      operationType: OP.SHOW,
+      gameState: 11,
+      pot: Number(replay.pot) || 0,
+      cards: [...clientPlayer.showCards, ...clientPlayer.commonPoker],
+    });
+  });
+  events.sort((a, b) => Number(a.replayOrder ?? 0) - Number(b.replayOrder ?? 0));
+  const roomConfig = {
+    maxPeople: Number(table.config?.maxPeople) || 7,
+    roomType: Number(table.roomType),
+    roomId: Number(table.roomId),
+    dzpkParams: {
+      smallBlind: Number(replay.smallBlind ?? table.smallBlind) || 0,
+      bigBlind: Number(replay.bigBlind ?? table.bigBlind) || 0,
+      initialBet: Number(replay.initialBet ?? table.bigBlind) || 0,
+    },
+  };
+  const detail = {
+    gameInningId: `${Number(table.roomId)}_${inning}`,
+    gameRoomUnion: {
+      gameRoomId: Number(table.roomId),
+      roomId: Number(table.roomId),
+      roomConfig: JSON.stringify(roomConfig),
+    },
+    inningResults: JSON.stringify(players.map((player, index) => {
+      const clientPlayer = historyPlayerForClient(player, index, forceShowCard);
+      const canShowCards = historyPlayerCanShowCards(player, forceShowCard);
+      const cardTypeInfo = player.cardTypeInfo || {};
+      const result = {
+        uid: clientPlayer.uid,
+        userName: clientPlayer.userName,
+        userIcon: clientPlayer.userIcon,
+        posName: clientPlayer.posName,
+        score: clientPlayer.score,
+        isWin: clientPlayer.isWin,
+        cardTypeId: clientPlayer.cardTypeId,
+        handPais: clientPlayer.handPais,
+        showCards: clientPlayer.showCards,
+        cardTypePokers: clientPlayer.cardTypePokers,
+        commonPokerList: clientPlayer.commonPoker,
+        operateList: clientPlayer.operateList,
+        winInsurance: Number(player.winInsurance) || 0,
+        insuranceBet: Number(player.insuranceBet) || 0,
+      };
+      if (canShowCards) {
+        result.cardTypeInfo = {
+          cardTypeId: clientPlayer.cardTypeId,
+          handCardList: clientPlayer.cardTypePokers.slice(),
+          pokerEnumList: Array.isArray(cardTypeInfo.pokerEnumList) ? cardTypeInfo.pokerEnumList.slice() : [],
+        };
+      }
+      return result;
+    })),
+    // HoldemHistoryModel.onPushRecordDetail parses this field unconditionally.
+    inningInfo: JSON.stringify({ forceShowCard }),
+    roundList: JSON.stringify(events.map((action) => {
+      const cards = Array.isArray(action.cards) ? action.cards : [];
+      const board = Array.isArray(action.board) ? action.board : cards.slice(2);
+      return {
+        uid: Number(action.uid) || 0,
+        operationType: Number(action.operationType ?? action.operate) || 0,
+        gameState: Number(action.gameState) || 0,
+        bet: Number(action.bet) || 0,
+        roundBetScore: Number(action.roundBetScore ?? action.bet) || 0,
+        currentBetScore: Number(action.currentBetScore) || 0,
+        totalBetScore: Number(action.totalBetScore) || 0,
+        pot: Number(action.pot) || 0,
+        flopPokerList: board.slice(0, 3),
+        turnPoker: board[3] ?? -1,
+        riverPoker: board[4] ?? -1,
+        operationDuration: 1,
+      };
+    })),
+    memberResults: players.map((player, pos) => {
+      const clientPlayer = historyPlayerForClient(player, pos, forceShowCard);
+      const canShowCards = historyPlayerCanShowCards(player, forceShowCard);
+      return {
+        uid: clientPlayer.uid,
+        pos: Number.isInteger(player.pos) ? player.pos : pos,
+        posName: clientPlayer.posName,
+        pais: canShowCards ? clientPlayer.showCards.slice() : [],
+        score: clientPlayer.score,
+        point: Number(player.openingPoint) || 0,
+        openingPoint: Number(player.openingPoint) || 0,
+        userInfo: clientPlayer.userInfo,
+      };
+    }),
+  };
+  return { exploitsInfoMsgs: [detail] };
+}
+
 export const BOT_UID = gameConfig.botUid;
 
 function nextBotPos(table) {
@@ -227,7 +593,7 @@ export function botChoose(table, actor) {
   if (toCall > table.bigBlind * 8) {
     return { operation: OP.ABANDON, operationData: 0 };
   }
-  return { operation: OP.POT_1, operationData: 0 };
+  return { operation: OP.FOLLOW, operationData: toCall };
 }
 
 function maybeQueueStart(table) {
@@ -293,6 +659,11 @@ export function beginHand(io, table) {
     ? players[(table.dealerPos + 1) % players.length]
     : players[(table.dealerPos + 2) % players.length];
   const utg = players[(players.indexOf(bb) + 1) % players.length];
+  const handPositions = positionNames(players.length);
+  for (let index = 0; index < players.length; index += 1) {
+    const player = players[(table.dealerPos + index) % players.length];
+    player.posName = handPositions[index];
+  }
   for (const m of table.members) {
     m.dealer = m.uid === dealer.uid;
     m.folded = false;
@@ -301,6 +672,7 @@ export function beginHand(io, table) {
     m.streetBet = 0;
     m.totalBet = 0;
     m.lastOperation = 0;
+    m.openingPoint = m.point;
   }
   const deck = shuffle(makeDeck());
   table.hand = {
@@ -319,6 +691,8 @@ export function beginHand(io, table) {
     bigBlindId: bb.uid,
     bankerId: dealer.uid,
     underTheGunUid: utg.uid,
+    replayActions: [],
+    replayEvents: [],
   };
   io.broadcast(PUSH.NIUNIU_CURRENT_INNING_BEGIN_INFO, {
     currentInning: table.currentInning,
@@ -370,6 +744,7 @@ function postInitialBet(io, table, player, amount) {
     player.allIn = true;
   }
   table.hand.pot += pay;
+  recordReplayAction(table, player, OP.PER, pay, REPLAY_GAME_STATE.BET_FRONT);
   pushAction(io, table, player, OP.PER, pay);
 }
 
@@ -383,6 +758,7 @@ function postBlind(io, table, player, amount, operation) {
     player.allIn = true;
   }
   table.hand.pot += pay;
+  recordReplayAction(table, player, operation, pay, REPLAY_GAME_STATE.BET_BLIND);
   pushAction(io, table, player, operation, pay);
 }
 
@@ -420,7 +796,7 @@ function applyAction(io, table, uid, operation, operationData) {
   const streetBetBefore = actor.streetBet;
   const toCall = Math.max(0, hand.currentBet - actor.streetBet);
   let op = Number(operation);
-  const amountOps = [OP.ALL_IN, OP.FOLLOW, OP.ADD, OP.BET];
+  const amountOps = [OP.ALL_IN, OP.FOLLOW, OP.ADD, OP.BET, OP.POT_1, OP.POT_2, OP.POT_3, OP.POT_4, OP.POT_5, OP.CUSTOM_ADD];
   const amount = operationData == null || operationData === "" ? 0 : Number(operationData);
   if (amountOps.includes(op) && !Number.isFinite(amount)) {
     return;
@@ -428,14 +804,7 @@ function applyAction(io, table, uid, operation, operationData) {
   if (op === OP.PASS && toCall > 0) {
     op = OP.POT_1;
   }
-  if (op === OP.POT_1 || op === OP.POT_4) {
-    payTo(actor, hand, toCall);
-    actor.lastOperation = OP.POT_1;
-    if (actor.point === 0) {
-      actor.allIn = true;
-      actor.lastOperation = OP.ALL_IN;
-    }
-  } else if (op === OP.PASS) {
+  if (op === OP.PASS) {
     actor.lastOperation = OP.PASS;
   } else if (op === OP.ABANDON) {
     actor.folded = true;
@@ -446,7 +815,7 @@ function applyAction(io, table, uid, operation, operationData) {
     if (actor.point === 0) {
       actor.allIn = true;
     }
-  } else if (op === OP.ALL_IN || op === OP.ADD || op === OP.BET) {
+  } else if (amountOps.includes(op) && op !== OP.FOLLOW) {
     const raiseTo = op === OP.ALL_IN
       ? actor.streetBet + actor.point
       : raiseAmount(table, actor, amount);
@@ -458,7 +827,7 @@ function applyAction(io, table, uid, operation, operationData) {
       hand.lastRaiseUid = actor.uid;
       hand.acted = new Set([actor.uid]);
     }
-    actor.lastOperation = actor.point === 0 ? OP.ALL_IN : OP.FOLLOW;
+    actor.lastOperation = actor.point === 0 ? OP.ALL_IN : op;
     if (actor.point === 0) {
       actor.allIn = true;
     }
@@ -466,6 +835,7 @@ function applyAction(io, table, uid, operation, operationData) {
     actor.lastOperation = op;
   }
   hand.acted.add(actor.uid);
+  recordReplayAction(table, actor, actor.lastOperation, actor.streetBet - streetBetBefore, REPLAY_GAME_STATE[hand.street]);
   pushAction(io, table, actor, actor.lastOperation, actor.streetBet - streetBetBefore);
   const remaining = live(table);
   if (remaining.length === 1) {
@@ -478,6 +848,42 @@ function applyAction(io, table, uid, operation, operationData) {
   }
   hand.actorUid = nextActorUid(table, actor.uid);
   promptActor(io, table);
+}
+
+function recordReplayAction(table, player, operation, bet, gameState) {
+  const hand = table.hand;
+  hand.replayActions ||= [];
+  hand.replayEvents ||= [];
+  const action = {
+    replayOrder: hand.replayEvents.length,
+    uid: player.uid,
+    operate: operation,
+    operationType: operation,
+    bet: Number(bet) || 0,
+    currentBetScore: Number(bet) || 0,
+    totalBetScore: Number(player.totalBet) || 0,
+    pot: Number(hand.pot) || 0,
+    gameState: Number(gameState) || 0,
+    cards: [...(player.hole || []), ...hand.board],
+  };
+  hand.replayActions.push(action);
+  hand.replayEvents.push(action);
+}
+
+function recordReplayDeal(hand, gameState) {
+  hand.replayEvents ||= [];
+  hand.replayEvents.push({
+    replayOrder: hand.replayEvents.length,
+    uid: 0,
+    operationType: 0,
+    bet: 0,
+    roundBetScore: 0,
+    currentBetScore: 0,
+    totalBetScore: 0,
+    pot: Number(hand.pot) || 0,
+    gameState,
+    board: [...hand.board],
+  });
 }
 
 function payTo(player, hand, amount) {
@@ -546,6 +952,7 @@ function nextStreet(io, table) {
     hand.board.push(hand.deck[hand.deckPos], hand.deck[hand.deckPos + 1], hand.deck[hand.deckPos + 2]);
     hand.deckPos += 3;
     hand.street = "BET_FLOP";
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_FLOP);
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_FLOP");
     io.broadcast(PUSH.DZPK_DEAL_FAN_PUSH, { cardList: hand.board.slice(0, 3) });
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FLOP");
@@ -553,6 +960,7 @@ function nextStreet(io, table) {
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     hand.street = "BET_TURN";
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_TURN);
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_TURN");
     io.broadcast(PUSH.DZPK_DEAL_ZHUANG_PUSH, { cardList: [hand.board[3]] });
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_TURN");
@@ -560,6 +968,7 @@ function nextStreet(io, table) {
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     hand.street = "BET_RIVER";
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_RIVER);
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_RIVER");
     io.broadcast(PUSH.DZPK_DEAL_HE_PUSH, { cardList: [hand.board[4]] });
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_RIVER");
@@ -578,9 +987,22 @@ function nextStreet(io, table) {
 
 function dealRemaining(table) {
   const hand = table.hand;
-  while (hand.board.length < 5) {
+  if (hand.board.length < 3) {
+    while (hand.board.length < 3) {
+      hand.board.push(hand.deck[hand.deckPos]);
+      hand.deckPos += 1;
+    }
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_FLOP);
+  }
+  if (hand.board.length < 4) {
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_TURN);
+  }
+  if (hand.board.length < 5) {
+    hand.board.push(hand.deck[hand.deckPos]);
+    hand.deckPos += 1;
+    recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_RIVER);
   }
 }
 
@@ -633,6 +1055,19 @@ function actionOptions(table, actor) {
     }
   }
   opts.push({ operation: OP.ALL_IN, data: 0, playerAmount });
+  // The client builds its shortcut amounts from these fields when CUSTOM_ADD
+  // is present: pot is the current hand pot, and followTotalBet is this
+  // player's amount to call. Keep the values in protocol score units.
+  opts.push({
+    operation: OP.CUSTOM_ADD,
+    data: 0,
+    playerAmount,
+    userData: {
+      bigBlind: table.bigBlind,
+      pot: Number(table.hand?.pot) || 0,
+      followTotalBet: toCall,
+    },
+  });
   return opts;
 }
 
@@ -716,9 +1151,54 @@ function settle(io, table, contenders) {
       pos: m.pos,
     };
   });
+  const replayPlayers = table.members.filter((m) => m.hole?.length).map((m) => {
+    const result = results.find((item) => item.uid === m.uid);
+    const userInfo = userInfoOf(m);
+    return {
+      uid: m.uid,
+      userName: m.name,
+      userIcon: userInfo.icon,
+      pos: m.pos,
+      score: result?.score || 0,
+      isWin: Boolean(result?.isWin),
+      openingPoint: m.openingPoint,
+      cardTypeId: result?.cardTypeId || 0,
+      cardTypeInfo: result?.cardTypeInfo,
+      posName: m.posName,
+      cards: [...m.hole, ...hand.board],
+      handPais: [...m.hole],
+      commonPoker: [...hand.board],
+      showCards: Array.isArray(result?.showCards) && result.showCards.length
+        ? result.showCards.slice(0, 2)
+        : [-1, -1],
+      operateList: hand.replayActions
+        .filter((action) => action.uid === m.uid)
+        .map(({ uid, replayOrder, ...action }) => action),
+    };
+  });
+  table.history ||= [];
+  // Dev replay is room-local; keep every completed hand until the room is retired.
+  table.history.push({
+    gameRoomId: table.roomId,
+    currentInningNum: table.currentInning,
+    smallBlind: table.smallBlind,
+    bigBlind: table.bigBlind,
+    initialBet: table.bigBlind,
+    pot: hand.pot,
+    forceShowCard: Boolean(table.forceShowCard),
+    firstGameList: replayPlayers,
+    secondGameList: [],
+    roundEvents: hand.replayEvents.map((event) => ({
+      ...event,
+      ...(Array.isArray(event.cards) ? { cards: event.cards.slice() } : {}),
+      ...(Array.isArray(event.board) ? { board: event.board.slice() } : {}),
+    })),
+  });
   io.broadcast(PUSH.DZPK_PLAYER_DIPAI_PUSH, active.map((m) => ({ uid: m.uid, cardList: m.hole, pos: m.pos })));
   io.broadcast(PUSH.DZPK_INNING_RESULT_PUSH, results);
-  io.broadcast(PUSH.ROOM_INFO, texasRoomInfo(table));
+  // ROOM_INFO is wired to the client's room-login handler, which stops all
+  // running actions and resets the table. The result payload already carries
+  // each player's new point, so do not interrupt the settlement animation.
   table.hand = null;
   table.phase = seated(table).length >= 2 ? "starting" : "idle";
   table.startAt = Date.now() + gameConfig.nextHandDelayMs;
