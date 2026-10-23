@@ -121,14 +121,22 @@ export class SeatGame extends GameBase {
   carryPanel(table, session) {
     const wallet = Math.max(Number(session.wallet) || 0, 0);
     const carryMin = Number(table.carryMin) || this.buyIn(table, session) || 0;
+    const carryMax = Math.max(wallet, carryMin);
     return {
       reason: 0,
       carryMin,
-      carryMax: Math.max(wallet, carryMin),
+      // These fields are all consumed by the 2.0.1279 carry-in panel. Keep
+      // them numeric even when a room does not configure an upper bound.
+      carryDefault: carryMin,
+      carryMax,
+      configCarryMax: carryMax,
+      carryBalance: 0,
       accountBalance: wallet,
+      leftTime: 0,
       freezePoint: 0,
       carryInMultiple: 5,
       carryType: 0,
+      carryCustom: carryMin,
       isByServerSettle: false,
     };
   }
@@ -169,11 +177,21 @@ export class SeatGame extends GameBase {
     const amount = Math.max(Number(body?.carryIn) || 0, 0);
     const min = Number(table.carryMin) || 0;
     if (amount < min) {
-      send(PUSH.CARRY_SCORE_RESULT, { uid: session.userId, state: 1, carryIn: amount });
+      send(PUSH.CARRY_SCORE_RESULT, {
+        uid: session.userId,
+        state: 1,
+        carryIn: amount,
+        carryBalance: Number(member.point) || 0,
+      });
       return;
     }
     if (!debit(session, amount, ctx).ok) {
-      send(PUSH.CARRY_SCORE_RESULT, { uid: session.userId, state: 1, carryIn: amount });
+      send(PUSH.CARRY_SCORE_RESULT, {
+        uid: session.userId,
+        state: 1,
+        carryIn: amount,
+        carryBalance: Number(member.point) || 0,
+      });
       return;
     }
     const wasEmpty = member.point <= 0;
@@ -182,7 +200,12 @@ export class SeatGame extends GameBase {
       this.afterSit(table, member, session);
       this.queueStart(table);
     }
-    ctx.io.broadcast(PUSH.CARRY_SCORE_RESULT, { uid: session.userId, state: 0, carryIn: amount });
+    ctx.io.broadcast(PUSH.CARRY_SCORE_RESULT, {
+      uid: session.userId,
+      state: 0,
+      carryIn: amount,
+      carryBalance: Number(member.point) || 0,
+    });
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
   }
 

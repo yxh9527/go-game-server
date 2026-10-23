@@ -30,6 +30,21 @@ export async function createHandler(runtime) {
           }
         }
       },
+      sendUser(uid, msgid, payload) {
+        // Private action options are valid only for a seated member. An
+        // observer must never receive 3426, because the client calculates
+        // its all-in amount from a seat and gets null for observers.
+        if (msgid === PUSH.DZPK_OPERATION_PUSH
+          && !(table.members || []).some((member) => Number(member.uid) === Number(uid))) {
+          return;
+        }
+        for (const ws of runtime.registry.sessions.keys()) {
+          const session = runtime.registry.session(ws);
+          if (session?.roomId === table.roomId && Number(session.userId) === Number(uid)) {
+            send(ws, msgid, payload);
+          }
+        }
+      },
       forEachPlayer(fn) {
         for (const [ws, session] of runtime.registry.sessions) {
           if (session?.roomId === table.roomId) {

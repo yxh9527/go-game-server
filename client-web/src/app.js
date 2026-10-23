@@ -45,6 +45,7 @@ export function createClientApp() {
   const version = clientVersion();
   const clientDir = path.join(staticRoot, "client", version);
 
+  app.use("/avator", express.static(path.join(staticRoot, "avator")));
   app.get(["/", `/${version}`, `/${version}/`, `/${version}/index.html`], (_req, res) => {
     serveIndex(clientDir, res);
   });

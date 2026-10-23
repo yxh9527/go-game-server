@@ -93,6 +93,7 @@ export function texasRoomInfo(table) {
       gameName: gameConfig.name,
       smallBlind: table.smallBlind,
       bigBlind: table.bigBlind,
+      initialBet: table.bigBlind,
       carryMin: table.carryMin,
       carryMax: -1,
       betTime: table.betTime,
@@ -333,6 +334,10 @@ export function beginHand(io, table) {
     underTheGunUid: utg.uid,
   });
   io.broadcast(PUSH.QIPAI_RESULT, { result: true, currentInning: table.currentInning });
+  io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FRONT");
+  for (const player of players) {
+    postInitialBet(io, table, player, table.bigBlind);
+  }
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_BLIND");
   postBlind(io, table, sb, table.smallBlind, OP.BLIND);
   postBlind(io, table, bb, table.bigBlind, OP.BLIND);
@@ -356,6 +361,18 @@ export function beginHand(io, table) {
   promptActor(io, table);
 }
 
+function postInitialBet(io, table, player, amount) {
+  const pay = Math.min(player.point, amount);
+  player.point -= pay;
+  player.totalBet += pay;
+  player.lastOperation = OP.PER;
+  if (player.point === 0) {
+    player.allIn = true;
+  }
+  table.hand.pot += pay;
+  pushAction(io, table, player, OP.PER, pay);
+}
+
 function postBlind(io, table, player, amount, operation) {
   const pay = Math.min(player.point, amount);
   player.point -= pay;
@@ -366,7 +383,7 @@ function postBlind(io, table, player, amount, operation) {
     player.allIn = true;
   }
   table.hand.pot += pay;
-  pushAction(io, table, player, operation);
+  pushAction(io, table, player, operation, pay);
 }
 
 function holeType(hole) {
@@ -400,8 +417,14 @@ function applyAction(io, table, uid, operation, operationData) {
     return;
   }
   const hand = table.hand;
+  const streetBetBefore = actor.streetBet;
   const toCall = Math.max(0, hand.currentBet - actor.streetBet);
   let op = Number(operation);
+  const amountOps = [OP.ALL_IN, OP.FOLLOW, OP.ADD, OP.BET];
+  const amount = operationData == null || operationData === "" ? 0 : Number(operationData);
+  if (amountOps.includes(op) && !Number.isFinite(amount)) {
+    return;
+  }
   if (op === OP.PASS && toCall > 0) {
     op = OP.POT_1;
   }
@@ -417,8 +440,16 @@ function applyAction(io, table, uid, operation, operationData) {
   } else if (op === OP.ABANDON) {
     actor.folded = true;
     actor.lastOperation = OP.ABANDON;
-  } else if (op === OP.ALL_IN || op === OP.FOLLOW || op === OP.ADD || op === OP.BET) {
-    const raiseTo = raiseAmount(table, actor, operationData);
+  } else if (op === OP.FOLLOW) {
+    payTo(actor, hand, toCall);
+    actor.lastOperation = actor.point === 0 ? OP.ALL_IN : OP.FOLLOW;
+    if (actor.point === 0) {
+      actor.allIn = true;
+    }
+  } else if (op === OP.ALL_IN || op === OP.ADD || op === OP.BET) {
+    const raiseTo = op === OP.ALL_IN
+      ? actor.streetBet + actor.point
+      : raiseAmount(table, actor, amount);
     const pay = Math.min(actor.point, Math.max(0, raiseTo - actor.streetBet));
     payTo(actor, hand, pay);
     if (actor.streetBet > hand.currentBet) {
@@ -435,7 +466,7 @@ function applyAction(io, table, uid, operation, operationData) {
     actor.lastOperation = op;
   }
   hand.acted.add(actor.uid);
-  pushAction(io, table, actor, actor.lastOperation);
+  pushAction(io, table, actor, actor.lastOperation, actor.streetBet - streetBetBefore);
   const remaining = live(table);
   if (remaining.length === 1) {
     settle(io, table, remaining);
@@ -459,15 +490,8 @@ function payTo(player, hand, amount) {
 
 function raiseAmount(table, actor, operationData) {
   const hand = table.hand;
-  const data = Number(operationData || 0);
-  let target;
-  if (data >= 50) {
-    target = data;
-  } else if (data > 0) {
-    target = Math.round(data * Math.max(hand.pot, table.bigBlind * 2));
-  } else {
-    target = hand.currentBet + hand.minRaise;
-  }
+  const data = Number(operationData ?? 0);
+  const target = Math.round(data * 100);
   return Math.min(actor.streetBet + actor.point, Math.max(hand.currentBet + hand.minRaise, target));
 }
 
@@ -575,33 +599,47 @@ function promptActor(io, table) {
     delayLeftCount: 0,
     isByDelay: false,
   });
-  io.broadcast(PUSH.DZPK_OPERATION_PUSH, actionOptions(table, actor));
+  const operations = actionOptions(table, actor);
+  // 3426 contains private controls. It must never be broadcast to the room:
+  // observers do not have a seat, so the client cannot calculate their all-in
+  // amount and will render NaN. Production IO supplies sendUser; a test/dummy
+  // IO without it deliberately sends nothing.
+  if (typeof io.sendUser === "function") {
+    io.sendUser(actor.uid, PUSH.DZPK_OPERATION_PUSH, operations);
+  }
 }
 
 function actionOptions(table, actor) {
   const toCall = Math.max(0, table.hand.currentBet - actor.streetBet);
-  const opts = [{ operation: OP.ABANDON, data: 0, playerAmount: 0 }];
+  const point = Number(actor.point);
+  const playerAmount = Number.isFinite(point) ? Math.max(0, point) : 0;
+  const opts = [{ operation: OP.ABANDON, data: 0, playerAmount }];
   if (toCall === 0) {
-    opts.push({ operation: OP.PASS, data: 0, playerAmount: 0 });
+    opts.push({ operation: OP.PASS, data: 0, playerAmount });
+    opts.push({ operation: OP.BET, data: table.bigBlind, playerAmount });
   } else {
-    opts.push({ operation: OP.POT_1, data: 0, playerAmount: Math.min(actor.point, toCall) });
-  }
-  const minRaiseTo = table.hand.currentBet + table.hand.minRaise;
-  if (actor.point > toCall) {
     opts.push({
       operation: OP.FOLLOW,
-      data: 1,
-      playerAmount: Math.min(actor.point, Math.max(0, minRaiseTo - actor.streetBet)),
+      data: Math.min(playerAmount, toCall),
+      playerAmount,
     });
+    const minRaiseTo = table.hand.currentBet + table.hand.minRaise;
+    if (actor.streetBet + playerAmount > minRaiseTo) {
+      opts.push({
+        operation: OP.ADD,
+        data: minRaiseTo,
+        playerAmount,
+      });
+    }
   }
-  opts.push({ operation: OP.ALL_IN, data: 0, playerAmount: actor.point });
+  opts.push({ operation: OP.ALL_IN, data: 0, playerAmount });
   return opts;
 }
 
-function pushAction(io, table, player, operation) {
+function pushAction(io, table, player, operation, currentBetScore = 0) {
   io.broadcast(PUSH.DZPK_ACTION_BET_PUSH, {
     uid: player.uid,
-    currentBetScore: Number(player.streetBet) || 0,
+    currentBetScore: Number(currentBetScore) || 0,
     totalBetScore: Number(player.totalBet) || 0,
     operation,
     point: Number(player.point) || 0,

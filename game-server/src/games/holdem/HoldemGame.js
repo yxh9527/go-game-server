@@ -37,6 +37,7 @@ export class HoldemGame extends SeatGame {
         gameName: this.config.name,
         smallBlind: table.smallBlind,
         bigBlind: table.bigBlind,
+        initialBet: table.bigBlind,
         carryMin: table.carryMin,
         carryMax: -1,
         betTime: table.betTime,
@@ -58,9 +59,21 @@ export class HoldemGame extends SeatGame {
     this.queueStart(table);
   }
 
+  queueStart(table) {
+    const ready = this.seated(table);
+    const hasHuman = ready.some((member) => !member.bot);
+    const hasCashTableObserver = Number(table.roomType) === 19 && (table.observers || []).length > 0;
+    if (table.phase !== "idle" || (!hasHuman && !hasCashTableObserver) || ready.length < this.minPeople()) {
+      return;
+    }
+    table.phase = "starting";
+    table.startAt = Date.now() + (this.config.startDelayMs || 3000);
+  }
+
   onJoin(ctx) {
     super.onJoin(ctx);
     engine.ensureBots(ctx.table);
+    this.queueStart(ctx.table);
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
     ctx.send(PUSH.DZPK_PUSH_WATCHGAME, this.roomInfo(ctx.table).OBmemberList);
   }
@@ -72,6 +85,18 @@ export class HoldemGame extends SeatGame {
 
   onPlayingSnapshot(ctx) {
     engine.pushPlayingSnapshot(ctx.send, ctx.table, ctx.session);
+  }
+
+  onLeave(ctx) {
+    const cash = super.onLeave(ctx);
+    const table = ctx.table;
+    if (!table.observers.length && !table.members.some((member) => !member.bot)) {
+      table.members = [];
+      table.hand = null;
+      table.phase = "idle";
+      table.startAt = 0;
+    }
+    return cash;
   }
 
   onMessage(ctx, msgid, payload) {

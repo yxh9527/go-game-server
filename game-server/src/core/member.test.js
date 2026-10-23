@@ -7,6 +7,7 @@ test("publicSeat nests uid under userInfo", () => {
   assert.equal(seat.uid, 10001);
   assert.equal(seat.userInfo.uid, 10001);
   assert.equal(seat.userInfo.name, "dev");
+  assert.match(seat.userInfo.icon, /^\/avator\/(?:10002\.jpg|900(?:0[7-9]|1\d|2[0-4])\.png)$/);
   assert.equal(seat.pos, 0);
 });
 

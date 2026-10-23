@@ -1,8 +1,27 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const avatarDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../static/avator");
+const avatarFiles = fs.existsSync(avatarDir)
+  ? fs.readdirSync(avatarDir).filter((file) => /^\d+\.(?:png|jpe?g|webp)$/i.test(file)).sort()
+  : [];
+
+function avatarFor(uid) {
+  if (!avatarFiles.length) return "";
+  const value = String(uid ?? "");
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return `/avator/${avatarFiles[hash % avatarFiles.length]}`;
+}
+
 export function userInfoOf(member) {
   return {
     uid: member.uid,
     name: String(member.name ?? member.uid),
-    icon: "",
+    icon: member.icon || avatarFor(member.uid),
     sex: 0,
     level: 0,
     isOnLine: true,

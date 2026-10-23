@@ -91,7 +91,14 @@ test("SeatGame sitdown then carry-in seats the observer", () => {
   assert.equal(table.members[0].pos, 2);
   assert.equal(table.members[0].point, 0);
   assert.equal(table.observers.length, 0);
-  assert.ok(sit.messages.some((m) => m.msgid === PUSH.CARRYIN_RESULT && m.payload.carryMin === 50));
+  const carryPanel = sit.messages.find((m) => m.msgid === PUSH.CARRYIN_RESULT)?.payload;
+  assert.equal(carryPanel.carryMin, 50);
+  assert.equal(carryPanel.carryDefault, 50);
+  assert.equal(carryPanel.carryMax, 500);
+  assert.equal(carryPanel.configCarryMax, 500);
+  assert.equal(carryPanel.carryBalance, 0);
+  assert.equal(carryPanel.carryCustom, 50);
+  assert.ok(Number.isFinite(carryPanel.leftTime));
   const buy = mockCtx(game, table, a, { carryIn: 100 });
   game.onCarryScore(buy);
   assert.equal(table.members[0].point, 100);
@@ -99,6 +106,7 @@ test("SeatGame sitdown then carry-in seats the observer", () => {
   const result = buy.messages.find((m) => m.msgid === PUSH.CARRY_SCORE_RESULT);
   assert.equal(result.payload.state, 0);
   assert.equal(result.payload.carryIn, 100);
+  assert.equal(result.payload.carryBalance, 100);
 });
 
 test("SeatGame leave returns chips and clears empty table", () => {

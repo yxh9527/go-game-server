@@ -18,6 +18,7 @@ export const CLIENT_DEV_PATCH = `<script>
       cc.log = rawLog;
       cc.warn = console.warn;
       cc.error = rawError;
+      if (cc.app && !cc.app.webImgPool) cc.app.webImgPool = Object.create(null);
       hookPersist();
     }
   }
@@ -571,49 +572,21 @@ export const CLIENT_DEV_PATCH = `<script>
       return false;
     }
   }
-  function isBairenPersist(node) {
-    return /bairen|hundred|brnn/i.test(String((node && node.name) || ""));
-  }
   function isLoadingPersist(node) {
-    return /connectTips|ProgressLoading|ApiLoading|waiting/i.test(String((node && node.name) || ""));
+    return /^(connectTips|ProgressLoading|ApiLoading)$/i.test(String((node && node.name) || ""));
   }
   function isHiddenPersist(node) {
-    return isBairenPersist(node) || isLoadingPersist(node);
+    return isLoadingPersist(node);
   }
   function muteNode(node) {
     if (!node) return false;
-    var changed = false;
     try {
-      if (node.active !== false) {
-        node.active = false;
-        changed = true;
-      }
-    } catch (e) {}
-    try {
-      if (typeof node.opacity === "number" && node.opacity !== 0) {
-        node.opacity = 0;
-        changed = true;
-      }
-    } catch (e) {}
-    try {
-      if (typeof node.pauseSystemEvents === "function") node.pauseSystemEvents(true);
-    } catch (e) {}
-    freezeMutedNode(node);
-    return changed;
-  }
-  function freezeMutedNode(node) {
-    if (!node || node.__gogameFrozen) return;
-    node.__gogameFrozen = true;
-    try {
+      if (node.active === false) return false;
       node.active = false;
-      Object.defineProperty(node, "active", {
-        configurable: true,
-        enumerable: true,
-        get: function () { return false; },
-        set: function () {}
-      });
-      step("freeze node " + (node.name || "node"));
-    } catch (e) {}
+      return node.active === false;
+    } catch (e) {
+      return false;
+    }
   }
   function hookPersist() {
     try {
@@ -652,12 +625,12 @@ export const CLIENT_DEV_PATCH = `<script>
     try {
       walkNodes(cc.director && cc.director.getScene(), function (node) {
         var nm = String((node && node.name) || "");
-        if (/connectTips|ConnectTips|ProgressLoading|ApiLoading/i.test(nm)) muteNode(node);
+        if (/^(connectTips|ProgressLoading|ApiLoading)$/i.test(nm)) muteNode(node);
         var comps = node && node._components || [];
         for (var i = 0; i < comps.length; i++) {
           var ctor = comps[i] && comps[i].constructor;
           var cn = (ctor && (ctor.name || ctor.prototype && ctor.prototype.__classname__)) || "";
-          if (/ConnectTips|ProgressLoading|ApiLoading/i.test(String(cn))) muteNode(node);
+          if (/^(ConnectTips|ProgressLoading|ApiLoading)$/i.test(String(cn))) muteNode(node);
         }
       });
     } catch (e) {}
@@ -696,6 +669,27 @@ export const CLIENT_DEV_PATCH = `<script>
       step("GameUtils showLoading hook");
     } catch (e) {}
   }
+  function hookHundredCleanup() {
+    try {
+      var Cls = getClass("BairenMultyBetViewModel");
+      var proto = Cls && Cls.prototype;
+      if (!proto || proto.__gogameCleanupHook || typeof proto.sendUnregRoomsReq !== "function") return;
+      proto.__gogameCleanupHook = true;
+      var original = proto.sendUnregRoomsReq;
+      proto.sendUnregRoomsReq = function () {
+        function ignoreMissingDomain(err) {
+          if (String(err && err.message || err).indexOf("当前没有hundredDomain百人服地址") < 0) throw err;
+          step("skip hundred cleanup without hundredDomain");
+          return 0;
+        }
+        try {
+          return Promise.resolve(original.apply(this, arguments)).catch(ignoreMissingDomain);
+        } catch (err) {
+          return Promise.resolve(ignoreMissingDomain(err));
+        }
+      };
+    } catch (e) {}
+  }
   var loadedSends = 0;
   function postGameLoaded(scene) {
     if (!scene || HALL_WAIT[scene]) return;
@@ -729,6 +723,7 @@ export const CLIENT_DEV_PATCH = `<script>
     hookWebHallOb();
     hookPersist();
     hookGameUtils();
+    hookHundredCleanup();
     watchLaunchOverlay();
     var scene = cc.director.getScene();
     var name = scene && scene.name;

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import vm from "node:vm";
 import test from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { clientVersion, langModuleFiles } from "./app.js";
+import { clientVersion, createClientApp, langModuleFiles } from "./app.js";
 import { CLIENT_DEV_PATCH } from "./dev-patch.js";
 
 test("client version reads static/client", () => {
@@ -17,6 +18,18 @@ test("langModuleFiles finds hashed common bundle files", () => {
   assert.ok(files);
   assert.equal(files.config, "config.cc744.json");
   assert.equal(files.index, "index.cc744.js");
+});
+
+test("client app serves local avatar files by avatar ID", async () => {
+  const server = http.createServer(createClientApp());
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/avator/90007.png`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /^image\/png/);
+  } finally {
+    await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
+  }
 });
 
 test("client dev patch remaps language bundles and keeps console", () => {
@@ -46,7 +59,8 @@ test("client dev patch remaps language bundles and keeps console", () => {
   assert.match(CLIENT_DEV_PATCH, /hide launch overlay/);
   assert.match(CLIENT_DEV_PATCH, /launchOverlayHidden/);
   assert.match(CLIENT_DEV_PATCH, /launch-new-api/);
-  assert.match(CLIENT_DEV_PATCH, /isBairenPersist/);
+  assert.match(CLIENT_DEV_PATCH, /function isLoadingPersist/);
+  assert.match(CLIENT_DEV_PATCH, /skip hundred cleanup without hundredDomain/);
   assert.match(CLIENT_DEV_PATCH, /connectTips/);
   assert.match(CLIENT_DEV_PATCH, /hideConnectTips|isLoadingPersist/);
   assert.match(CLIENT_DEV_PATCH, /joinRoom\.isOb = true/);
@@ -57,9 +71,104 @@ test("client dev patch remaps language bundles and keeps console", () => {
   assert.match(CLIENT_DEV_PATCH, /GameCanvas/);
   assert.match(CLIENT_DEV_PATCH, /pointerEvents/);
   assert.doesNotMatch(CLIENT_DEV_PATCH, /canvas\.style\.position/);
-  assert.match(CLIENT_DEV_PATCH, /__gogameFrozen/);
+  assert.doesNotMatch(CLIENT_DEV_PATCH, /freezeMutedNode|__gogameFrozen|pauseSystemEvents/);
   assert.match(CLIENT_DEV_PATCH, /showLoading hook|block showLoading|GameUtils showLoading hook/);
   assert.match(CLIENT_DEV_PATCH, /__gogameLaunchObs/);
+});
+
+test("hundred-game cleanup does not block ordinary room exit without a hundred domain", async () => {
+  const intervalCallbacks = [];
+  let cleanupCalls = 0;
+  class BairenMultyBetViewModel {
+    sendUnregRoomsReq() {
+      cleanupCalls += 1;
+      return Promise.reject(new Error("当前没有hundredDomain百人服地址, 无法连接百人服"));
+    }
+  }
+  const classes = { BairenMultyBetViewModel };
+  const cc = {
+    js: { getClassByName: (name) => classes[name] || null, _nameToClass: classes },
+    assetManager: { bundles: { forEach() {} } },
+    director: { getScene: () => ({ name: "webHallOb" }) },
+  };
+  const window = {
+    cc,
+    location: { href: "http://www.localhost:11042/2.0.1279/?userId=10001&openId=10001&isWebHall=1" },
+    parent: { postMessage() {} },
+    WebSocket: class WebSocket {},
+    addEventListener() {},
+  };
+  const context = {
+    window,
+    cc,
+    location: window.location,
+    document: { documentElement: {}, getElementById: () => null },
+    history: { replaceState() {} },
+    URL,
+    URLSearchParams,
+    XMLHttpRequest: class XMLHttpRequest { open() {} },
+    console: { log() {}, warn() {}, error() {} },
+    setInterval: (fn) => { intervalCallbacks.push(fn); return intervalCallbacks.length; },
+    clearInterval() {},
+    setTimeout: () => 1,
+  };
+  const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+
+  vm.runInNewContext(patch, context);
+  for (const callback of intervalCallbacks) callback();
+  await BairenMultyBetViewModel.prototype.sendUnregRoomsReq();
+
+  assert.equal(cleanupCalls, 1);
+});
+
+test("Holdem patch leaves game nodes and their input events untouched", () => {
+  const intervalCallbacks = [];
+  const bairenMultyBet = { name: "BairenMultyBet", active: true, pauseSystemEvents() { this.paused = true; } };
+  const buttonLayer = { name: "bairen_root", active: true, pauseSystemEvents() { this.paused = true; } };
+  const loading = { name: "ProgressLoading", active: true, pauseSystemEvents() { this.paused = true; } };
+  const activeScene = { name: "gameHoldem", _children: [] };
+  const roots = { a: bairenMultyBet, b: buttonLayer, c: loading };
+  const cc = {
+    app: {},
+    game: { _persistRootNodes: roots, addPersistRootNode() {} },
+    js: { getClassByName: () => null, _nameToClass: {} },
+    assetManager: { bundles: { forEach() {} } },
+    director: { getScene: () => activeScene },
+  };
+  const window = {
+    cc,
+    location: { href: "http://www.localhost:11042/2.0.1279/?userId=10001&openId=10001&isWebHall=1" },
+    parent: { postMessage() {} },
+    WebSocket: class WebSocket {},
+    addEventListener() {},
+  };
+  const context = {
+    window,
+    cc,
+    location: window.location,
+    document: { documentElement: {}, getElementById: () => null },
+    history: { replaceState() {} },
+    URL,
+    URLSearchParams,
+    XMLHttpRequest: class XMLHttpRequest { open() {} },
+    console: { log() {}, warn() {}, error() {} },
+    setInterval: (fn) => { intervalCallbacks.push(fn); return intervalCallbacks.length; },
+    clearInterval() {},
+    setTimeout: () => 1,
+  };
+  const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+
+  vm.runInNewContext(patch, context);
+  for (const callback of intervalCallbacks) callback();
+
+  assert.equal(bairenMultyBet.active, true);
+  assert.equal(buttonLayer.active, true);
+  assert.equal(bairenMultyBet.paused, undefined);
+  assert.equal(buttonLayer.paused, undefined);
+  assert.equal(Object.getOwnPropertyDescriptor(bairenMultyBet, "active").get, undefined);
+  assert.equal(loading.active, false);
+  assert.equal(loading.paused, undefined);
+  assert.equal(typeof cc.app.webImgPool, "object");
 });
 
 test("webHallEarly exposes peek without consuming cache", () => {
