@@ -84,9 +84,8 @@ export class HoldemGame extends SeatGame {
 
   onSitDown(ctx) {
     super.onSitDown(ctx);
-    // Fill the table with bots only after a real player explicitly asks to sit.
-    // Bots occupy empty chairs while the client completes its buy-in panel;
-    // they cannot start a hand without a funded human seat.
+    // Refill empty bot chairs after an explicit sit request. Cash-table bots
+    // can already be playing while the human completes the buy-in panel.
     if (ctx.table.members.some((member) => Number(member.uid) === Number(ctx.session.userId))) {
       engine.ensureBots(ctx.table);
       ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));

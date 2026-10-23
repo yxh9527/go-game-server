@@ -7,8 +7,6 @@ export default {
   minPeople: 2,
   maxPeople: 7,
   betTime: 11,
-  botUid: 90000001,
-  botName: "Bot",
   defaultSmallBlind: 10,
   defaultBigBlind: 20,
   defaultCarryMin: 500,
@@ -17,7 +15,6 @@ export default {
   // The client settle sequence takes about four seconds (winner/card/coin
   // animations followed by table reset). Leave a buffer before dealing again.
   nextHandDelayMs: 6000,
-  botActDelayMs: 400,
   openInsurance: false,
   taxType: 0,
   taxPercent: 0,

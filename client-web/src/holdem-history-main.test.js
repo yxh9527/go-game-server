@@ -25,7 +25,7 @@ function label() {
 function list() {
   return {
     cards: [],
-    updateList(cards) { this.cards = Array.from(cards); },
+    updateList(cards, bestFive = []) { this.cards = Array.from(cards); this.bestFive = Array.from(bestFive); },
     clear() { this.cards = []; },
   };
 }
@@ -71,7 +71,7 @@ function replayTable() {
   return table;
 }
 
-test("active Holdem history parser and renderer show five cards for all six players", () => {
+test("original Holdem parser renders two hole cards and five board cards for six players", () => {
   const table = replayTable();
   const replay = texasHistoryPayload(table).playBackList[0];
   const detail = texasHistoryDetail(table, 1);
@@ -94,36 +94,51 @@ test("active Holdem history parser and renderer show five cards for all six play
   const row = rowRenderer(model);
   for (let index = 0; index < stage.playerList.length; index++) {
     const player = stage.playerList[index];
-    // This is the reported 5 + 5 shape, produced by the real model.
-    assert.equal(player.holdCards.length, 5);
+    // op=46 handPais is the two hole cards, not the evaluated five-card hand.
+    assert.equal(player.holdCards.length, 2);
     assert.equal(player.commonCards.length, 5);
     row.superList_commons.updateList(player.commonCards);
     row.commonNd.active = true;
     row.update(player, index);
-    assert.deepEqual(row.superList_holds.cards, model.getUserScoreData(player.uid).cardTypePokers);
-    assert.equal(row.superList_holds.cards.length + row.superList_commons.cards.length, 5);
-    assert.equal(row.commonNd.active, false);
+    const stored = table.history[0].firstGameList.find((entry) => entry.uid === player.uid);
+    assert.deepEqual(row.superList_holds.cards, stored.showCards);
+    assert.deepEqual(row.superList_commons.cards, stored.commonPoker);
+    assert.equal(new Set([...row.superList_holds.cards, ...row.superList_commons.cards]).size, 7);
+    assert.equal(model.getUserScoreData(player.uid).cardTypePokers.length, 5);
+    const highlighted = [row.superList_holds, row.superList_commons]
+      .flatMap((list) => list.cards.filter((card) => list.bestFive.includes(card)));
+    assert.equal(highlighted.length, 5);
+    assert.deepEqual(highlighted.slice().sort((a, b) => a - b),
+      stored.cardTypeInfo.handCardList.slice().sort((a, b) => a - b));
   }
 });
 
 for (const storedCount of [2, 5, 7]) {
-  test("active showdown uses the evaluated five with " + storedCount + " stored cards", () => {
-    const best = [9, 15, 29, 43, 6];
-    const player = { uid: 1, score: 50, cardTypePokers: best };
+  test("server adapts " + storedCount + " stored cards to the original detail contract", () => {
+    const table = replayTable();
+    const stored = table.history[0].firstGameList[0];
+    stored.handPais = storedCount === 2 ? stored.showCards.slice()
+      : storedCount === 5 ? stored.cardTypeInfo.handCardList.slice() : stored.cards.slice();
+    const before = structuredClone(table.history);
+    const player = texasHistoryPayload(table).playBackList[0].firstGameList[0];
+    const detail = JSON.parse(texasHistoryDetail(table, 1).exploitsInfoMsgs[0].inningResults)[0];
     const row = rowRenderer({ getUserScoreData: () => player, getCurrentPlayBack: () => ({ firstGameList: [player] }) });
-    row.update({ uid: 1, posName: 1, name: "Bot", cardType: 2, score: 50,
-      holdCards: [9, 10, 1, 15, 29, 43, 6].slice(0, storedCount), commonCards: [1, 15, 29, 43, 6] });
-    assert.deepEqual(row.superList_holds.cards, best);
-    assert.deepEqual(row.superList_commons.cards, []);
+    row.update({ uid: 1, posName: 1, name: "Bot", cardType: detail.cardTypeId, score: detail.score,
+      holdCards: detail.handPais, commonCards: detail.commonPokerList });
+    assert.deepEqual(row.superList_holds.cards, stored.showCards);
+    assert.deepEqual(row.superList_commons.cards, stored.commonPoker);
+    assert.deepEqual(detail.cardTypeInfo.handCardList, stored.cardTypeInfo.handCardList);
+    assert.deepEqual(table.history, before);
   });
 }
 
 test("reusing an active showdown row clears previous cards without revealing hidden cards", () => {
   const player = { uid: 1, score: 50, cardTypePokers: [9, 15, 29, 43, 6] };
   const row = rowRenderer({ getUserScoreData: () => player, getCurrentPlayBack: () => ({ firstGameList: [player] }) });
-  row.update({ uid: 1, posName: 1, name: "Bot", cardType: 2, score: 50, holdCards: [9, 10] });
-  assert.equal(row.superList_holds.cards.length, 5);
-  row.update({ uid: 1, posName: 1, name: "Bot", cardType: null, score: 50, holdCards: [-1, -1] });
+  row.update({ uid: 1, posName: 1, name: "Bot", cardType: 2, score: 50, holdCards: [9, 10], commonCards: [1, 15, 29, 43, 6] });
+  assert.equal(row.superList_holds.cards.length, 2);
+  assert.equal(row.superList_commons.cards.length, 5);
+  row.update({ uid: 1, posName: 1, name: "Bot", cardType: null, score: 50, holdCards: [-1, -1], commonCards: [] });
   assert.deepEqual(row.superList_holds.cards, []);
   assert.deepEqual(row.superList_commons.cards, []);
 });

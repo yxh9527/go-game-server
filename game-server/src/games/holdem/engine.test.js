@@ -397,6 +397,8 @@ test("legacy holdem history restores valid profile, position, and revealed cards
   assert.ok(!rounds.some((round) => round.operationType === OP.SHOW && round.uid === 10005));
   assert.ok(!rounds.some((round) => round.operationType === OP.SHOW && round.uid === 10006));
   assert.equal(inningResults[0].cardTypeInfo.handCardList.length, 5);
+  assert.deepEqual(inningResults[0].handPais, [11, 12]);
+  assert.deepEqual(inningResults[0].commonPokerList, [1, 2, 3, 4, 5]);
   assert.equal(inningResults[0].userIcon, "/avator/90024.png");
   assert.equal(inningResults[0].posName, 5);
   assert.deepEqual(inningResults[1].handPais, []);
@@ -506,7 +508,7 @@ test("dev holdem record detail matches the Holdem history detail parser", async 
   assert.equal(inningResults[0].isWin, true);
   assert.equal(inningResults[0].cardTypeInfo.cardTypeId, 2);
   assert.deepEqual(inningResults[0].cardTypeInfo.handCardList, [1, 2, 3, 4, 5]);
-  assert.deepEqual(inningResults[0].handPais, [1, 2, 3, 4, 5]);
+  assert.deepEqual(inningResults[0].handPais, [1, 2]);
   assert.deepEqual(inningResults[0].showCards, [1, 2]);
   assert.deepEqual(inningResults[0].cardTypePokers, [1, 2, 3, 4, 5]);
   assert.deepEqual(inningResults[0].commonPokerList, [3, 4, 5]);

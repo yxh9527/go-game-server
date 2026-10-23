@@ -1,8 +1,11 @@
 import { SeatGame } from "../../core/SeatGame.js";
 import { SEND, PUSH } from "../../messages.js";
 import config from "./config.js";
-import * as engine from "./engine.js";
+import { rel } from "../../rel.js";
 import { ZJH_SEND } from "./messages.js";
+
+const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const engine = await rel(import.meta.url, "./engine.js", v);
 
 export class ZjhGame extends SeatGame {
   constructor() {

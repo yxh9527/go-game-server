@@ -3,6 +3,11 @@ import { makeDeck, shuffle } from "../holdem/cards.js";
 import gameConfig from "./config.js";
 import { compare3, evaluate3 } from "./hand.js";
 import { ZJH_OP, ZJH_PUSH } from "./messages.js";
+import { rel } from "../../rel.js";
+
+const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const robot = await rel(import.meta.url, "./robot.js", version);
+export const { ensureBot, botChoose } = robot;
 
 export function zjhConf(table) {
   return {
@@ -46,29 +51,6 @@ export function extraRoomInfo(table) {
       maxRounds: table.maxRounds,
     },
   };
-}
-
-export function ensureBot(table) {
-  const humans = table.members.filter((m) => !m.bot);
-  if (humans.length !== 1 || table.members.some((m) => m.bot)) {
-    return;
-  }
-  const used = new Set(table.members.map((item) => item.pos));
-  let pos = 0;
-  while (used.has(pos) && pos < gameConfig.maxPeople) {
-    pos += 1;
-  }
-  table.members.push({
-    uid: gameConfig.botUid,
-    name: gameConfig.botName,
-    point: Math.max(table.carryMin, table.ante * gameConfig.buyInMultiple),
-    pos,
-    state: 1,
-    lastOperation: 0,
-    totalBet: 0,
-    dealer: false,
-    bot: true,
-  });
 }
 
 function seated(table) {
@@ -167,7 +149,7 @@ function promptActor(io, table) {
     return;
   }
   table.hand.deadline = Date.now() + table.betTime * 1000;
-  table.hand.botActAt = actor.bot ? Date.now() + gameConfig.botActDelayMs : 0;
+  robot.scheduleTurn(table, actor);
   io.broadcast(ZJH_PUSH.OPERATION_PLAYER, {
     uid: actor.uid,
     leftTime: table.betTime,
@@ -206,17 +188,6 @@ export function onZjhAction(io, table, session, body) {
   applyAction(io, table, Number(body?.uid || session.userId), Number(body?.operation), body?.operationData);
 }
 
-export function botChoose(table, actor) {
-  const toCall = Math.max(0, table.hand.currentBet - actor.streetBet);
-  if (toCall > table.ante * 8) {
-    return { operation: ZJH_OP.FOLD, operationData: 0 };
-  }
-  if (!actor.looked) {
-    return { operation: ZJH_OP.LOOK, operationData: 0 };
-  }
-  return { operation: ZJH_OP.CALL, operationData: 0 };
-}
-
 export function tickPlaying(io, table, now = Date.now()) {
   if (table.phase !== "playing" || !table.hand) {
     return;
@@ -225,11 +196,7 @@ export function tickPlaying(io, table, now = Date.now()) {
   if (!actor) {
     return;
   }
-  if (actor.bot && now >= (table.hand.botActAt || 0)) {
-    const choice = botChoose(table, actor);
-    applyAction(io, table, actor.uid, choice.operation, choice.operationData);
-    return;
-  }
+  if (robot.tickBot(table, actor, now, (uid, operation, data) => applyAction(io, table, uid, operation, data))) return;
   if (now >= table.hand.deadline) {
     applyAction(io, table, actor.uid, ZJH_OP.FOLD, 0);
   }

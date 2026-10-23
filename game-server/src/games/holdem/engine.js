@@ -4,6 +4,12 @@ import { memberListSeats, publicObserver, publicSeat, userInfoOf } from "../../c
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
+import { rel } from "../../rel.js";
+
+const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const robot = await rel(import.meta.url, "./robot.js", version);
+// Compatibility for existing callers; all robot behavior lives in robot.js.
+export const { BOT_UID, ensureBots, ensureBot, botChoose } = robot;
 
 function num(row, key, fallback = 0) {
   const value = row?.[key];
@@ -483,7 +489,9 @@ export function texasHistoryDetail(table, inningNum) {
         score: clientPlayer.score,
         isWin: clientPlayer.isWin,
         cardTypeId: clientPlayer.cardTypeId,
-        handPais: clientPlayer.handPais,
+        // op=46 renders handPais beside commonPokerList. Unlike the settlement
+        // best-five field, this detail field must contain only revealed holes.
+        handPais: canShowCards ? clientPlayer.showCards.slice() : [],
         showCards: clientPlayer.showCards,
         cardTypePokers: clientPlayer.cardTypePokers,
         commonPokerList: clientPlayer.commonPoker,
@@ -538,64 +546,6 @@ export function texasHistoryDetail(table, inningNum) {
   return { exploitsInfoMsgs: [detail] };
 }
 
-export const BOT_UID = gameConfig.botUid;
-
-function nextBotPos(table) {
-  const used = new Set(table.members.map((item) => item.pos));
-  let pos = 0;
-  while (used.has(pos) && pos < 7) {
-    pos += 1;
-  }
-  return pos;
-}
-
-export function ensureBots(table, count) {
-  const maxPeople = 7;
-  if (table.botTarget == null) {
-    const n = count == null ? 3 + Math.floor(Math.random() * 4) : Number(count);
-    table.botTarget = Math.min(Math.max(Math.floor(n), 0), maxPeople - 1);
-  }
-  const point = Math.max(Number(table.carryMin) || 0, Number(table.bigBlind) * gameConfig.buyInBb);
-  while (table.members.filter((m) => m.bot).length < table.botTarget && table.members.length < maxPeople) {
-    const pos = nextBotPos(table);
-    if (pos >= maxPeople) {
-      break;
-    }
-    const index = table.members.filter((m) => m.bot).length;
-    table.members.push({
-      uid: BOT_UID + index,
-      name: index === 0 ? gameConfig.botName : `${gameConfig.botName}${index + 1}`,
-      point,
-      pos,
-      state: 1,
-      lastOperation: 0,
-      totalBet: 0,
-      streetBet: 0,
-      dealer: false,
-      bot: true,
-      clubId: 0,
-    });
-  }
-}
-
-export function ensureBot(table, count) {
-  ensureBots(table, count);
-}
-
-export function botChoose(table, actor) {
-  const toCall = Math.max(0, table.hand.currentBet - actor.streetBet);
-  if (toCall === 0) {
-    return { operation: OP.PASS, operationData: 0 };
-  }
-  if (toCall >= actor.point) {
-    return { operation: OP.ALL_IN, operationData: 0 };
-  }
-  if (toCall > table.bigBlind * 8) {
-    return { operation: OP.ABANDON, operationData: 0 };
-  }
-  return { operation: OP.FOLLOW, operationData: toCall };
-}
-
 function maybeQueueStart(table) {
   if (table.phase === "idle" && seated(table).length >= gameConfig.minPeople) {
     table.phase = "starting";
@@ -623,11 +573,7 @@ export function tickPlaying(io, table, now = Date.now()) {
   if (!actor) {
     return;
   }
-  if (actor.bot && now >= (table.hand.botActAt || 0)) {
-    const choice = botChoose(table, actor);
-    applyAction(io, table, actor.uid, choice.operation, choice.operationData);
-    return;
-  }
+  if (robot.tickBot(table, actor, now, (uid, operation, data) => applyAction(io, table, uid, operation, data))) return;
   if (now >= table.hand.deadline) {
     const canCheck = actor.streetBet >= table.hand.currentBet;
     applyAction(io, table, actor.uid, canCheck ? OP.PASS : OP.ABANDON, 0);
@@ -1013,7 +959,7 @@ function promptActor(io, table) {
     return;
   }
   table.hand.deadline = Date.now() + table.betTime * 1000;
-  table.hand.botActAt = actor.bot ? Date.now() + gameConfig.botActDelayMs : 0;
+  robot.scheduleTurn(table, actor);
   io.broadcast(PUSH.DZPK_OPERATION_PLAYER_PUSH, {
     uid: actor.uid,
     leftTime: table.betTime,

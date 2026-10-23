@@ -64,7 +64,7 @@ const bestFive = [1, 3, 4, 5, 6];
 function player(overrides = {}) {
   return {
     uid: 1, score: 100, firstScore: 100, secondScore: 100,
-    handPais: [1, 2, ...board],
+    handPais: [1, 2],
     commonPokerList: board,
     cardTypeInfo: { cardTypeId: 5, handCardList: bestFive },
     ...overrides,
@@ -82,22 +82,23 @@ function assertShowdown(view, stageName, expected) {
   rows.forEach((row, index) => {
     const cards = row.getChildByName("cardsNd");
     assert.deepEqual(cardsIn(cards.getChildByName("holdsNd")), expected[index]);
-    assert.equal(cards.getChildByName("commonsNd").children.length, 0);
+    const expectedBoard = stageName === "secondNd" ? [8, 9, 10, 11, 12] : board;
+    assert.deepEqual(cardsIn(cards.getChildByName("commonsNd")), expectedBoard);
   });
 }
 
-for (const handPais of [[1, 2], bestFive, [1, 2, ...board]]) {
-  test(`Holdem showdown renders best five with ${handPais.length} stored cards`, () => {
+for (const handPais of [[1, 2], [8, 9], [10, 11]]) {
+  test(`original Holdem detail keeps hole cards ${handPais.join(",")} separate from board`, () => {
     const view = viewFor([player({ handPais }), player({ uid: 2, score: -100 })]);
     view.render();
-    assertShowdown(view, "firstNd", [bestFive, bestFive]);
+    assertShowdown(view, "firstNd", [handPais, [1, 2]]);
     assert.deepEqual(cardsIn(view.showCardsNd.getChildByName("firstNd").getChildByName("topNd").getChildByName("cardsNd")), board);
     view.render();
-    assertShowdown(view, "firstNd", [bestFive, bestFive]);
+    assertShowdown(view, "firstNd", [handPais, [1, 2]]);
   });
 }
 
-test("Holdem repeated showdown uses each run's own best five", () => {
+test("original Holdem repeated showdown keeps each board separate from hole cards", () => {
   const secondBest = [2, 8, 9, 10, 11];
   const repeatedCards = {
     secondCommonPokerList: [8, 9, 10, 11, 12],
@@ -108,14 +109,14 @@ test("Holdem repeated showdown uses each run's own best five", () => {
     player({ ...repeatedCards, uid: 2, score: -100, firstScore: -100, secondScore: -100 }),
   ]);
   view.render();
-  assertShowdown(view, "firstNd", [bestFive, bestFive]);
-  assertShowdown(view, "secondNd", [secondBest, secondBest]);
+  assertShowdown(view, "firstNd", [[1, 2], [1, 2]]);
+  assertShowdown(view, "secondNd", [[1, 2], [1, 2]]);
 });
 
 test("Holdem showdown does not add players with unrevealed cards", () => {
   const view = viewFor([player(), player({ uid: 2, score: -100, handPais: [], cardTypeInfo: undefined })]);
   view.render();
-  assertShowdown(view, "firstNd", [bestFive]);
+  assertShowdown(view, "firstNd", [[1, 2]]);
 });
 
 test("Holdem non-showdown self view retains its original card display", () => {
