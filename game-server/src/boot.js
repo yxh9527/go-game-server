@@ -64,6 +64,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
+    extraDirs: env.isDev ? [path.resolve(here, "../../cache/holdem"), path.resolve(here, "../../cache/game-server")] : [],
     entry: path.join(here, "create-handler.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("registry.js"),
     onReload: apply,
@@ -72,17 +73,7 @@ async function main() {
   await reload("boot");
 
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url || "/", "http://127.0.0.1");
-    if (runtime.env === "dev" && req.method === "GET" && url.pathname === "/internal/dev/holdem-record-detail") {
-      const roomId = Number(url.searchParams.get("roomId")) || 0;
-      const inningNum = Number(url.searchParams.get("inningNum")) || 0;
-      const data = runtime.getDevHoldemRecordDetail?.(roomId, inningNum) || null;
-      res.statusCode = data ? 200 : 404;
-      res.setHeader("Content-Type", "application/json");
-      res.setHeader("Cache-Control", "no-store");
-      res.end(JSON.stringify(data ? { code: 0, data } : { code: 404, data: null }));
-      return;
-    }
+    if (handler.handleLocalRequest?.(req, res)) return;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({
       code: 0,

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import fs from "node:fs";
 import { watchHot } from "../../hall/src/hot.js";
+import { env, loadEnv } from "../../shared/rpc/env.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -17,6 +18,7 @@ function loadConfig() {
 
 async function main() {
   const config = loadConfig();
+  loadEnv(config);
   const log = console;
   let app = (req, res) => {
     res.statusCode = 503;
@@ -30,6 +32,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
+    extraDirs: env.isDev ? [path.resolve(here, "../../cache/client-web")] : [],
     entry: path.join(here, "app.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js"),
     onReload: apply,

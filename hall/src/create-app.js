@@ -10,6 +10,9 @@ export async function createApp(runtime) {
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const rooms = roomMod.createRoomLogic(decode);
+  const localRecords = runtime.env === "dev"
+    ? await rel(import.meta.url, "../../cache/hall/record-detail.js", v)
+    : null;
 
   const app = express();
   app.use((req, res, next) => {
@@ -57,7 +60,7 @@ export async function createApp(runtime) {
     if (op === 46 && runtime.env === "dev") {
       const gameRoomId = decode.num(params.gameRoomId, 0);
       const inningNum = decode.num(params.inningNum, 0);
-      const data = await getDevHoldemRecordDetail(gameRoomId, inningNum);
+      const data = await localRecords.getDevHoldemRecordDetail(runtime, gameRoomId, inningNum);
       res.set("Cache-Control", "no-store").json(data
         ? { msgCode: 200, errMsg: null, data }
         : { msgCode: 404, errMsg: "开发环境没有找到这局牌的详情记录", data: null });
@@ -75,21 +78,6 @@ export async function createApp(runtime) {
       throw error;
     }
     res.set("Cache-Control", "no-store").json({ msgCode: 200, errMsg: null, data });
-  }
-
-  async function getDevHoldemRecordDetail(gameRoomId, inningNum) {
-    if (!gameRoomId || !inningNum) return null;
-    const configured = String(runtime.config.game_server || "127.0.0.1:11041");
-    const base = /^https?:\/\//i.test(configured) ? configured : `http://${configured}`;
-    const endpoint = new URL("/internal/dev/holdem-record-detail", base);
-    endpoint.searchParams.set("roomId", String(gameRoomId));
-    endpoint.searchParams.set("inningNum", String(inningNum));
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
-    if (!response.ok) return null;
-    const body = await response.json();
-    return body?.code === 0 && Array.isArray(body.data?.exploitsInfoMsgs) && body.data.exploitsInfoMsgs.length
-      ? body.data
-      : null;
   }
 
   async function dispatch(op, params, userId, req) {

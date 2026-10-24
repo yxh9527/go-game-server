@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "start": "node src/boot.js",
-    "test": "node --test ../shared/rpc/rpc.test.js ./src/codec.test.js ./src/room-expiry.test.js ./src/core/GameBase.test.js ./src/core/SeatGame.test.js ./src/core/robot.test.js ./src/core/room-pool.test.js ./src/core/room-features.test.js ./src/core/fair-code.test.js ./src/core/HundredGame.test.js ./src/core/SlotsGame.test.js ./src/games/holdem/cards.test.js ./src/games/holdem/engine.test.js ./src/games/holdem/robot.test.js ./src/games/baccarat/rules.test.js ./src/games/ggl-core/engine.test.js ./src/games/zjh/hand.test.js ./src/games/zjh/engine.test.js ./src/games/zjh/robot.test.js ./src/wallet/wallet.test.js"
+    "test": "node ../test/run.js game-server"
   }
 }

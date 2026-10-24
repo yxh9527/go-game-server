@@ -6,16 +6,20 @@
     "hall",
     "client-web",
     "game-server",
-    "match",
-    "mock-server"
+    "match"
   ],
   "scripts": {
-    "dev": "node scripts/dev.js",
+    "dev": "node cache/dev.js",
     "hall": "node hall/src/boot.js",
     "client-web": "node client-web/src/boot.js",
     "game-server": "node game-server/src/boot.js",
     "match": "node match/src/boot.js",
-    "test": "node --test shared/rpc/rpc.test.js hall/src/**/*.test.js client-web/src/**/*.test.js game-server/src/**/*.test.js match/src/**/*.test.js"
+    "test": "node test/run.js",
+    "build:prod": "node scripts/build-prod.js",
+    "prod:hall": "node scripts/prod.js hall",
+    "prod:game-server": "node scripts/prod.js game-server",
+    "prod:match": "node scripts/prod.js match",
+    "prod:client-web": "node scripts/prod.js client-web"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.6",
@@ -25,5 +29,8 @@
     "js-yaml": "^4.1.0",
     "mysql2": "^3.15.3",
     "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=22.20.0"
   }
 }

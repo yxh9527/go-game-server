@@ -25,6 +25,7 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
   const { table, io } = ctx;
   if (table.standby || Number(table.roomType) === 101 || table.admissionTask || table.roundAdmission
     || lifecycle.isExpired(table, now)) return;
+  if (!lifecycle.syncActivity(table, now)) return;
   const overrides = { ...game.config.robotBehavior, ...table.cfg?.robot_behavior };
   const settings = { ...roomBehavior };
   for (const key of Object.keys(settings)) {

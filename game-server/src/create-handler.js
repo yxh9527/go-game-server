@@ -11,6 +11,9 @@ export async function createHandler(runtime) {
   const lifecycle = await rel(import.meta.url, "./core/room-lifecycle.js", v);
   const poolModule = await rel(import.meta.url, "./core/room-pool.js", v);
   const features = await rel(import.meta.url, "./core/room-features.js", v);
+  const localHttp = runtime.env === "dev"
+    ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
+    : null;
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
@@ -212,6 +215,9 @@ export async function createHandler(runtime) {
       delete table.roomFeatures;
       table.robotTraffic?.profiles.clear();
       delete table.robotTraffic;
+      delete table.suspendedAt;
+      delete table.emptySinceHands;
+      delete table.humanPresenceSeen;
       if (runtime.registry.getTable(table.roomId, table.agentId, table.gameId) === table) {
         runtime.registry.removeTable(table.roomId, table.agentId, table.gameId);
       }
@@ -504,5 +510,6 @@ export async function createHandler(runtime) {
     return table ? holdemEngine.texasHistoryDetail(table, inningNum) : null;
   }
 
-  return { onMessage, tick, onClose, games, getDevHoldemRecordDetail };
+  return { onMessage, tick, onClose, games, getDevHoldemRecordDetail,
+    handleLocalRequest: (req, res) => localHttp?.handleLocalRequest(runtime, req, res) || false };
 }

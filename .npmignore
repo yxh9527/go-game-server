@@ -1,0 +1,12 @@
+/test/
+/cache/
+/tools/
+/doc/
+/dist/
+**/*.test.js
+**/*.spec.js
+**/*.log
+.tmp*
+.codex/
+.agents/
+.git/

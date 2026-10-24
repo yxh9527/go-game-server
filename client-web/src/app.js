@@ -3,9 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { rel } from "../../game-server/src/rel.js";
+import { env } from "../../shared/rpc/env.js";
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
-const { CLIENT_DEV_PATCH } = await rel(import.meta.url, "./dev-patch.js", v);
+const CLIENT_DEV_PATCH = env.isDev
+  ? (await rel(import.meta.url, "../../cache/client-web/dev-patch.js", v)).CLIENT_DEV_PATCH
+  : "";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");

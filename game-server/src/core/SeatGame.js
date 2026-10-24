@@ -27,6 +27,7 @@ export class SeatGame extends GameBase {
       ...this.extraTableFields(roomRow),
     });
     features.initializeRoomStats(table);
+    lifecycle.syncActivity(table);
     return table;
   }
 
@@ -121,6 +122,7 @@ export class SeatGame extends GameBase {
     table.members.push(member);
     features.recordCarryIn(table, member, buyIn);
     table.observers = (table.observers || []).filter((item) => item.uid !== session.userId);
+    lifecycle.syncActivity(table);
     if (buyIn > 0) {
       this.afterSit(table, member, session);
       this.queueStart(table);
@@ -130,6 +132,7 @@ export class SeatGame extends GameBase {
 
   watch(table, session) {
     if (table.members.some((item) => item.uid === session.userId)) {
+      lifecycle.syncActivity(table);
       return;
     }
     if (!table.observers.some((item) => item.uid === session.userId)) {
@@ -141,6 +144,7 @@ export class SeatGame extends GameBase {
         point: Number(session.wallet) || 0,
       });
     }
+    lifecycle.syncActivity(table);
   }
 
   carryPanel(table, session) {
@@ -277,6 +281,7 @@ export class SeatGame extends GameBase {
     if (table.phase === "playing" || table.hand) return;
     // Tournament chips/elimination belong to match, not cash-table buy-ins.
     if (Number(table.roomType) === 101) return;
+    lifecycle.syncActivity(table);
     const inning = table.roomFeatures?.settledInning || 0;
     if (!table.roundAdmission) {
       if (!inning || inning <= (table.admissionCheckedInning || 0) || lifecycle.isExpired(table)) return;
@@ -330,7 +335,7 @@ export class SeatGame extends GameBase {
           payout.persisted = true;
         }
         table.members = table.members.filter((item) => item !== member);
-        this.watch(table, payout.session);
+        this.watch(table, member.bot ? { ...payout.session, bot: true } : payout.session);
         if (member.bot) table.observers.find((item) => item.uid === member.uid).bot = true;
         payout.removed = true;
         io.broadcast(PUSH.USER_STANDUP_ROOM, member.uid);
@@ -376,6 +381,7 @@ export class SeatGame extends GameBase {
 
   queueStart(table) {
     if (table.standby || table.admissionTask || table.roundAdmission || lifecycle.isExpired(table)) return;
+    if (!lifecycle.syncActivity(table)) return;
     const ready = this.seated(table);
     const hasHuman = ready.some((item) => !item.bot);
     if (table.phase === "idle" && (Number(table.roomType) !== 101 || hasHuman) && ready.length >= this.minPeople()) {
@@ -395,6 +401,7 @@ export class SeatGame extends GameBase {
   }
 
   onLoginRoom(ctx) {
+    lifecycle.syncActivity(ctx.table);
     this.expirePendingCarry(ctx);
     ctx.send(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
     features.handleRoomFeature(ctx, SEND.SEND_GAME_RANKING_REQ);
@@ -435,6 +442,7 @@ export class SeatGame extends GameBase {
       return;
     }
     if (table.standby) return;
+    if (!lifecycle.syncActivity(table, now)) return;
     robot.tickRoom(this, ctx, now);
     if (this.seated(table).length < this.minPeople() && table.phase === "starting") table.phase = "idle";
     this.queueStart(table);
@@ -457,8 +465,11 @@ export class SeatGame extends GameBase {
     const table = ctx.table;
     const uid = ctx.session.userId;
     const member = table.members.find((item) => item.uid === uid);
+    const person = member || (table.observers || []).find((item) => item.uid === uid);
+    const completedBeforeLeave = table.roomFeatures?.totalHands || 0;
     if (!member) {
       table.observers = (table.observers || []).filter((item) => item.uid !== uid);
+      lifecycle.noteDeparture(table, person, completedBeforeLeave);
       ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
       features.pushObservers(ctx);
       return 0;
@@ -468,6 +479,7 @@ export class SeatGame extends GameBase {
     features.recordCarryOut(table, member, cash);
     table.members = table.members.filter((item) => item.uid !== uid);
     table.observers = (table.observers || []).filter((item) => item.uid !== uid);
+    lifecycle.noteDeparture(table, person, completedBeforeLeave);
     ctx.io.broadcast(PUSH.USER_STANDUP_ROOM, uid);
     ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));

@@ -1,0 +1,10 @@
+test
+cache
+**/*.test.js
+**/*.spec.js
+node_modules
+dist
+.git
+**/.git
+.tmp*
+**/*.log

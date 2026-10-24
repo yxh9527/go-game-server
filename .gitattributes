@@ -1,0 +1,4 @@
+/test export-ignore
+/cache export-ignore
+/tools export-ignore
+/.tmp* export-ignore

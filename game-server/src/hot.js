@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export function watchHot({ dir, entry, skip, onReload, log }) {
+export function watchHot({ dir, extraDirs = [], entry, skip, onReload, log }) {
   let timer = null;
   let loading = false;
   let pending = false;
@@ -28,20 +28,22 @@ export function watchHot({ dir, entry, skip, onReload, log }) {
     }
   }
 
-  fs.watch(dir, { recursive: true }, (_event, filename) => {
-    if (!filename) {
-      return;
-    }
-    const rel = String(filename).replaceAll("\\", "/");
-    if (skip && skip(rel)) {
-      return;
-    }
-    if (!rel.endsWith(".js")) {
-      return;
-    }
-    clearTimeout(timer);
-    timer = setTimeout(() => reload(rel), 150);
-  });
+  for (const watchedDir of [dir, ...extraDirs]) {
+    fs.watch(watchedDir, { recursive: true }, (_event, filename) => {
+      if (!filename) {
+        return;
+      }
+      const rel = String(filename).replaceAll("\\", "/");
+      if (skip && skip(rel)) {
+        return;
+      }
+      if (!rel.endsWith(".js")) {
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => reload(rel), 150);
+    });
+  }
 
   return reload;
 }

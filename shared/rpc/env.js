@@ -1,9 +1,10 @@
 let isDevMode = true;
 let rpcConfig = {};
+loadEnv();
 
 export function loadEnv(config = {}) {
   rpcConfig = config || {};
-  const raw = String(config.env || process.env.GOGAME_ENV || process.env.IS_DEV || "dev").toLowerCase();
+  const raw = String(process.env.GOGAME_ENV || config.env || process.env.IS_DEV || process.env.NODE_ENV || "dev").toLowerCase();
   isDevMode = raw !== "prod" && raw !== "production" && raw !== "online" && raw !== "0";
   if (raw === "0" || raw === "false") {
     isDevMode = false;

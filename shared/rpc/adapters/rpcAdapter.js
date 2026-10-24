@@ -1,12 +1,10 @@
 import { env } from "../env.js";
-import { BusRpcDev } from "../implementations/dev/busRpcDev.js";
-import { CommonRpcDev } from "../implementations/dev/commonRpcDev.js";
-import { GatewayRpcDev } from "../implementations/dev/gatewayRpcDev.js";
-import { LobbyRpcDev } from "../implementations/dev/lobbyRpcDev.js";
+import { createRequire } from "node:module";
 import { BusRpcProd } from "../implementations/prod/busRpcProd.js";
 import { CommonRpcProd } from "../implementations/prod/commonRpcProd.js";
 import { GatewayRpcProd } from "../implementations/prod/gatewayRpcProd.js";
 import { LobbyRpcProd } from "../implementations/prod/lobbyRpcProd.js";
+const require = createRequire(import.meta.url);
 
 /**
  * 统一 RPC 入口。
@@ -19,6 +17,11 @@ export class RpcAdapter {
 
   initializeServices() {
     if (env.isDev) {
+      // Node 22 loads synchronous ESM here only in dev. Production can omit cache entirely.
+      const { BusRpcDev } = require("../../../cache/rpc/busRpcDev.js");
+      const { CommonRpcDev } = require("../../../cache/rpc/commonRpcDev.js");
+      const { GatewayRpcDev } = require("../../../cache/rpc/gatewayRpcDev.js");
+      const { LobbyRpcDev } = require("../../../cache/rpc/lobbyRpcDev.js");
       this.gatewayService = new GatewayRpcDev();
       this.commonService = new CommonRpcDev();
       this.lobbyService = new LobbyRpcDev();

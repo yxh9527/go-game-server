@@ -38,6 +38,7 @@ export function createRoomPool(runtime, gameOf) {
     if (registry.getTable(roomId, agentId, game.id)) throw new Error("Room already exists");
     const table = game.createTable(roomId, roomType, cfg);
     table.createdAt = now;
+    if (Number.isFinite(table.suspendedAt)) table.suspendedAt = now;
     lifecycle.initializeLifetime(table, now);
     if (table.roomFeatures) table.roomFeatures.startedAt = table.createdAt;
     table.agentId = Number(agentId) || 0;

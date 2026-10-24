@@ -2,6 +2,7 @@
 // so a business-module reload cannot restart its clock.
 export const ROOM_LIFETIME_MS = 8 * 60 * 60 * 1000;
 export const ROOM_LIFETIME_SECONDS = ROOM_LIFETIME_MS / 1000;
+export const EMPTY_ROOM_SETTLED_HANDS = 3;
 export const OCCUPANCY_THRESHOLD = 0.8;
 export const EXPANSION_RATIO = 0.05;
 
@@ -24,6 +25,69 @@ export function isExpired(table, now = Date.now()) {
 export function remainingSeconds(table, now = Date.now()) {
   initializeLifetime(table, now);
   return Math.max(0, Math.ceil((table.expiresAt - now) / 1000));
+}
+
+export function hasHumanPresence(table) {
+  return (table.members || []).some((member) => !member.bot)
+    || (table.observers || []).some((member) => !member.bot);
+}
+
+// Only gameplay clocks pause. The room's creation/expiry clock, ranking and
+// wallet persistence continue to use real time and survive module reloads.
+export function syncActivity(table, now = Date.now()) {
+  if (table.kind !== "normal" || Number(table.roomType) === 101) return true;
+  if (table.closing) return false;
+  const hasHuman = hasHumanPresence(table);
+  const completed = table.roomFeatures?.totalHands || 0;
+  // Adopt resident rooms from the immediate-suspension version. Never-started
+  // empty reserves still wait for their first real visitor.
+  if (table.humanPresenceSeen === undefined) {
+    table.humanPresenceSeen = hasHuman || completed > 0 || table.currentInning > 0 || Boolean(table.robotTraffic);
+  }
+  if (hasHuman) {
+    table.humanPresenceSeen = true;
+    delete table.emptySinceHands;
+  } else if (table.humanPresenceSeen && !Number.isFinite(table.emptySinceHands)) {
+    table.emptySinceHands = completed;
+  }
+  const finishedEmptyRun = Number.isFinite(table.emptySinceHands)
+    && completed - table.emptySinceHands >= EMPTY_ROOM_SETTLED_HANDS;
+  if (!hasHuman && (!table.humanPresenceSeen
+      || (finishedEmptyRun && table.phase !== "playing" && !table.hand))) {
+    if (!Number.isFinite(table.suspendedAt)) table.suspendedAt = now;
+    return false;
+  }
+  if (Number.isFinite(table.suspendedAt)) {
+    const elapsed = Math.max(0, now - table.suspendedAt);
+    const shift = (target, keys) => {
+      if (!target) return;
+      for (const key of keys) {
+        if (Number.isFinite(target[key]) && target[key] > 0) target[key] += elapsed;
+      }
+    };
+    shift(table, ["startAt"]);
+    shift(table.hand, ["deadline", "botActAt"]);
+    shift(table.robotTraffic, ["nextCheckAt"]);
+    for (const profile of table.robotTraffic?.profiles.values() || []) {
+      shift(profile, ["seatedAt", "waitingAt", "canSitAt", "carryAt"]);
+    }
+    for (const member of table.members || []) {
+      if (member.bot) shift(member, ["carryDeadline"]);
+    }
+    delete table.suspendedAt;
+  }
+  return true;
+}
+
+export function noteDeparture(table, person, completedBeforeLeave, now = Date.now()) {
+  if (table.kind === "normal" && Number(table.roomType) !== 101
+      && person && !person.bot && !hasHumanPresence(table)) {
+    table.humanPresenceSeen = true;
+    // Leaving can fold the last human and settle the current hand. That
+    // settlement is the first of the three, not a reason to reset the count.
+    table.emptySinceHands = completedBeforeLeave;
+  }
+  return syncActivity(table, now);
 }
 
 export function capacityGroupKey(table) {
