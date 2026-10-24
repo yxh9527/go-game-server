@@ -299,6 +299,14 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.authenticated === false) return;
+    if (msgid === SEND.MB_UNREG_ROOMS_REQ) {
+      // The shared Bairen client sends this even without any subscriptions,
+      // and often after 2110 has detached the primary room. No room lookup,
+      // join, wallet operation or main-table leave belongs to this cleanup.
+      // There are currently no multi-room subscriptions in this handler.
+      send(ws, PUSH.MB_UNREG_ROOMS_RES, {});
+      return;
+    }
     if (msgid === SEND.SEND_BLOCKCHAIN_VERIFY || msgid === SEND.SEND_BLOCKCHAIN_INFO) {
       const roomId = Number(payload?.gameRoomId || session.roomId);
       const candidates = runtime.registry.listAgentGameRooms(session.agentId)
@@ -361,6 +369,14 @@ export async function createHandler(runtime) {
       }
       return;
     }
+    // An explicit exit is acknowledged directly, never via room broadcast:
+    // inRoom=false intentionally stops subsequent room traffic to this socket.
+    // Also recover clients whose earlier exit completed without its receipt.
+    if (msgid === SEND.SEND_LEVEL_OUT && session.inRoom === false) {
+      if (session.leaveTask) await session.leaveTask;
+      else sendLeaveResult(ws, session);
+      return;
+    }
     const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
     if (!table) {
       return;
@@ -409,15 +425,30 @@ export async function createHandler(runtime) {
     }
   }
 
-  async function leaveTable(ws, session, table, game) {
-    await game.afterRound?.(ctxOf(ws, session, table));
-    session.inRoom = false;
-    const cash = game.onLeave(ctxOf(ws, session, table));
-    if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
-    else session.wallet += Number(cash || 0);
-    pushPoint(ws, session);
-    await persist(session);
-    await game.afterRound?.(ctxOf(ws, session, table));
+  function sendLeaveResult(ws, session) {
+    send(ws, PUSH.USER_LEVEL_ROOM, { roomId: session.roomId, uid: session.userId, type: 1 });
+  }
+
+  function leaveTable(ws, session, table, game) {
+    if (session.leaveTask) return session.leaveTask;
+    const task = (async () => {
+      await game.afterRound?.(ctxOf(ws, session, table));
+      session.inRoom = false;
+      const cash = game.onLeave(ctxOf(ws, session, table));
+      if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
+      else session.wallet += Number(cash || 0);
+      pushPoint(ws, session);
+      await persist(session);
+      await game.afterRound?.(ctxOf(ws, session, table));
+      // The original client returns to its hall only after receiving 2205
+      // for its own uid/roomId. Spectators need the same receipt as players.
+      sendLeaveResult(ws, session);
+    })();
+    // Keep the in-flight operation on the resident session across hot reloads.
+    session.leaveTask = task;
+    const clearTask = () => { if (session.leaveTask === task) delete session.leaveTask; };
+    task.then(clearTask, clearTask);
+    return task;
   }
 
   function tick() {

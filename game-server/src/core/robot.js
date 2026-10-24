@@ -120,7 +120,6 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
   for (const [uid, profile] of state.profiles) {
     if (seated(uid) || now - profile.waitingAt < settings.observerLifetimeMs) continue;
     game.onLeave(roomContext(profile));
-    io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
     state.profiles.delete(uid);
   }
   // Keep a free chair for a real player. A vacancy is an opportunity, not an

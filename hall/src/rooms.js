@@ -1,11 +1,5 @@
-const HUNDRED_ROOM_TYPES = new Set([50, 51, 52]);
-
 export function createRoomLogic(decode) {
   const { num, truthy } = decode;
-
-  function isHundredRoom(roomType) {
-    return HUNDRED_ROOM_TYPES.has(num(roomType, 0));
-  }
 
   function filterRooms(rows, params = {}) {
     const gameType = num(params.gameType, undefined);
@@ -91,7 +85,10 @@ export function createRoomLogic(decode) {
       gameRoomConfigId: num(row.game_room_config_id, 0),
       key: `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",
-      hundredDomain: isHundredRoom(roomType) ? (config.hundred_server || config.game_server || "") : "",
+      // Ordinary games also load the shared Bairen panel and unsubscribe on
+      // exit. Its original socket selector requires this endpoint even when
+      // no hundred-player room was entered; a shared server reuses domain.
+      hundredDomain: config.hundred_server || config.game_server || "",
     };
   }
 

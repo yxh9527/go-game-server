@@ -740,6 +740,10 @@ export const CLIENT_DEV_PATCH = `<script>
     postedLoaded = true;
     function send() {
       try {
+        // A delayed retry from the old game must not cover the hall again
+        // after the original client has already switched to webHallOb.
+        var current = window.cc && cc.director && cc.director.getScene();
+        if (!current || current.name !== scene || HALL_WAIT[current.name]) return;
         if (window.parent && window.parent !== window) {
           window.parent.postMessage({ type: "gameLoaded" }, "*");
         }

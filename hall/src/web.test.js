@@ -55,6 +55,7 @@ test("hall overlay observer does not watch its own style writes", () => {
         values.set(key, value);
         priorities.set(key, priority);
       },
+      removeProperty(key) { values.delete(key); priorities.delete(key); },
     };
   };
   const classes = new Set(["game-iframe_gameIframe__blCWg"]);
@@ -62,16 +63,17 @@ test("hall overlay observer does not watch its own style writes", () => {
     classList: {
       contains: (name) => classes.has(name),
       add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
     },
     style: makeStyle("holder"),
   };
-  const frame = { style: makeStyle("frame") };
+  const frame = { style: makeStyle("frame"), contentWindow: {} };
   const loading = { style: makeStyle("loading") };
   const document = {
     documentElement: {},
     querySelectorAll(selector) {
+      if (selector.includes("iframe")) return [frame];
       if (selector.includes("gameIframe")) return [holder];
-      if (selector === "iframe") return [frame];
       if (selector.includes("loading_loading")) return [loading];
       return [];
     },
@@ -100,10 +102,10 @@ test("hall overlay observer does not watch its own style writes", () => {
     console: { log() {} },
   });
 
-  window.onMessage({ data: { type: "gameLoaded" }, stopImmediatePropagation() { stopped = true; } });
+  window.onMessage({ source: frame.contentWindow, data: { type: "gameLoaded" }, stopImmediatePropagation() { stopped = true; } });
   const initialWrites = writes.length;
   observer([{ type: "childList" }]);
-  window.onMessage({ data: { type: "gameLoaded" }, stopImmediatePropagation() { stopped = true; } });
+  window.onMessage({ source: frame.contentWindow, data: { type: "gameLoaded" }, stopImmediatePropagation() { stopped = true; } });
 
   assert.equal(observerOptions.subtree, true);
   assert.equal(observerOptions.childList, true);
@@ -113,4 +115,77 @@ test("hall overlay observer does not watch its own style writes", () => {
   assert.equal(initialWrites, 9);
   assert.equal(classes.has("game-iframe_visible__LsoiQ"), true);
   assert.equal(stopped, true);
+});
+
+test("exit uncovers the hall through rerenders and a second entry/exit without navigating back", () => {
+  let observe, tick;
+  const visible = "game-iframe_visible__LsoiQ";
+  const makeNode = () => {
+    const values = new Map(), priorities = new Map(), classes = new Set();
+    return {
+      style: {
+        getPropertyValue: (name) => values.get(name) || "",
+        getPropertyPriority: (name) => priorities.get(name) || "",
+        setProperty(name, value, priority) { values.set(name, value); priorities.set(name, priority); },
+        removeProperty(name) { values.delete(name); priorities.delete(name); },
+      },
+      classList: { contains: (name) => classes.has(name), add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
+    };
+  };
+  let holder = makeNode();
+  const frame = { ...makeNode(), contentWindow: {} };
+  const loading = makeNode();
+  const loadingCalls = [];
+  let backCalls = 0;
+  const window = { $loading: (value) => loadingCalls.push(value),
+    addEventListener(type, listener) { if (type === "message") this.onMessage = listener; },
+  };
+  const source = HALL_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
+  vm.runInNewContext(source, { window, console: { log() {} }, clearInterval() {},
+    setInterval(callback) { tick = callback; return 1; },
+    MutationObserver: class { constructor(callback) { observe = callback; } observe() {} },
+    document: { documentElement: {}, querySelectorAll(selector) {
+      if (selector.includes("iframe")) return [frame];
+      if (selector.includes("gameIframe")) return [holder];
+      if (selector.includes("loading_loading")) return [loading];
+      return [];
+    } },
+  });
+  const dispatch = (type, source = frame.contentWindow) => {
+    let stopped = false;
+    window.onMessage({ source, data: JSON.stringify({ type }), stopImmediatePropagation() { stopped = true; } });
+    // Original React gameBack calls router.back(). It must be paired with
+    // the route push that our existing gameLoaded bridge intentionally skips.
+    if (!stopped && type === "gameBack" && source === frame.contentWindow) backCalls += 1;
+    return stopped;
+  };
+  tick();
+  assert.equal(dispatch("gameLoaded", {}), false, "ignore messages from unrelated frames");
+  assert.equal(holder.classList.contains(visible), false);
+  for (let cycle = 0; cycle < 2; cycle++) {
+    window.$loading(true);
+    assert.equal(loadingCalls.at(-1), true);
+    assert.equal(loading.style.getPropertyValue("display"), "", "entry can show loading again");
+    assert.equal(dispatch("gameLoaded"), true);
+    assert.equal(holder.style.getPropertyValue("visibility"), "visible");
+    assert.equal(frame.style.getPropertyValue("pointer-events"), "auto");
+    assert.equal(dispatch("gameBack", {}), false);
+    assert.equal(holder.style.getPropertyValue("visibility"), "visible");
+    assert.equal(dispatch("gameBack"), true);
+    assert.equal(dispatch("gameBack"), true, "duplicate exits must not navigate outside the hall");
+    assert.equal(holder.classList.contains(visible), false);
+    assert.equal(holder.style.getPropertyValue("visibility"), "hidden");
+    assert.equal(holder.style.getPropertyValue("z-index"), "-1");
+    assert.equal(frame.style.getPropertyValue("pointer-events"), "none");
+    holder = makeNode();
+    holder.classList.add(visible);
+    observe([{ type: "childList" }]);
+    tick();
+    assert.equal(holder.classList.contains(visible), false, "React replacement cannot resurrect the black overlay");
+    assert.equal(holder.style.getPropertyValue("visibility"), "hidden");
+    assert.equal(backCalls, 0);
+  }
+  dispatch("gameLoaded");
+  assert.equal(dispatch("errText"), false, "preserve native error handling");
+  assert.equal(holder.style.getPropertyValue("visibility"), "hidden");
 });

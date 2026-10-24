@@ -459,6 +459,7 @@ export class SeatGame extends GameBase {
     const member = table.members.find((item) => item.uid === uid);
     if (!member) {
       table.observers = (table.observers || []).filter((item) => item.uid !== uid);
+      ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
       features.pushObservers(ctx);
       return 0;
     }

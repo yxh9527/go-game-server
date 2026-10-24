@@ -11,9 +11,14 @@ import { PUSH, SEND } from "../../game-server/src/messages.js";
 import { OP } from "../../game-server/src/games/holdem/op.js";
 import { ZjhGame } from "../../game-server/src/games/zjh/ZjhGame.js";
 import * as robot from "../../game-server/src/core/robot.js";
+import { createHandler } from "../../game-server/src/create-handler.js";
+import { createRegistry } from "../../game-server/src/registry.js";
+import { createRoomLogic } from "../../hall/src/rooms.js";
+import * as hallDecode from "../../hall/src/decode.js";
 
 const main = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/main/index.88f4e.js", import.meta.url), "utf8");
 const holdem = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/Holdem/index.55219.js", import.meta.url), "utf8");
+const multyBet = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/BairenMultyBet/index.74b50.js", import.meta.url), "utf8");
 function method(bundle, anchor, next, globals = {}) {
   const start = bundle.indexOf(anchor);
   const end = bundle.indexOf(next, start);
@@ -22,6 +27,97 @@ function method(bundle, anchor, next, globals = {}) {
 }
 
 const convertSecondsToDHMS = method(main, "U['convertSecondsToDHMS']=", ",U['keepDecimal']=");
+
+test("original Bairen socket selector and unsubscribe complete for ordinary room entry data", { timeout: 2000 }, async () => {
+  for (const separateServer of [false, true]) {
+    const connectRoomData = createRoomLogic(hallDecode).enterRoomPayload({ room_type: 19, game_room_config_id: 70 }, {}, {
+      game_server: "room.example:443", hundred_server: separateServer ? "hundred.example:443" : "room.example:443",
+    });
+    const registry = createRegistry();
+    const table = createTexasTable(connectRoomData.roomId, 19, { carry_min: 500 });
+    const session = { userId: 63, roomId: table.roomId, gameId: table.gameId, inRoom: true,
+      authenticated: true, wallet: 500 };
+    table.members.push({ uid: 63, name: "player", pos: 0, point: 500 });
+    registry.setTable(table.roomId, table);
+    const callbacks = new Map();
+    const received = [];
+    const socket = { readyState: 1, send(raw) {
+      const frame = decodeFrame(raw);
+      received.push(frame);
+      callbacks.get(frame.msgid)?.(frame.payload);
+    } };
+    registry.bind(socket, session);
+    const handler = await createHandler({ hotVersion: "original-unsubscribe", registry, configs: [], findConfig: () => null,
+      wallet: { credit() { assert.fail("unsubscribe must not credit"); }, persist() { assert.fail("unsubscribe must not persist"); } },
+      log: { info() {}, error() {} },
+    });
+    const pending = [];
+    const transport = (socketUrl) => ({ socketUrl, send(id, payload) {
+      pending.push(Promise.resolve().then(() => handler.onMessage(socket, encodeFrame(id, payload))));
+    } });
+    const primary = transport("wss://room.example:443/");
+    const secondary = transport(separateServer ? "wss://hundred.example:443/" : "");
+    const helper = {};
+    Object.defineProperty(helper, "roomSocket", { get: method(multyBet,
+      "Object['defineProperty'](P,'roomSocket',{'get':", ",'enumerable':", {
+        G: { default: { canKiwi: false } }, E: { default: { instance: { connectRoomData } } },
+        C: { default: { ins: primary } }, D: { default: { ins: secondary } },
+        A: { default: { getUrlDomain: (url) => url.replace(/^wss?:\/\//, "").replace(/\/$/, "") } },
+        console: { log() {} },
+      }) });
+    helper.sendMsg = method(multyBet, "P['sendMsg']=", ",P['toastTip']=");
+    const unsubscribe = method(multyBet, "K['prototype']['sendUnregRoomsReq']=", ",K['prototype']['sendRoomBetReq']=", {
+      C: { default: { offByTargetName: (id) => callbacks.delete(id), on: (id, callback) => callbacks.set(id, callback) } },
+      E: { BRMBDef: { Request: SEND, Response: PUSH } }, F: { default: helper },
+    });
+    const viewModel = {};
+    const before = JSON.stringify(table);
+    for (const inRoom of [true, false]) {
+      session.inRoom = inRoom;
+      assert.equal(await unsubscribe.call(viewModel), 0, "original promise resolves using 6225 without a client hook");
+      assert.equal(session.inRoom, inRoom);
+      assert.equal(session.wallet, 500);
+      assert.equal(JSON.stringify(table), before, "auxiliary unsubscribe cannot remove seats or alter main room state");
+    }
+    await Promise.all(pending);
+    assert.equal(helper.roomSocket, separateServer ? secondary : primary);
+    assert.deepEqual(received.map((frame) => frame.msgid), [PUSH.MB_UNREG_ROOMS_RES, PUSH.MB_UNREG_ROOMS_RES]);
+  }
+});
+
+test("original holdem exit handler returns observers and seated players to the API hall", async () => {
+  for (const seated of [false, true]) {
+    const registry = createRegistry();
+    const game = new HoldemGame();
+    const table = game.createTable(700016, 19, { carry_min: 500 });
+    const session = { userId: 62, name: "player", roomId: table.roomId, gameId: game.id, inRoom: true, wallet: seated ? 500 : 1000 };
+    if (seated) table.members.push({ uid: session.userId, name: session.name, pos: 0, point: 500, state: 1 });
+    else game.watch(table, session);
+    registry.setTable(table.roomId, table);
+    const received = [];
+    const ws = { readyState: 1, send(frame) { received.push(decodeFrame(frame)); } };
+    registry.bind(ws, session);
+    const handler = await createHandler({ hotVersion: "client-exit", registry, configs: [], findConfig: () => null,
+      wallet: { async persist() {} }, log: { info() {}, error() {} },
+    });
+    let returnedToHall = 0;
+    const globals = {
+      ad: { default: { userData: { uid: session.userId } } },
+      aw: { default: { ReportLog() {} } },
+      ai: { Holdem_audio: { ins: { leaveRoom() {} } } },
+      ac: { default: { isApi: () => true, gotoApiHall: () => { returnedToHall += 1; } } },
+    };
+    const room = { _conf: game.roomInfo(table), dispatchEventAll() {},
+      checkToShowStartGameAndInviteFriend() {}, checkToShowWaitNextRound() {},
+    };
+    room.levelRoom = method(holdem, "aI['prototype']['levelRoom']=", ",aI['prototype']['updateBlindDispalyInfo']=", globals);
+    const exit = method(holdem, "aI['prototype']['userLevelRoom']=", ",aI['prototype']['userLevelRoomData']=", globals);
+    await handler.onMessage(ws, encodeFrame(SEND.SEND_LEVEL_OUT));
+    for (const frame of received) if (frame.msgid === PUSH.USER_LEVEL_ROOM) exit.call(room, frame.payload);
+    assert.equal(returnedToHall, 1, seated ? "seated player returns" : "observer returns");
+    assert.equal(session.wallet, 1000);
+  }
+});
 
 for (const type of [19, 25]) {
   test(type + ": original client shows robot buy-in through incremental seat messages", (t) => {

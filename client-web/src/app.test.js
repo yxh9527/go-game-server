@@ -247,6 +247,7 @@ test("direct scene fallback skips a scene that the client entered while loading"
   let loadSceneCalls = 0;
   let runSceneImmediateCalls = 0;
   const loadedMessages = [];
+  const retries = [];
   const gameScene = { name: "gameHoldem" };
   const bundle = {
     loadScene(_name, _progress, complete) {
@@ -284,7 +285,7 @@ test("direct scene fallback skips a scene that the client entered while loading"
     console: { log() {}, warn() {}, error() {} },
     setInterval: () => 1,
     clearInterval() {},
-    setTimeout: () => 1,
+    setTimeout: (callback) => { retries.push(callback); return retries.length; },
   };
   const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
 
@@ -295,6 +296,10 @@ test("direct scene fallback skips a scene that the client entered while loading"
   assert.equal(activeScene.name, "gameHoldem");
   assert.equal(runSceneImmediateCalls, 0);
   assert.equal(loadedMessages.filter((message) => message.type === "gameLoaded").length, 1);
+  activeScene = { name: "webHallOb" };
+  for (const retry of retries) retry();
+  assert.equal(loadedMessages.filter((message) => message.type === "gameLoaded").length, 1,
+    "delayed gameLoaded retries cannot reveal an empty scene after gameBack");
 });
 
 test("runtime SceneManager module is preferred over the direct scene fallback", async () => {

@@ -23,7 +23,7 @@ test("find room by blinds and return enter payload", () => {
   assert.equal(payload.roomId, rooms.assignRoomId(row));
   assert.equal(payload.roomType, 19);
   assert.equal(payload.domain, "127.0.0.1:11041");
-  assert.equal(payload.hundredDomain, "");
+  assert.equal(payload.hundredDomain, "127.0.0.1:11041");
   assert.equal(payload.playMode, 0);
   assert.equal(payload.smallBlind, 10);
 });
@@ -32,6 +32,15 @@ test("hundred rooms keep hundredDomain", () => {
   const row = { game_type: 50, room_type: 50, game_room_config_id: 1, play_mode: 1, room_index: 0, small_blind: 0, big_blind: 0, force_show_card: 0 };
   const payload = rooms.enterRoomPayload(row, { roomType: 50 }, { game_server: "127.0.0.1:11041", hundred_server: "127.0.0.1:11041" });
   assert.equal(payload.hundredDomain, "127.0.0.1:11041");
+});
+
+test("ordinary games retain a separate hundred endpoint and fall back to the shared server", () => {
+  for (const roomType of [19, 25, 58, 61, 101]) {
+    const row = { room_type: roomType, game_room_config_id: 70 };
+    assert.equal(rooms.enterRoomPayload(row, {}, { game_server: "room.example:443",
+      hundred_server: "hundred.example:443" }).hundredDomain, "hundred.example:443");
+    assert.equal(rooms.enterRoomPayload(row, {}, { game_server: "room.example:443" }).hundredDomain, "room.example:443");
+  }
 });
 
 test("dev public ws host rewrites lobby.localhost to www.localhost", () => {

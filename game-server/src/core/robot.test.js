@@ -379,7 +379,7 @@ test("observer retirement releases profiles without reusing ranking identities",
   assert.equal(f.table.robotTraffic.profiles.size, 0);
   assert.equal(f.table.observers.length, 0);
   assert.ok(f.table.roomFeatures.players.has(uid));
-  assert.equal(f.messages.find((m) => m.id === PUSH.USER_LEVEL_ROOM).data.uid, uid);
+  assert.deepEqual(f.messages.filter((m) => m.id === PUSH.USER_LEVEL_ROOM).map((m) => m.data.uid), [uid]);
   f.table.robotTraffic.nextUid = uid;
   f.table.cfg.robot_behavior.joinProbability = 1;
   f.traffic(1000);

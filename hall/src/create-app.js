@@ -178,7 +178,7 @@ export async function createApp(runtime) {
     const payload = rooms.enterRoomPayload(row, params, {
       ...runtime.config,
       game_server: domain,
-      hundred_server: domain,
+      hundred_server: runtime.env === "dev" ? domain : (runtime.config.hundred_server || domain),
     });
     if ([19, 25].includes(Number(row.room_type))) {
       const allocation = await roomPool.requestRoomPool(runtime, params, "allocate", {

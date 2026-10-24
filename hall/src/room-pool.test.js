@@ -56,6 +56,7 @@ test("hall allocates live empty reserves through authenticated game-server queri
   const first = await query(45);
   assert.equal(first.msgCode, 200);
   assert.equal(first.data.roomId, 700000);
+  assert.equal(first.data.hundredDomain, first.data.domain, "ordinary rooms must advertise their shared hundred socket endpoint");
   assert.equal((await query(45)).data.roomId, first.data.roomId, "reuse available room");
   const table = registry.getTable(first.data.roomId, 1, "holdem");
   assert.deepEqual(table.members, []);
@@ -94,6 +95,10 @@ test("hall allocates live empty reserves through authenticated game-server queri
   assert.equal(table.members.length, 1);
   assert.equal(table.members[0].bot, true);
   assert.equal(table.members[0].point, 0, "robot occupies a seat before its delayed buy-in");
+  await request(SEND.SEND_LEVEL_OUT, undefined, PUSH.USER_LEVEL_ROOM);
+  assert.deepEqual(await request(SEND.MB_UNREG_ROOMS_REQ, undefined, PUSH.MB_UNREG_ROOMS_RES), {});
+  assert.equal(table.observers.some((member) => member.uid === 1), false);
+  assert.equal(registry.getTable(table.roomId, 1, "holdem"), table, "auxiliary cleanup must not destroy the main room");
   const close = new Promise((resolve) => client.once("close", resolve));
   client.close();
   await close;
