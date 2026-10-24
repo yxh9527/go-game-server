@@ -1,10 +1,11 @@
-import { SeatGame } from "../../core/SeatGame.js";
 import { SEND, PUSH } from "../../messages.js";
 import { rel } from "../../rel.js";
 import config from "./config.js";
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
+const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", v);
 
 export class HoldemGame extends SeatGame {
   constructor() {
@@ -34,6 +35,7 @@ export class HoldemGame extends SeatGame {
   extraRoomInfo(table) {
     return {
       dzpk: {
+        gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
         gameName: this.config.name,
         smallBlind: table.smallBlind,
         bigBlind: table.bigBlind,
@@ -47,49 +49,8 @@ export class HoldemGame extends SeatGame {
     };
   }
 
-  buyIn(table, session) {
-    return Math.min(
-      Math.max(Number(session.wallet) || 0, 0),
-      Math.max(table.carryMin, table.bigBlind * this.config.buyInBb),
-    );
-  }
-
-  afterSit(table) {
-    engine.ensureBots(table);
-    this.queueStart(table);
-  }
-
-  queueStart(table) {
-    const ready = this.seated(table);
-    const hasHuman = ready.some((member) => !member.bot);
-    const hasCashTableObserver = Number(table.roomType) === 19 && (table.observers || []).length > 0;
-    if (table.phase !== "idle" || (!hasHuman && !hasCashTableObserver) || ready.length < this.minPeople()) {
-      return;
-    }
-    table.phase = "starting";
-    table.startAt = Date.now() + (this.config.startDelayMs || 3000);
-  }
-
-  onJoin(ctx) {
-    super.onJoin(ctx);
-    // Cash-table bots run their own hands while real players watch. The bots
-    // use the same turn/action/settlement loop as seated players.
-    if (Number(ctx.table.roomType) === 19) {
-      engine.ensureBots(ctx.table);
-      this.queueStart(ctx.table);
-    }
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
-    ctx.send(PUSH.DZPK_PUSH_WATCHGAME, this.roomInfo(ctx.table).OBmemberList);
-  }
-
-  onSitDown(ctx) {
-    super.onSitDown(ctx);
-    // Refill empty bot chairs after an explicit sit request. Cash-table bots
-    // can already be playing while the human completes the buy-in panel.
-    if (ctx.table.members.some((member) => Number(member.uid) === Number(ctx.session.userId))) {
-      engine.ensureBots(ctx.table);
-      ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
-    }
+  defaultBuyIn(table) {
+    return Math.max(table.carryMin, table.bigBlind * this.config.buyInBb);
   }
 
   onLoginRoom(ctx) {
@@ -99,11 +60,6 @@ export class HoldemGame extends SeatGame {
 
   onPlayingSnapshot(ctx) {
     engine.pushPlayingSnapshot(ctx.send, ctx.table, ctx.session);
-  }
-
-  onLeave(ctx) {
-    const cash = super.onLeave(ctx);
-    return cash;
   }
 
   onMessage(ctx, msgid, payload) {

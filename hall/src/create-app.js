@@ -7,6 +7,8 @@ export async function createApp(runtime) {
   const toClient = await rel(import.meta.url, "./to-client.js", v);
   const roomMod = await rel(import.meta.url, "./rooms.js", v);
   const web = await rel(import.meta.url, "./web.js", v);
+  const fairCode = await rel(import.meta.url, "./fair-code.js", v);
+  const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const rooms = roomMod.createRoomLogic(decode);
 
   const app = express();
@@ -48,6 +50,10 @@ export async function createApp(runtime) {
       ...req.query,
     };
     const op = decode.num(params.op, 0);
+    if (op === 29) {
+      res.set("Cache-Control", "no-store").json(await fairCode.requestFairCode(runtime, params));
+      return;
+    }
     if (op === 46 && runtime.env === "dev") {
       const gameRoomId = decode.num(params.gameRoomId, 0);
       const inningNum = decode.num(params.inningNum, 0);
@@ -58,7 +64,16 @@ export async function createApp(runtime) {
       return;
     }
     const userId = decode.num(params.userId ?? req.query.userId, 0);
-    const data = await dispatch(op, params, userId, req);
+    let data;
+    try {
+      data = await dispatch(op, params, userId, req);
+    } catch (error) {
+      if ((op === 38 || op === 45) && error.code) {
+        res.set("Cache-Control", "no-store").json({ msgCode: error.code, errMsg: error.message, data: null });
+        return;
+      }
+      throw error;
+    }
     res.set("Cache-Control", "no-store").json({ msgCode: 200, errMsg: null, data });
   }
 
@@ -128,13 +143,24 @@ export async function createApp(runtime) {
     });
   }
 
-  function roomList(params) {
+  async function roomList(params) {
     const gameType = decode.num(params.gameType, 0);
     const selected = rooms.filterRooms(runtime.roomStore.list(), params);
+    // The hall lists configurations; occupancy comes from the live pool.
+    // No room is created just because somebody opens the lobby.
+    const poolRooms = selected.some((row) => [19, 25].includes(Number(row.room_type)))
+      && params.userId && (params.token || params.userToken)
+      ? await roomPool.requestRoomPool(runtime, params, "list") : [];
     return [{
       gameType,
       roomClassifications: [],
-      roomInfoData: selected.map((row) => toClient.toClientRoom(row)),
+      roomInfoData: selected.map((row) => {
+        const result = toClient.toClientRoom(row);
+        const live = poolRooms.filter((table) => table.gameRoomConfigId === Number(row.game_room_config_id)
+          && table.roomType === Number(row.room_type));
+        if ([19, 25].includes(Number(row.room_type))) result.totalPeople = live.reduce((sum, table) => sum + table.totalPeople, 0);
+        return result;
+      }),
       maintenanceInfoMsg: "{\"endDate\":\"\",\"isWhite\":false,\"itemList\":[]}",
       privateRoomOpen: false,
       hundredDomain: runtime.config.hundred_server || null,
@@ -143,17 +169,27 @@ export async function createApp(runtime) {
     }];
   }
 
-  function enterRoom(params, req) {
+  async function enterRoom(params, req) {
     const row = rooms.findRoom(runtime.roomStore.list(), params);
     if (!row) {
       return [];
     }
     const domain = web.publicWsHost(req, runtime.config, runtime.env);
-    return rooms.enterRoomPayload(row, params, {
+    const payload = rooms.enterRoomPayload(row, params, {
       ...runtime.config,
       game_server: domain,
       hundred_server: domain,
     });
+    if ([19, 25].includes(Number(row.room_type))) {
+      const allocation = await roomPool.requestRoomPool(runtime, params, "allocate", {
+        gameRoomConfigId: Number(row.game_room_config_id), roomType: Number(row.room_type),
+        roomIndex: params.roomIndex ?? row.room_index ?? 0,
+      });
+      return { ...payload, roomId: allocation.roomId, roomType: allocation.roomType,
+        roomIndex: allocation.roomIndex, gameRoomConfigId: allocation.gameRoomConfigId,
+        playMode: allocation.playMode };
+    }
+    return payload;
   }
 
   async function wallet(userId) {

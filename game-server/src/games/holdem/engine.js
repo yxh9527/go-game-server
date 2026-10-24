@@ -1,13 +1,16 @@
-import { PUSH } from "../../messages.js";
 import { debit } from "../../wallet/index.js";
-import { memberListSeats, publicObserver, publicSeat, userInfoOf } from "../../core/member.js";
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
 import { rel } from "../../rel.js";
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const { memberListSeats, publicObserver, publicSeat, userInfoOf } = await rel(import.meta.url, "../../core/member.js", version);
+const { PUSH } = await rel(import.meta.url, "../../messages.js", version);
 const robot = await rel(import.meta.url, "./robot.js", version);
+const features = await rel(import.meta.url, "../../core/room-features.js", version);
+const fair = await rel(import.meta.url, "../../core/fair-code.js", version);
+const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", version);
 // Compatibility for existing callers; all robot behavior lives in robot.js.
 export const { BOT_UID, ensureBots, ensureBot, botChoose } = robot;
 
@@ -170,7 +173,7 @@ function historyPlayerForClient(player, index, forceShowCard) {
 export function createTexasTable(roomId, roomType, cfg) {
   const smallBlind = num(cfg, "small_blind", gameConfig.defaultSmallBlind);
   const bigBlind = num(cfg, "big_blind", gameConfig.defaultBigBlind);
-  return {
+  const table = lifecycle.initializeLifetime({
     gameId: gameConfig.id,
     kind: gameConfig.kind,
     roomId: Number(roomId),
@@ -193,11 +196,14 @@ export function createTexasTable(roomId, roomType, cfg) {
     phase: "idle",
     startAt: 0,
     hand: null,
-  };
+  });
+  features.initializeRoomStats(table);
+  return table;
 }
 
 function dzpkParams(table) {
   return {
+    gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
     smallBlind: table.smallBlind,
     bigBlind: table.bigBlind,
     initialBet: table.bigBlind,
@@ -242,11 +248,14 @@ export function texasRoomInfo(table) {
     roomId: table.roomId,
     roomType: table.roomType,
     currentInning: table.currentInning,
+    gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
+    leftTime: lifecycle.remainingSeconds(table),
     maxPeople: 7,
     roomState: table.phase === "playing" ? 2 : 1,
     memberList: memberListSeats(table.members, 7),
     OBmemberList: (table.observers || []).map((item) => publicObserver(item)),
     dzpk: {
+      gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
       gameName: gameConfig.name,
       smallBlind: table.smallBlind,
       bigBlind: table.bigBlind,
@@ -295,7 +304,9 @@ export function onTexasJoin(send, table, session, body) {
     send(PUSH.JOIN_ROOM, publicMember(table.members[table.members.length - 1]));
     ensureBot(table);
   }
-  send(PUSH.DZPK_PUSH_WATCHGAME, table.observers);
+  const report = features.ranking(table);
+  send(PUSH.DZPK_PUSH_RANKINGLIST, report);
+  send(PUSH.DZPK_PUSH_WATCHGAME, report.obMemberList);
   send(PUSH.ROOM_TYPE_RESULT, {
     roomId: table.roomId,
     roomType: table.roomType,
@@ -307,6 +318,7 @@ export function onTexasJoin(send, table, session, body) {
 export function onTexasLoginRoom(send, table, session) {
   send(PUSH.DZPK_PUSH_GAME_SETTING, { result: true, type: 0 });
   send(PUSH.ROOM_INFO, texasRoomInfo(table));
+  send(PUSH.DZPK_PUSH_RANKINGLIST, features.ranking(table));
   if (table.phase === "playing" && table.hand) {
     send(PUSH.BRNN_GAME_STATE_PUSH, table.hand.street);
     pushPlayingSnapshot(send, table, session);
@@ -589,6 +601,7 @@ export function onTexasAction(io, table, session, body) {
 }
 
 export function beginHand(io, table) {
+  if (lifecycle.isExpired(table)) return;
   const players = seated(table);
   if (players.length < 2) {
     table.phase = "idle";
@@ -624,6 +637,8 @@ export function beginHand(io, table) {
   table.hand = {
     deck,
     deckPos: 0,
+    // Existing hands survive hot reload and retain their original deal layout.
+    burnBeforeBoard: true,
     board: [],
     street: "BET_PERFLOP",
     pot: 0,
@@ -640,6 +655,8 @@ export function beginHand(io, table) {
     replayActions: [],
     replayEvents: [],
   };
+  features.beginHandStats(table, players);
+  fair.beginFairHand(io, table, players, 2);
   io.broadcast(PUSH.NIUNIU_CURRENT_INNING_BEGIN_INFO, {
     currentInning: table.currentInning,
     uidList: players.map((p) => p.uid),
@@ -895,6 +912,7 @@ function nextStreet(io, table) {
     return;
   }
   if (hand.street === "BET_PERFLOP") {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos], hand.deck[hand.deckPos + 1], hand.deck[hand.deckPos + 2]);
     hand.deckPos += 3;
     hand.street = "BET_FLOP";
@@ -903,6 +921,7 @@ function nextStreet(io, table) {
     io.broadcast(PUSH.DZPK_DEAL_FAN_PUSH, { cardList: hand.board.slice(0, 3) });
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FLOP");
   } else if (hand.street === "BET_FLOP") {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     hand.street = "BET_TURN";
@@ -911,6 +930,7 @@ function nextStreet(io, table) {
     io.broadcast(PUSH.DZPK_DEAL_ZHUANG_PUSH, { cardList: [hand.board[3]] });
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_TURN");
   } else if (hand.street === "BET_TURN") {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     hand.street = "BET_RIVER";
@@ -934,6 +954,7 @@ function nextStreet(io, table) {
 function dealRemaining(table) {
   const hand = table.hand;
   if (hand.board.length < 3) {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     while (hand.board.length < 3) {
       hand.board.push(hand.deck[hand.deckPos]);
       hand.deckPos += 1;
@@ -941,11 +962,13 @@ function dealRemaining(table) {
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_FLOP);
   }
   if (hand.board.length < 4) {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_TURN);
   }
   if (hand.board.length < 5) {
+    if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_RIVER);
@@ -1141,7 +1164,10 @@ function settle(io, table, contenders) {
     })),
   });
   io.broadcast(PUSH.DZPK_PLAYER_DIPAI_PUSH, active.map((m) => ({ uid: m.uid, cardList: m.hole, pos: m.pos })));
+  features.finishHandStats(table, results);
+  fair.finishFairHand(table, results);
   io.broadcast(PUSH.DZPK_INNING_RESULT_PUSH, results);
+  features.pushRanking({ table, io });
   // ROOM_INFO is wired to the client's room-login handler, which stops all
   // running actions and resets the table. The result payload already carries
   // each player's new point, so do not interrupt the settlement animation.
@@ -1176,11 +1202,6 @@ export function onTexasStandup(io, table, session) {
   foldIfPlaying(io, table, uid);
   const cash = member.point || 0;
   table.members = table.members.filter((m) => m.uid !== uid);
-  if (!table.members.some((m) => !m.bot)) {
-    table.members = table.members.filter((m) => !m.bot);
-    table.phase = "idle";
-    table.hand = null;
-  }
   io.broadcast(PUSH.USER_STANDUP_ROOM, uid);
   io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
   io.broadcast(PUSH.ROOM_INFO, texasRoomInfo(table));

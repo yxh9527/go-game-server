@@ -23,7 +23,7 @@ export function ensureBots(table, count, rng = Math.random) {
     table.botTarget = clamp(Math.floor(target), 0, maxPeople - 1);
   }
   const usedPositions = new Set(table.members.map((member) => member.pos));
-  const usedIds = new Set(table.members.map((member) => member.uid));
+  const usedIds = new Set([...table.members, ...(table.observers || [])].map((member) => member.uid));
   const point = Math.max(finite(table.carryMin), finite(table.bigBlind, gameConfig.defaultBigBlind) * gameConfig.buyInBb);
   let countNow = table.members.filter((member) => member.bot).length;
   while (countNow < table.botTarget && table.members.length < maxPeople) {

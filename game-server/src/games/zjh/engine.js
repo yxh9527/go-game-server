@@ -1,4 +1,3 @@
-import { PUSH } from "../../messages.js";
 import { makeDeck, shuffle } from "../holdem/cards.js";
 import gameConfig from "./config.js";
 import { compare3, evaluate3 } from "./hand.js";
@@ -6,7 +5,11 @@ import { ZJH_OP, ZJH_PUSH } from "./messages.js";
 import { rel } from "../../rel.js";
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const { PUSH } = await rel(import.meta.url, "../../messages.js", version);
 const robot = await rel(import.meta.url, "./robot.js", version);
+const features = await rel(import.meta.url, "../../core/room-features.js", version);
+const fair = await rel(import.meta.url, "../../core/fair-code.js", version);
+const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", version);
 export const { ensureBot, botChoose } = robot;
 
 export function zjhConf(table) {
@@ -33,7 +36,7 @@ export function zjhConf(table) {
       criticalAnte: 0,
       carryMin: table.carryMin,
       betTime: table.betTime,
-      gameTime: 28800,
+      gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
     },
     playMode: table.playMode || 3,
     gameRoomConfigId: Number(table.cfg?.game_room_config_id || 2501),
@@ -44,6 +47,7 @@ export function zjhConf(table) {
 export function extraRoomInfo(table) {
   return {
     ctjh: {
+      gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
       gameName: gameConfig.name,
       ante: table.ante,
       carryMin: table.carryMin,
@@ -66,6 +70,7 @@ function currentActor(table) {
 }
 
 export function beginHand(io, table) {
+  if (lifecycle.isExpired(table)) return;
   const players = seated(table);
   if (players.length < 2) {
     table.phase = "idle";
@@ -99,6 +104,8 @@ export function beginHand(io, table) {
     deadline: Date.now() + table.betTime * 1000,
     bankerId: dealer.uid,
   };
+  features.beginHandStats(table, players);
+  fair.beginFairHand(io, table, players, 3);
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FRONT");
   for (const p of players) {
     const pay = Math.min(p.point, table.ante);
@@ -366,7 +373,10 @@ function settle(io, table) {
       pos: m.pos,
     };
   });
+  features.finishHandStats(table, results);
+  fair.finishFairHand(table, results);
   io.broadcast(ZJH_PUSH.INNING_RESULT, results);
+  features.pushRanking({ table, io });
   table.hand = null;
   table.phase = seated(table).length >= 2 ? "starting" : "idle";
   table.startAt = Date.now() + gameConfig.nextHandDelayMs;

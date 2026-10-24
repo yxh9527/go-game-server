@@ -43,6 +43,13 @@ export function userInfoOf(member) {
   };
 }
 
+export function carryLeftTime(member, now = Date.now()) {
+  if (Number.isFinite(member.carryDeadline) && member.carryDeadline > 0) {
+    return Math.max(0, member.carryDeadline - now);
+  }
+  return Math.max(0, Number(member.carryLeftTime) || 0);
+}
+
 export function publicSeat(member) {
   const userInfo = userInfoOf(member);
   return {
@@ -57,7 +64,7 @@ export function publicSeat(member) {
     banker: Boolean(member.dealer),
     tuoGuanState: Boolean(member.tuoGuanState),
     tuoGuanLeftTime: member.tuoGuanLeftTime || 0,
-    carryLeftTime: member.carryLeftTime || 0,
+    carryLeftTime: carryLeftTime(member),
     lastOperation: Number(member.lastOperation) || 0,
     xiaZhuData: member.totalBet || 0,
   };
@@ -69,6 +76,10 @@ export function publicObserver(member) {
     uid: member.uid,
     name: userInfo.name,
     userInfo,
+    userName: userInfo.name,
+    userIcon: userInfo.icon,
+    winLostScore: Number(member.winLostScore) || 0,
+    totalHands: Number(member.totalHands) || 0,
     point: Number(member.point) || 0,
   };
 }

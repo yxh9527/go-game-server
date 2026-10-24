@@ -1,10 +1,10 @@
-import { SeatGame } from "../../core/SeatGame.js";
 import { SEND, PUSH } from "../../messages.js";
 import config from "./config.js";
 import { rel } from "../../rel.js";
 import { ZJH_SEND } from "./messages.js";
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
 
 export class ZjhGame extends SeatGame {
@@ -35,20 +35,8 @@ export class ZjhGame extends SeatGame {
     return engine.extraRoomInfo(table);
   }
 
-  buyIn(table, session) {
-    return Math.min(
-      Math.max(Number(session.wallet) || 0, 0),
-      Math.max(table.carryMin, table.ante * this.config.buyInMultiple),
-    );
-  }
-
-  afterSit(table) {
-    engine.ensureBot(table);
-  }
-
-  onJoin(ctx) {
-    super.onJoin(ctx);
-    ctx.send(PUSH.DZPK_PUSH_WATCHGAME, ctx.table.observers);
+  defaultBuyIn(table) {
+    return Math.max(table.carryMin, table.ante * this.config.buyInMultiple);
   }
 
   onLoginRoom(ctx) {
@@ -57,6 +45,7 @@ export class ZjhGame extends SeatGame {
   }
 
   onMessage(ctx, msgid, payload) {
+    if (super.onMessage(ctx, msgid, payload)) return true;
     if (msgid === SEND.LOGIN_ROOM) {
       this.onLoginRoom(ctx);
       return true;

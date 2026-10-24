@@ -581,7 +581,10 @@ test("ensureBots seats three to six bots and leaves a chair", () => {
   assert.ok(Number.isFinite(bots[0].point));
 });
 
-test("observer-only holdem room runs autonomous bot hands without seating or charging the observer", async () => {
+test("observer-only holdem room runs autonomous bot hands without seating or charging the observer", async (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(Math, "random", () => 0.5);
   const { HoldemGame } = await import("./HoldemGame.js");
   const game = new HoldemGame();
   const table = game.createTable(700001, 19, { small_blind: 10, big_blind: 20, carry_min: 500 });
@@ -609,7 +612,11 @@ test("observer-only holdem room runs autonomous bot hands without seating or cha
   };
 
   game.onJoin(ctx);
-
+  assert.equal(table.members.length, 0);
+  table.cfg.robot_behavior = { checkMinMs: 1000, checkMaxMs: 1000, carryMinMs: 1000,
+    carryMaxMs: 1000, joinProbability: 1, leaveProbability: 0 };
+  game.tick(ctx);
+  for (let i = 0; i < 3; i += 1) { now += 1000; game.tick(ctx); }
   assert.equal(table.observers.length, 1);
   assert.ok(table.members.length >= 3);
   assert.ok(table.members.every((member) => member.bot));
@@ -627,11 +634,15 @@ test("observer-only holdem room runs autonomous bot hands without seating or cha
   game.onLeave(ctx);
   assert.equal(table.observers.length, 0);
   assert.equal(table.phase, "playing");
-  assert.equal(table.retireWhenHandEnds, true);
+  assert.notEqual(table.retireWhenHandEnds, true);
+  assert.equal(table.expiresAt - table.createdAt, 8 * 60 * 60 * 1000);
   assert.notEqual(table.retired, true);
 });
 
-test("holdem fills remaining chairs with bots after explicit human sit", async () => {
+test("holdem schedules bot arrivals independently of explicit human sit", async (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(Math, "random", () => 0.5);
   const { HoldemGame } = await import("./HoldemGame.js");
   const game = new HoldemGame();
   const table = game.createTable(700004, 19, { small_blind: 10, big_blind: 20, carry_min: 500 });
@@ -641,12 +652,23 @@ test("holdem fills remaining chairs with bots after explicit human sit", async (
   };
   game.onJoin({ ...ctx, body: { isOb: true } });
   game.onSitDown(ctx);
-  assert.ok(table.members.some((member) => member.bot));
+  assert.equal(table.members.some((member) => member.bot), false);
   assert.ok(table.members.some((member) => !member.bot && member.point === 0));
+  assert.equal(table.phase, "idle");
+  table.cfg.robot_behavior = { checkMinMs: 1000, checkMaxMs: 1000, carryMinMs: 1000,
+    carryMaxMs: 1000, joinProbability: 1, leaveProbability: 0 };
+  game.tick(ctx);
+  now += 1000;
+  game.tick(ctx);
+  assert.equal(table.members.filter((member) => member.bot).length, 1);
+  for (let i = 0; i < 2; i += 1) { now += 1000; game.tick(ctx); }
   assert.equal(table.phase, "starting");
 });
 
-test("cash table bots still start when human has no funds to sit", async () => {
+test("cash table bots still start when human has no funds to sit", async (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(Math, "random", () => 0.5);
   const { HoldemGame } = await import("./HoldemGame.js");
   const game = new HoldemGame();
   const table = game.createTable(700002, 19, { small_blind: 10, big_blind: 20, carry_min: 500 });
@@ -660,7 +682,10 @@ test("cash table bots still start when human has no funds to sit", async () => {
   };
 
   game.onJoin(ctx);
-
+  table.cfg.robot_behavior = { checkMinMs: 1000, checkMaxMs: 1000, carryMinMs: 1000,
+    carryMaxMs: 1000, joinProbability: 1, leaveProbability: 0 };
+  game.tick(ctx);
+  for (let i = 0; i < 3; i += 1) { now += 1000; game.tick(ctx); }
   assert.ok(table.members.some((member) => member.bot));
   assert.equal(table.phase, "starting");
 });

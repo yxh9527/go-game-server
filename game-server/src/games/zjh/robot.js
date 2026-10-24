@@ -13,7 +13,7 @@ export function ensureBot(table) {
   const pos = Array.from({ length: gameConfig.maxPeople }, (_, index) => index).find((index) => !used.has(index));
   if (pos == null) return;
   let uid = BOT_UID;
-  while (table.members.some((member) => member.uid === uid)) uid += 1;
+  while ([...table.members, ...(table.observers || [])].some((member) => member.uid === uid)) uid += 1;
   table.members.push({
     uid, name: BOT_NAME,
     point: Math.max(finite(table.carryMin), finite(table.ante, gameConfig.defaultAnte) * gameConfig.buyInMultiple),
