@@ -10,7 +10,7 @@ const row = { game_type: 19 };
 const room = { carryMin: 500, roomType: 19, totalPeople: 0 };
 
 test("all daily segments follow Shanghai time and meet continuously at midnight", async () => {
-  const population = await createRoomPopulation({ randomAmplitude: 0, minPeople: 0, maxPeople: 100000 });
+  const population = await createRoomPopulation({ randomAmplitude: 0, minPeople: 0, maxPeople: 100 });
   const counts = Array.from({ length: 25 }, (_, hour) => population.decorate(room, row, at(hour)).totalPeople);
   assert.equal(counts[0], counts[24]);
   for (const [start, end, direction] of [[0, 3, -1], [6, 12, 1], [12, 14, -1], [14, 24, 1]]) {
@@ -20,7 +20,7 @@ test("all daily segments follow Shanghai time and meet continuously at midnight"
   }
   assert.equal(counts[3], Math.min(...counts));
   assert.deepEqual(counts.slice(3, 7), Array(4).fill(counts[3]));
-  assert.ok(Math.abs(population.decorate(room, row, at(24) - 5000).totalPeople - counts[24]) < 20);
+  assert.ok(Math.abs(population.decorate(room, row, at(24) - 5000).totalPeople - counts[24]) <= 1);
   const utc = await createRoomPopulation({ randomAmplitude: 0, timeZone: "UTC" });
   const shanghai = await createRoomPopulation({ randomAmplitude: 0 });
   assert.equal(utc.decorate(room, row, at(12) + 8 * 3600_000).totalPeople,
@@ -34,7 +34,7 @@ test("entry amount reduces population throughout the day for every game type", a
       const counts = [100, 500, 5000, 30000, 100000000].map(carryMin =>
         population.decorate({ ...room, carryMin }, { game_type: gameType }, at(hour)).totalPeople);
       assert.ok(counts.every(Number.isSafeInteger));
-      assert.ok(counts.every(count => count >= 8 && count <= 1200));
+      assert.ok(counts.every(count => count >= 8 && count <= 100));
       assert.ok(counts.every((count, i) => i === 0 || count < counts[i - 1]), JSON.stringify(counts));
     }
   }
@@ -68,14 +68,14 @@ test("random variation is smooth, request-independent and survives hot reload", 
     assert.equal(next.decorate(room, row, time).totalPeople, count);
     for (let refresh = 0; refresh < 10; refresh++) assert.equal(first.decorate(room, row, time).totalPeople, count);
   }
-  assert.ok(new Set(counts).size > 4);
+  assert.ok(new Set(counts).size > 1);
   assert.ok(counts.every((count, i) => !i || Math.abs(count - counts[i - 1]) <= 3));
   const alternate = await createRoomPopulation({ seed: "other" });
   assert.notDeepEqual(counts, counts.map((_, i) => alternate.decorate(room, row, start + i * 5000).totalPeople));
 });
 
 test("range, entry decay and each time-period amplitude are configurable", async () => {
-  const baseConfig = { randomAmplitude: 0, minPeople: 0, maxPeople: 10000 };
+  const baseConfig = { randomAmplitude: 0, minPeople: 0, maxPeople: 100 };
   const base = await createRoomPopulation(baseConfig);
   const lowerPeak = await createRoomPopulation({ ...baseConfig, activity: { noon: 0.50 } });
   assert.ok(lowerPeak.decorate(room, row, at(12)).totalPeople < base.decorate(room, row, at(12)).totalPeople);
@@ -107,7 +107,21 @@ test("invalid settings are normalized without NaN or inverted time trends", asyn
   for (let hour = 0; hour < 24; hour++) {
     const count = population.decorate(room, row, at(hour)).totalPeople;
     assert.ok(Number.isSafeInteger(count));
-    assert.ok(count >= 100 && count <= 1200);
+    assert.equal(count, 100);
+  }
+});
+
+test("each room stays within 100 even at peak activity with noise and oversized overrides", async () => {
+  for (const settings of [{}, { maxPeople: 1200, randomAmplitude: 0.5 }, { minPeople: 1000, maxPeople: 10000 }]) {
+    const population = await createRoomPopulation(settings);
+    assert.equal(population.settings.maxPeople, 100);
+    assert.ok(population.settings.minPeople <= 100);
+    for (const gameType of [19, 21, 1000, 1002, 1004, 99999]) {
+      for (let minute = 0; minute < 1440; minute += 5) {
+        const count = population.decorate({ carryMin: 0 }, { game_type: gameType }, at(minute / 60)).totalPeople;
+        assert.ok(Number.isSafeInteger(count) && count >= 0 && count <= 100);
+      }
+    }
   }
 });
 
@@ -153,14 +167,20 @@ test("op 38 applies common counts to every game without waking or allocating roo
   for (const type of gameTypes) {
     const list = await query(type);
     assert.equal(list.length, 3);
-    assert.ok(list.every(item => Number.isSafeInteger(item.totalPeople) && item.totalPeople > 0));
+    assert.ok(list.every(item => Number.isSafeInteger(item.totalPeople) && item.totalPeople > 0 && item.totalPeople <= 100));
     assert.ok(list[0].totalPeople > list[1].totalPeople && list[1].totalPeople > list[2].totalPeople);
     assert.ok(list.every(item => item.unchangedField === "ok"));
   }
   assert.equal(gameServerRequests, 0, "list never invokes the live room pool");
   assert.equal(JSON.stringify(rows), before);
-  runtime.config.room_population = { minPeople: 123, maxPeople: 123 };
+  runtime.config.room_population = { minPeople: 42, maxPeople: 42 };
   runtime.hotVersion = "population-http-hot";
   app = await createApp(runtime);
-  assert.ok((await query(54321)).every(item => item.totalPeople === 123), "new app picks up common configuration");
+  assert.ok((await query(54321)).every(item => item.totalPeople === 42), "new app picks up common configuration");
+  runtime.config.room_population = { minPeople: 123, maxPeople: 123 };
+  runtime.hotVersion = "population-http-cap";
+  app = await createApp(runtime);
+  for (const type of gameTypes) {
+    assert.ok((await query(type)).every(item => item.totalPeople === 100), "overrides cannot exceed the common ceiling");
+  }
 });

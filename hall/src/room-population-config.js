@@ -5,7 +5,7 @@ export const roomPopulationConfig = {
   timeZone: "Asia/Shanghai",
   refreshSeconds: 5,
   minPeople: 8,
-  maxPeople: 1200,
+  maxPeople: 100,
   entryReference: 500,
   entryDecay: 0.45,
   randomAmplitude: 0.035,

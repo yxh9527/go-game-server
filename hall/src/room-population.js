@@ -1,6 +1,7 @@
 import { rel } from "./rel.js";
 
-const MAX_PEOPLE = 10_000_000;
+// Common per-room display ceiling, including configuration overrides.
+const MAX_PEOPLE = 100;
 const ENTRY_FIELDS = [
   ["carryMin", "carry_min"],
   ["hundredMinBet", "hundred_min_bet"],
