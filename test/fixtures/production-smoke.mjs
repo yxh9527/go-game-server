@@ -37,12 +37,15 @@ const web = await fromBundle("hall/src/web.js");
 assert.equal(web.HALL_DEV_PATCH, "");
 const { createMatchStore, createRoomStore } = await fromBundle("hall/src/store.js");
 const { createApp } = await fromBundle("hall/src/create-app.js");
+const roomStore = createRoomStore();
+roomStore.replace([{ game_type: 1004, room_type: 61, game_room_config_id: 6101, carry_min: 500, state: 1 }]);
 const hall = await createApp({ env: "prod", hotVersion: "production-smoke", config: {},
-  matchStore: createMatchStore(), roomStore: createRoomStore(), log: console });
+  matchStore: createMatchStore(), roomStore, log: console });
 const { createClientApp } = await fromBundle("client-web/src/app.js");
 const match = await fromBundle("match/src/create-app.js");
 await match.createApp({ env: "prod", hotVersion: "production-smoke", config: {}, store: {}, bus: {} });
-for (const [app, url] of [[hall, "/21/0?userId=1&userToken=smoke&openId=1&v=2.0.1279"], [createClientApp(), "/2.0.1279/"]]) {
+for (const [app, url] of [[hall, "/21/0?userId=1&userToken=smoke&openId=1&v=2.0.1279"],
+  [hall, "/api/internal/v1/do?op=38&gameType=1004"], [createClientApp(), "/2.0.1279/"]]) {
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -56,6 +59,12 @@ for (const [app, url] of [[hall, "/21/0?userId=1&userToken=smoke&openId=1&v=2.0.
     });
     assert.equal(response.status, 200, "isolated smoke request must not redirect to a running dev service");
     assert.doesNotMatch(response.body, /GOGAME-DEV|GOGAME-HALL|skip hundred cleanup/);
+    if (url.includes("op=38")) {
+      const body = JSON.parse(response.body);
+      assert.equal(body.msgCode, 200);
+      const count = body.data[0].roomInfoData[0].totalPeople;
+      assert.ok(Number.isSafeInteger(count) && count > 0, "shared population is available without dev cache");
+    }
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

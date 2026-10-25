@@ -9,6 +9,8 @@ export async function createApp(runtime) {
   const web = await rel(import.meta.url, "./web.js", v);
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
+  const populationMod = await rel(import.meta.url, "./room-population.js", v);
+  const population = await populationMod.createRoomPopulation(runtime.config.room_population, v);
   const rooms = roomMod.createRoomLogic(decode);
   const localRecords = runtime.env === "dev"
     ? await rel(import.meta.url, "../../cache/hall/record-detail.js", v)
@@ -134,20 +136,23 @@ export async function createApp(runtime) {
   async function roomList(params) {
     const gameType = decode.num(params.gameType, 0);
     const selected = rooms.filterRooms(runtime.roomStore.list(), params);
-    // The hall lists configurations; occupancy comes from the live pool.
-    // No room is created just because somebody opens the lobby.
-    const poolRooms = selected.some((row) => [19, 25].includes(Number(row.room_type)))
+    // Display population is shared by all games. Real occupancy is consulted
+    // only when disabled; listing never creates or wakes a game room.
+    const poolRooms = !population.enabled && selected.some((row) => [19, 25].includes(Number(row.room_type)))
       && params.userId && (params.token || params.userToken)
       ? await roomPool.requestRoomPool(runtime, params, "list") : [];
+    const now = Date.now();
     return [{
       gameType,
       roomClassifications: [],
       roomInfoData: selected.map((row) => {
         const result = toClient.toClientRoom(row);
-        const live = poolRooms.filter((table) => table.gameRoomConfigId === Number(row.game_room_config_id)
-          && table.roomType === Number(row.room_type));
-        if ([19, 25].includes(Number(row.room_type))) result.totalPeople = live.reduce((sum, table) => sum + table.totalPeople, 0);
-        return result;
+        if (!population.enabled && [19, 25].includes(Number(row.room_type))) {
+          const live = poolRooms.filter((table) => table.gameRoomConfigId === Number(row.game_room_config_id)
+            && table.roomType === Number(row.room_type));
+          result.totalPeople = live.reduce((sum, table) => sum + table.totalPeople, 0);
+        }
+        return population.decorate(result, row, now);
       }),
       maintenanceInfoMsg: "{\"endDate\":\"\",\"isWhite\":false,\"itemList\":[]}",
       privateRoomOpen: false,

@@ -33,7 +33,7 @@ test("hall allocates live empty reserves through authenticated game-server queri
   });
   await new Promise((resolve) => gameServer.listen(0, "127.0.0.1", resolve));
   const app = await createApp({ env: "dev", hotVersion: runtime.hotVersion,
-    config: { game_server: "127.0.0.1:" + gameServer.address().port },
+    config: { game_server: "127.0.0.1:" + gameServer.address().port, room_population: { enabled: false } },
     log: runtime.log, matchStore: { listMatches: () => [] }, roomStore: { list: () => rows }, rpc: { common: {}, lobby: {} },
   });
   const hallServer = http.createServer(app);
