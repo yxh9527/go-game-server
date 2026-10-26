@@ -71,6 +71,7 @@ export async function createRoomPopulation(overrides = {}, version = 0) {
     maxPeople: Math.round(bounded(input.maxPeople, defaults.maxPeople, minPeople, MAX_PEOPLE)),
     entryReference: bounded(input.entryReference, defaults.entryReference, 1, Number.MAX_SAFE_INTEGER),
     entryDecay: bounded(input.entryDecay, defaults.entryDecay, 0.01, 4),
+    minimumActivityShare: bounded(input.minimumActivityShare, defaults.minimumActivityShare, 0, 1),
     randomAmplitude: bounded(input.randomAmplitude, defaults.randomAmplitude, 0, 0.5),
     randomPeriodSeconds: bounded(input.randomPeriodSeconds, defaults.randomPeriodSeconds, refreshSeconds, 86400),
     seed: typeof input.seed === "string" ? input.seed.slice(0, 128) : defaults.seed,
@@ -105,7 +106,8 @@ export async function createRoomPopulation(overrides = {}, version = 0) {
     const start = randomUnit(key, bucket);
     const random = start + (randomUnit(key, bucket + 1) - start) * smooth;
     const noise = 1 + (random * 2 - 1) * settings.randomAmplitude;
-    const entryFactor = Math.pow(1 + roomEntryAmount(room, row) / settings.entryReference, -settings.entryDecay);
+    const entryDecay = Math.pow(1 + roomEntryAmount(room, row) / settings.entryReference, -settings.entryDecay);
+    const entryFactor = settings.minimumActivityShare + (1 - settings.minimumActivityShare) * entryDecay;
     const count = settings.minPeople + (settings.maxPeople - settings.minPeople)
       * entryFactor * activityAt(time) * noise;
     return { ...room, totalPeople: Math.max(settings.minPeople, Math.min(settings.maxPeople, Math.round(count))) };

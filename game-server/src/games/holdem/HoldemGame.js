@@ -1,11 +1,10 @@
-import { SEND, PUSH } from "../../messages.js";
 import { rel } from "../../rel.js";
 import config from "./config.js";
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const { SEND, PUSH } = await rel(import.meta.url, "../../messages.js", v);
 const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
-const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", v);
 
 export class HoldemGame extends SeatGame {
   constructor() {
@@ -22,7 +21,7 @@ export class HoldemGame extends SeatGame {
       bigBlind: n("big_blind", this.config.defaultBigBlind),
       carryMin: n("carry_min", this.config.defaultCarryMin),
       forceShowCard: Number(roomRow?.force_show_card) === 1,
-      playMode: n("play_mode", 0),
+      playMode: engine.holdemPlayMode(roomRow),
       roomClassification: 2,
       betTime: this.config.betTime,
     };
@@ -34,18 +33,8 @@ export class HoldemGame extends SeatGame {
 
   extraRoomInfo(table) {
     return {
-      dzpk: {
-        gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
-        gameName: this.config.name,
-        smallBlind: table.smallBlind,
-        bigBlind: table.bigBlind,
-        initialBet: table.bigBlind,
-        carryMin: table.carryMin,
-        carryMax: -1,
-        betTime: table.betTime,
-        forceShowCard: table.forceShowCard,
-        openInsurance: this.config.openInsurance,
-      },
+      playMode: table.playMode,
+      dzpk: engine.dzpkParams(table),
     };
   }
 
@@ -72,6 +61,14 @@ export class HoldemGame extends SeatGame {
     }
     if (msgid === SEND.DZPK_SEND_ACTION) {
       engine.onTexasAction(ctx.io, ctx.table, ctx.session, payload || {});
+      return true;
+    }
+    if (msgid === SEND.DZPK_HAND_CARD_REQ) {
+      engine.onHandCardReq(ctx.send, ctx.table, ctx.session);
+      return true;
+    }
+    if (msgid === SEND.DZPK_SHOW_CARD_REQ) {
+      engine.onShowCardReq(ctx.send, ctx.table, ctx.session, payload || {});
       return true;
     }
     if (msgid === SEND.GTO_REQ) {

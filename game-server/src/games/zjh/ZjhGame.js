@@ -1,9 +1,9 @@
-import { SEND, PUSH } from "../../messages.js";
-import config from "./config.js";
 import { rel } from "../../rel.js";
-import { ZJH_SEND } from "./messages.js";
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
+const { SEND, PUSH } = await rel(import.meta.url, "../../messages.js", v);
+const { ZJH_SEND } = await rel(import.meta.url, "./messages.js", v);
+const { default: config } = await rel(import.meta.url, "./config.js", v);
 const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
 
@@ -13,17 +13,22 @@ export class ZjhGame extends SeatGame {
   }
 
   extraTableFields(roomRow) {
+    let payload = {};
+    try { payload = JSON.parse(roomRow?.payload || "{}"); } catch {}
+    const params = { ...payload, ...(payload.ctjhParams || {}), ...(roomRow || {}) };
     const n = (key, fallback) => {
-      const value = Number(roomRow?.[key]);
+      const value = Number(params[key]);
       return Number.isFinite(value) && value > 0 ? value : fallback;
     };
     return {
-      ante: n("ante", this.config.defaultAnte) || n("small_blind", this.config.defaultAnte) || this.config.defaultAnte,
+      ante: n("ante", this.config.defaultAnte),
       carryMin: n("carry_min", this.config.defaultCarryMin),
       forceShowCard: roomRow?.force_show_card === undefined ? this.config.forceShowCard : Number(roomRow.force_show_card) === 1,
       playMode: n("play_mode", 3),
-      betTime: this.config.betTime,
-      maxRounds: this.config.maxRounds,
+      betTime: n("bet_time", n("betTime", this.config.betTime)),
+      maxRounds: Math.floor(n("max_rounds", n("maxRounds", this.config.maxRounds))),
+      roomClassification: n("room_classification", n("roomClassification", 2)),
+      history: [],
     };
   }
 
@@ -44,6 +49,10 @@ export class ZjhGame extends SeatGame {
     super.onLoginRoom(ctx);
   }
 
+  onPlayingSnapshot(ctx) {
+    engine.pushPlayingSnapshot(ctx.send, ctx.table, ctx.session);
+  }
+
   onMessage(ctx, msgid, payload) {
     if (super.onMessage(ctx, msgid, payload)) return true;
     if (msgid === SEND.LOGIN_ROOM) {
@@ -52,6 +61,19 @@ export class ZjhGame extends SeatGame {
     }
     if (msgid === ZJH_SEND.ACTION) {
       engine.onZjhAction(ctx.io, ctx.table, ctx.session, payload || {});
+      return true;
+    }
+    if (msgid === ZJH_SEND.HAND_CARD) {
+      engine.onHandCardReq(ctx.send, ctx.table, ctx.session);
+      return true;
+    }
+    if (msgid === ZJH_SEND.SHOW_CARD) {
+      engine.onShowCardReq(ctx.send, ctx.table, ctx.session, payload || {});
+      return true;
+    }
+    if (msgid === ZJH_SEND.GAME_BACK) {
+      ctx.send(3746, engine.historyPayload(ctx.runtime?.env === "dev" ? ctx.table
+        : { ...ctx.table, history: [] }, payload || {}, ctx.session.userId));
       return true;
     }
     return false;

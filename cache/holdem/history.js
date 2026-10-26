@@ -40,7 +40,8 @@ function historyPlayerForClient(player, index, forceShowCard) {
   const score = Number(player?.score) || 0;
   const canShowCards = historyPlayerCanShowCards(player, forceShowCard);
   const holeCards = historyPlayerHoleCards(player);
-  const visibleHoleCards = canShowCards && holeCards.length === 2 ? holeCards : [-1, -1];
+  const visibleHoleCards = holeCards.length === 2 && (canShowCards || Array.isArray(player?.showCards))
+    ? holeCards.map((card) => Number.isInteger(card) && card >= 0 && card < 52 ? card : -1) : [-1, -1];
   const fullCards = Array.isArray(player?.cards) ? player.cards.slice() : [];
   const commonPoker = Array.isArray(player?.commonPoker) && player.commonPoker.length
     ? player.commonPoker.slice()
@@ -100,8 +101,8 @@ function historyPlayerForClient(player, index, forceShowCard) {
     ? fullCards
     : [...holeCards, ...commonPoker];
   if (!canShowCards) {
-    cards[0] = -1;
-    cards[1] = -1;
+    cards[0] = visibleHoleCards[0];
+    cards[1] = visibleHoleCards[1];
   }
   const isWin = player?.isWin == null ? score > 0 : Boolean(player.isWin);
   return {
@@ -343,7 +344,7 @@ export function texasHistoryDetail(table, inningNum) {
 }
 
 export function recordHand(table, hand, results) {
-  const replayPlayers = table.members.filter((m) => m.hole?.length).map((m) => {
+  const replayPlayers = (hand.participants || hand.statsPlayers || table.members).filter((m) => m.hole?.length).map((m) => {
     const result = results.find((item) => item.uid === m.uid);
     const userInfo = userInfoOf(m);
     return {

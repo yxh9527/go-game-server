@@ -20,6 +20,7 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
   const runs = [];
   const loads = [];
   const classes = {};
+  class Notify { emitModule() { return 'original-notification'; } }
   function WebHallOb() {}
   WebHallOb.handleOpenGame = (value) => { opens.push(value); onOpen(value); };
   WebHallOb.prototype.start = function () {
@@ -36,6 +37,7 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
     },
   };
   const cc = {
+    Notify,
     js: { getClassByName: (name) => classes[name] || null, _nameToClass: classes },
     director: {
       getScene: () => activeScene,
@@ -83,6 +85,7 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
   vm.runInContext(CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, ""), context);
   return {
     logs, opens, loaded, runs, loads, window,
+    requestScene(options) { return new Notify().emitModule('common', 'loading', 'over', options); },
     setScene(name) {
       activeScene = { name };
       if (name === "webHallOb" && nativeStart) activeScene._components = [new WebHallOb()];
@@ -110,6 +113,27 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
     },
   };
 }
+
+test('shared loading notification opens the requested Zjh bundle and retires callbacks on exit', () => {
+  const page = browser();
+  page.setLoader((name, _progress, done) => done(null, { name }));
+  page.open(25010000, 25);
+  assert.equal(page.requestScene({ module: 'Zjh', scene: 'gameZjh' }), 'original-notification');
+  page.advance(200);
+  assert.deepEqual(page.loads, ['gameZjh']);
+  assert.deepEqual(page.runs, ['gameZjh']);
+  assert.ok(page.loaded.length > 0);
+  page.requestScene({ module: 'Zjh', scene: 'gameZjh' });
+  page.advance(200);
+  assert.equal(page.runs.length, 1, 'does not reset a live game scene');
+  page.setScene('webHallOb');
+  page.advance(200);
+  const count = page.loaded.length;
+  page.requestScene({ module: 'Zjh', scene: 'gameZjh' });
+  page.advance(3000);
+  assert.equal(page.runs.length, 1);
+  assert.equal(page.loaded.length, count);
+});
 
 test("idle hall never starts an empty delivery or timeout", () => {
   const page = browser();

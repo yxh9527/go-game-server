@@ -2,10 +2,15 @@ import { rel } from "./rel.js";
 
 export async function createHandler(runtime) {
   const v = runtime.hotVersion;
+  if (runtime.env === "dev") {
+    const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
+    await localConfigs.refreshRoomConfigs(runtime);
+  }
   const codec = await rel(import.meta.url, "./codec.js", v);
   const messages = await rel(import.meta.url, "./messages.js", v);
   const catalog = await rel(import.meta.url, "./games/catalog.js", v);
   const holdemEngine = await rel(import.meta.url, "./games/holdem/engine.js", v);
+  const zjhEngine = await rel(import.meta.url, "./games/zjh/engine.js", v);
   const games = await catalog.loadGames(v);
   const fair = await rel(import.meta.url, "./core/fair-code.js", v);
   const lifecycle = await rel(import.meta.url, "./core/room-lifecycle.js", v);
@@ -17,6 +22,10 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
+    if (table.gameId === "holdem" && Number(table.roomType) === 19 && Number(table.cfg?.play_mode || 0) === 0) {
+      // Adopt the corrected wire mode without replacing the live room/hand.
+      table.playMode = 1;
+    }
     if (table.kind === "normal") {
       features.initializeRoomStats(table);
       features.syncMembers(table);
@@ -504,8 +513,12 @@ export async function createHandler(runtime) {
     runtime.registry.drop(ws);
   }
 
-  function getDevHoldemRecordDetail(roomId, inningNum) {
+  function getDevHoldemRecordDetail(roomId, inningNum, userId, agentId) {
     if (runtime.env !== "dev") return null;
+    if (userId != null && agentId != null) {
+      const table = runtime.registry.getTable(roomId, agentId, "zjh");
+      if (table) return zjhEngine.historyDetail(table, inningNum, userId);
+    }
     const table = runtime.registry.listByRoomType(19).find((item) => Number(item.roomId) === Number(roomId));
     return table ? holdemEngine.texasHistoryDetail(table, inningNum) : null;
   }

@@ -3,6 +3,10 @@ import { rel } from "./rel.js";
 
 export async function createApp(runtime) {
   const v = runtime.hotVersion;
+  if (runtime.env === "dev") {
+    const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
+    await localConfigs.refreshRoomConfigs(runtime);
+  }
   const decode = await rel(import.meta.url, "./decode.js", v);
   const toClient = await rel(import.meta.url, "./to-client.js", v);
   const roomMod = await rel(import.meta.url, "./rooms.js", v);
@@ -62,7 +66,7 @@ export async function createApp(runtime) {
     if (op === 46 && runtime.env === "dev") {
       const gameRoomId = decode.num(params.gameRoomId, 0);
       const inningNum = decode.num(params.inningNum, 0);
-      const data = await localRecords.getDevHoldemRecordDetail(runtime, gameRoomId, inningNum);
+      const data = await localRecords.getDevHoldemRecordDetail(runtime, gameRoomId, inningNum, params);
       res.set("Cache-Control", "no-store").json(data
         ? { msgCode: 200, errMsg: null, data }
         : { msgCode: 404, errMsg: "开发环境没有找到这局牌的详情记录", data: null });

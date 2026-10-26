@@ -8,8 +8,11 @@ export const roomPopulationConfig = {
   maxPeople: 100,
   entryReference: 500,
   entryDecay: 0.45,
-  randomAmplitude: 0.035,
-  randomPeriodSeconds: 60,
+  // Retain an activity range even for very expensive rooms; avoid rounding
+  // every time of day to minPeople after applying the 100-person ceiling.
+  minimumActivityShare: 0.15,
+  randomAmplitude: 0.18,
+  randomPeriodSeconds: 10,
   seed: "gogame-room-population-v1",
   activity: {
     midnight: 1,

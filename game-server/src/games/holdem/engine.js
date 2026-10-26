@@ -14,6 +14,7 @@ const robot = await rel(import.meta.url, "./robot.js", version);
 const features = await rel(import.meta.url, "../../core/room-features.js", version);
 const fair = await rel(import.meta.url, "../../core/fair-code.js", version);
 const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", version);
+const { buildPots, awardPots } = await rel(import.meta.url, "./pots.js", version);
 const localHistory = env.isDev
   ? await rel(import.meta.url, "../../../../cache/holdem/history.js", version)
   : null;
@@ -62,7 +63,7 @@ export function createTexasTable(roomId, roomType, cfg) {
     bigBlind,
     carryMin: num(cfg, "carry_min", gameConfig.defaultCarryMin),
     forceShowCard: Number(cfg?.force_show_card) === 1,
-    playMode: num(cfg, "play_mode", 0),
+    playMode: holdemPlayMode(cfg, roomType),
     roomClassification: 2,
     betTime: gameConfig.betTime,
     dealerPos: 0,
@@ -74,7 +75,13 @@ export function createTexasTable(roomId, roomType, cfg) {
   return table;
 }
 
-function dzpkParams(table) {
+export function holdemPlayMode(cfg, roomType = cfg?.room_type) {
+  const mode = num(cfg, "play_mode", 0);
+  // Normal hall selector is 0; allocated rooms and WebSocket config use 1.
+  return Number(roomType) !== 101 && mode === 0 ? 1 : mode;
+}
+
+export function dzpkParams(table) {
   return {
     gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
     smallBlind: table.smallBlind,
@@ -84,7 +91,8 @@ function dzpkParams(table) {
     delayLook: true,
     openInsurance: false,
     forceShowCard: table.forceShowCard,
-    forceShowType: table.forceShowCard ? 1 : 0,
+    forceShowType: 1,
+    gameName: table.cfg?.name || gameConfig.name,
     carryMin: table.carryMin,
     carryMax: -1,
     betTime: table.betTime,
@@ -106,7 +114,6 @@ export function texasConf(table) {
     dzpkParams: params,
     dzpk: {
       ...params,
-      gameName: gameConfig.name,
     },
     playMode: Number(table.playMode) || 0,
     allowCarryOut: true,
@@ -127,18 +134,8 @@ export function texasRoomInfo(table) {
     roomState: table.phase === "playing" ? 2 : 1,
     memberList: memberListSeats(table.members, 7),
     OBmemberList: (table.observers || []).map((item) => publicObserver(item)),
-    dzpk: {
-      gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
-      gameName: gameConfig.name,
-      smallBlind: table.smallBlind,
-      bigBlind: table.bigBlind,
-      initialBet: table.bigBlind,
-      carryMin: table.carryMin,
-      carryMax: -1,
-      betTime: table.betTime,
-      forceShowCard: table.forceShowCard,
-      openInsurance: false,
-    },
+    playMode: table.playMode,
+    dzpk: dzpkParams(table),
     roomStart: table.members.length >= 2,
     memberNum: table.members.length,
   };
@@ -252,8 +249,34 @@ export function onTexasAction(io, table, session, body) {
   if (table.phase !== "playing" || !table.hand) {
     return;
   }
-  const uid = Number(body?.uid || session.userId);
+  const uid = Number(session.userId);
+  if (body?.uid != null && Number(body.uid) !== uid) return;
   applyAction(io, table, uid, Number(body?.operation), body?.operationData);
+}
+
+export function onHandCardReq(send, table, session) {
+  const player = table.members.find((member) => Number(member.uid) === Number(session.userId));
+  // The original client requests its own holes when its delayed turn starts.
+  // Ignore any caller-supplied uid and never broadcast this response.
+  send(PUSH.DZPK_HAND_CARD_RES, {
+    handCard: table.hand && player?.hole?.length === 2 ? player.hole.slice() : [-1, -1],
+    commonCard: table.hand?.board?.slice() || [],
+  });
+}
+
+export function onShowCardReq(send, table, session, body) {
+  const player = table.members.find((member) => Number(member.uid) === Number(session.userId));
+  const card = body.card;
+  const valid = table.phase === "playing" && table.hand && !table.forceShowCard
+    && Number.isInteger(card) && player?.hole?.includes(card) && typeof body.isShow === "boolean";
+  if (valid) {
+    const selected = new Set(player.selectedShowCards || []);
+    if (body.isShow) selected.add(card); else selected.delete(card);
+    player.selectedShowCards = [...selected];
+  }
+  // Selection is private until settlement, matching the original card icon.
+  send(PUSH.DZPK_SHOW_CARD_RES, { result: valid ? 0 : 1,
+    card: Number.isInteger(card) ? card : -1, isShow: valid ? body.isShow : false });
 }
 
 export function beginHand(io, table) {
@@ -288,6 +311,7 @@ export function beginHand(io, table) {
     m.totalBet = 0;
     m.lastOperation = 0;
     m.openingPoint = m.point;
+    m.selectedShowCards = [];
   }
   const deck = shuffle(makeDeck());
   table.hand = {
@@ -310,6 +334,7 @@ export function beginHand(io, table) {
     underTheGunUid: utg.uid,
     replayActions: [],
     replayEvents: [],
+    participants: players.slice(),
   };
   features.beginHandStats(table, players);
   fair.beginFairHand(io, table, players, 2);
@@ -563,7 +588,7 @@ function nextStreet(io, table) {
   hand.acted = new Set();
   const livePlayers = live(table);
   if (livePlayers.filter(canAct).length <= 1 && livePlayers.length > 1) {
-    dealRemaining(table);
+    dealRemaining(io, table);
     settle(io, table, livePlayers);
     return;
   }
@@ -598,7 +623,7 @@ function nextStreet(io, table) {
     settle(io, table, live(table));
     return;
   }
-  io.broadcast(PUSH.DZPK_BIANCHI_PUSH, [hand.pot]);
+  io.broadcast(PUSH.DZPK_BIANCHI_PUSH, buildPots(hand.participants || hand.statsPlayers || table.members).map((pot) => pot.amount));
   hand.actorUid = firstActorUid(table);
   if (!hand.actorUid) {
     nextStreet(io, table);
@@ -607,7 +632,7 @@ function nextStreet(io, table) {
   promptActor(io, table);
 }
 
-function dealRemaining(table) {
+function dealRemaining(io, table) {
   const hand = table.hand;
   if (hand.board.length < 3) {
     if (hand.burnBeforeBoard) hand.deckPos += 1;
@@ -616,18 +641,24 @@ function dealRemaining(table) {
       hand.deckPos += 1;
     }
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_FLOP);
+    io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_FLOP");
+    io.broadcast(PUSH.DZPK_DEAL_FAN_PUSH, { cardList: hand.board.slice(0, 3) });
   }
   if (hand.board.length < 4) {
     if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_TURN);
+    io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_TURN");
+    io.broadcast(PUSH.DZPK_DEAL_ZHUANG_PUSH, { cardList: [hand.board[3]] });
   }
   if (hand.board.length < 5) {
     if (hand.burnBeforeBoard) hand.deckPos += 1;
     hand.board.push(hand.deck[hand.deckPos]);
     hand.deckPos += 1;
     recordReplayDeal(hand, REPLAY_GAME_STATE.DEAL_RIVER);
+    io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_RIVER");
+    io.broadcast(PUSH.DZPK_DEAL_HE_PUSH, { cardList: [hand.board[4]] });
   }
 }
 
@@ -726,6 +757,9 @@ function sendSnapshot(send, table, session) {
     currentInning: table.currentInning,
     flopPokerList: hand.board.slice(0, 3),
     turnPoker: hand.board[3] ?? -1,
+    riverPoker: hand.board[4] ?? -1,
+    roundBetMap: Object.fromEntries(table.members.map((m) => [m.uid, Number(m.streetBet) || 0])),
+    sidePotList: buildPots(hand.participants || hand.statsPlayers || table.members).map((pot) => pot.amount),
     memberDeskInfos: table.members.map((m) => ({
       state: m.folded ? 3 : 1,
       xiaZhuData: m.totalBet,
@@ -733,7 +767,9 @@ function sendSnapshot(send, table, session) {
       lastOperation: m.lastOperation,
       pos: m.pos,
       uid: m.uid,
-      handPais: session.userId === m.uid ? m.hole : [-1, -1],
+      handPais: Number(session.userId) === Number(m.uid) ? (m.hole || []) : [-1, -1],
+      showCards: Number(session.userId) === Number(m.uid)
+        ? (m.hole || []).map((card) => m.selectedShowCards?.includes(card) ? card : -1) : [-1, -1],
     })),
   });
 }
@@ -747,37 +783,52 @@ function settle(io, table, contenders) {
     eval: hand.board.length === 5 ? evaluate7([...m.hole, ...hand.board]) : { cardTypeId: 1, key: [0], pokerEnumList: m.hole.map(cardName), best5: m.hole },
   }));
   ranked.sort((a, b) => compareRank(b.eval, a.eval));
-  const winners = ranked.filter((r) => compareRank(r.eval, ranked[0].eval) === 0);
-  const winEach = Math.floor(hand.pot / winners.length);
-  const results = table.members.filter((m) => m.hole?.length).map((m) => {
+  const participants = hand.participants || hand.statsPlayers || table.members.filter((m) => m.hole?.length);
+  const awards = awardPots(participants, ranked, hand.bankerId, compareRank);
+  io.broadcast(PUSH.DZPK_BIANCHI_PUSH, awards.pots.map((pot) => pot.amount));
+  const results = participants.map((m) => {
     const row = ranked.find((r) => r.member.uid === m.uid);
-    const won = winners.some((w) => w.member.uid === m.uid);
-    const score = won ? winEach - m.totalBet : -m.totalBet;
-    if (won) {
-      m.point += winEach;
-    }
+    const won = awards.winners.has(m.uid);
+    const payout = awards.payout.get(m.uid) || 0;
+    const score = payout - m.totalBet;
+    m.point += payout;
     const evals = row?.eval;
+    // Uncontested pots require no showdown. Folded holes must stay private
+    // through every field, including the nested cardTypeInfo fallback.
+    const reveal = table.forceShowCard || (active.length > 1 && !m.folded)
+      || m.selectedShowCards?.length === 2;
+    const shownEval = reveal && hand.board.length === 5
+      ? (evals || evaluate7([...m.hole, ...hand.board])) : null;
     return {
       xiaZhuData: m.totalBet,
-      cardTypeInfo: evals ? {
-        pokerEnumList: evals.pokerEnumList,
-        handCardList: evals.best5,
-        cardTypeId: evals.cardTypeId,
-      } : { pokerEnumList: [], handCardList: m.hole, cardTypeId: 0 },
-      cardTypeId: evals?.cardTypeId || 0,
+      ...(shownEval ? { cardTypeInfo: {
+        pokerEnumList: shownEval.pokerEnumList,
+        handCardList: shownEval.best5,
+        cardTypeId: shownEval.cardTypeId,
+      } } : {}),
+      cardTypeId: shownEval?.cardTypeId || 0,
       insuranceBet: 0,
       insuranceProfit: 0,
       isWin: won,
       uid: m.uid,
       score,
       point: m.point,
-      handPais: table.forceShowCard || !m.folded ? [...m.hole, ...hand.board] : [],
-      showCards: table.forceShowCard || !m.folded ? m.hole : [],
+      handPais: shownEval ? shownEval.best5 : [],
+      showCards: reveal ? m.hole.slice() : m.selectedShowCards?.length
+        ? m.hole.map((card) => m.selectedShowCards.includes(card) ? card : -1) : [],
       pos: m.pos,
     };
   });
   if (localHistory && io.env !== "prod") localHistory.recordHand(table, hand, results);
-  io.broadcast(PUSH.DZPK_PLAYER_DIPAI_PUSH, active.map((m) => ({ uid: m.uid, cardList: m.hole, pos: m.pos })));
+  const revealed = results.filter((result) => result.showCards.length === 2);
+  if (revealed.length) {
+    if (table.forceShowCard) {
+      io.broadcast(PUSH.DZPK_PLAYER_DIPAI_PUSH, revealed.map((result) => ({ uid: result.uid, cardList: result.showCards, pos: result.pos })));
+    } else {
+      for (const result of revealed) io.broadcast(PUSH.DZPK_ACTION_SHOWCARD_PUSH,
+        { uid: result.uid, cardList: result.showCards, pos: result.pos });
+    }
+  }
   features.finishHandStats(table, results);
   fair.finishFairHand(table, results);
   io.broadcast(PUSH.DZPK_INNING_RESULT_PUSH, results);

@@ -257,6 +257,7 @@ test("direct scene fallback skips a scene that the client entered while loading"
     },
   };
   const cc = {
+    Notify: class Notify { emitModule() {} },
     js: { getClassByName: () => null, _nameToClass: {} },
     assetManager: { getBundle: () => bundle, bundles: { forEach() {} } },
     director: {
@@ -268,6 +269,7 @@ test("direct scene fallback skips a scene that the client entered while loading"
   };
   const window = {
     cc,
+    __webHallEarly: { peek: () => ({ openGame: { value: { joinRoom: { roomId: 700000, roomType: 19 } } } }) },
     location: { href: "http://www.localhost:11042/2.0.1279/?userId=10001&openId=10001&isWebHall=1" },
     parent: { postMessage(message) { loadedMessages.push(message); } },
     WebSocket: class WebSocket {},
@@ -290,7 +292,8 @@ test("direct scene fallback skips a scene that the client entered while loading"
   const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
 
   vm.runInNewContext(patch, context);
-  context.console.warn("进入游戏", "gameHoldem");
+  new cc.Notify().emitModule("common", "loading", "over", { module: "Holdem", scene: "gameHoldem" });
+  retries.shift()();
 
   assert.equal(loadSceneCalls, 1);
   assert.equal(activeScene.name, "gameHoldem");
@@ -324,12 +327,14 @@ test("runtime SceneManager module is preferred over the direct scene fallback", 
     },
   };
   const cc = {
+    Notify: class Notify { emitModule() {} },
     js: { getClassByName: () => null, _nameToClass: {} },
     assetManager: { getBundle: () => null, bundles: { forEach() {} } },
     director: { getScene: () => activeScene },
   };
   const window = {
     cc,
+    __webHallEarly: { peek: () => ({ openGame: { value: { joinRoom: { roomId: 700000, roomType: 19 } } } }) },
     __require(name) {
       assert.equal(name, "SceneManager");
       return { default: { instance: sceneManager } };
@@ -356,7 +361,7 @@ test("runtime SceneManager module is preferred over the direct scene fallback", 
   const patch = CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, "");
 
   vm.runInNewContext(patch, context);
-  context.console.warn("进入游戏", "gameHoldem");
+  new cc.Notify().emitModule("common", "loading", "over", { module: "Holdem", scene: "gameHoldem" });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(loadSceneCalls, 1);

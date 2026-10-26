@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { botChoose, ensureBot, scheduleTurn, tickBot } from "../../../../game-server/src/games/zjh/robot.js";
+import { botChoose, scheduleTurn, tickBot } from "../../../../game-server/src/games/zjh/robot.js";
 import { ZJH_OP, ZJH_PUSH } from "../../../../game-server/src/games/zjh/messages.js";
 import { beginHand, tickPlaying } from "../../../../game-server/src/games/zjh/engine.js";
 import { ZjhGame } from "../../../../game-server/src/games/zjh/ZjhGame.js";
@@ -37,15 +37,11 @@ test("zjh comparisons select a live public opponent without reading its cards", 
   const { table, actor, rival } = fixture();
   table.hand.round = 3;
   Object.defineProperty(rival, "hole", { get() { throw new Error("rival cards accessed"); } });
-  assert.deepEqual(botChoose(table, actor, () => 0.1), { operation: ZJH_OP.COMPARE, operationData: rival.uid });
+  assert.deepEqual(botChoose(table, actor, () => 0.1), { operation: ZJH_OP.COMPARE, targetUid: rival.uid });
 });
 
-test("zjh robot filling and action scheduling respect seats and deadlines", () => {
-  const table = { ante: 10, carryMin: 100, members: [{ uid: 42, pos: 0, point: 500 }] };
-  ensureBot(table);
-  ensureBot(table);
-  assert.equal(table.members.length, 2);
-  const actor = table.members[1];
+test("zjh action scheduling respects deadlines", () => {
+  const { table, actor } = fixture();
   table.hand = { currentBet: 10, botActAt: 0, deadline: 1200 };
   scheduleTurn(table, actor, 1000, () => 0.9);
   assert.ok(table.hand.botActAt <= 1100);
@@ -69,11 +65,13 @@ test("zjh robot games terminate with normal settlement and conserved chips", (t)
   let seed = 20261023;
   t.mock.method(Math, "random", () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296));
   const game = new ZjhGame();
-  for (let hand = 0; hand < 30; hand += 1) {
+  let reachedThirdRound = 0;
+  const actions = new Set();
+  for (let hand = 0; hand < 80; hand += 1) {
     const table = game.createTable(790000 + hand, 25, { ante: 10, carry_min: 100 });
-    table.members.push({ uid: 42, pos: 0, point: 500 });
-    ensureBot(table);
-    table.members[0].bot = true;
+    table.members = Array.from({ length: 2 + hand % 4 }, (_, pos) => ({
+      uid: 90000002 + pos, name: "bot" + pos, pos, point: 1000, bot: true,
+    }));
     const initialChips = table.members.reduce((sum, member) => sum + member.point, 0);
     const messages = [];
     const io = { send() {}, forEachPlayer() {}, broadcast(msgid, payload) { messages.push({ msgid, payload }); } };
@@ -86,5 +84,10 @@ test("zjh robot games terminate with normal settlement and conserved chips", (t)
     const result = messages.find((message) => message.msgid === ZJH_PUSH.INNING_RESULT);
     assert.ok(result);
     assert.equal(result.payload.reduce((sum, member) => sum + member.score, 0), 0);
+    if (messages.some((m) => m.msgid === ZJH_PUSH.ROUND_INFO && m.payload >= 3)) reachedThirdRound += 1;
+    for (const m of messages) if (m.msgid === ZJH_PUSH.ACTION_BET) actions.add(m.payload.operation);
   }
+  assert.ok(reachedThirdRound > 30, "normal games must continue beyond the second round");
+  for (const op of [ZJH_OP.CALL, ZJH_OP.RAISE, ZJH_OP.LOOK, ZJH_OP.COMPARE, ZJH_OP.FOLD]) assert.ok(actions.has(op));
+  t.diagnostic("80 robot hands, " + reachedThirdRound + " reached round 3; action variety and chip conservation verified");
 });

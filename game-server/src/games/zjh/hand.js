@@ -12,6 +12,8 @@ function isStraight3(values) {
 }
 
 export function evaluate3(ids) {
+  if (!Array.isArray(ids) || ids.length !== 3 || new Set(ids).size !== 3
+    || !ids.every((id) => Number.isInteger(id) && id >= 0 && id < 52)) throw new Error("Invalid three-card hand");
   const cards = ids.map((id) => ({ id, value: rankValue(id), suit: Math.floor(id / 13) }));
   const values = cards.map((c) => c.value).sort((a, b) => b - a);
   const flush = cards.every((c) => c.suit === cards[0].suit);
@@ -56,6 +58,28 @@ export function compare3(a, b) {
     if (dv) {
       return dv;
     }
+  }
+  return 0;
+}
+
+// Room compareRule=1: equal ranks are resolved by suit, spade > heart > club > diamond.
+// For pairs compare the pair first; for A23 compare the three before the ace.
+export function compareWithSuit(a, b) {
+  const rank = compare3(a, b);
+  if (rank) return rank;
+  const ordered = (hand) => hand.handCardList.slice().sort((x, y) => {
+    const score = (card) => {
+      let value = rankValue(card);
+      if ([3, 5].includes(hand.cardTypeId) && hand.key[0] === 3 && value === 14) value = 1;
+      if (hand.cardTypeId === 2 && value === hand.key[0]) value += 20;
+      return value * 4 + Math.floor(card / 13);
+    };
+    return score(y) - score(x);
+  });
+  const ac = ordered(a), bc = ordered(b);
+  for (let i = 0; i < 3; i += 1) {
+    const suit = Math.floor(ac[i] / 13) - Math.floor(bc[i] / 13);
+    if (suit) return suit;
   }
   return 0;
 }

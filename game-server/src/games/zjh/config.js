@@ -11,7 +11,7 @@ export default {
   defaultCarryMin: 100,
   buyInMultiple: 50,
   startDelayMs: 3000,
-  nextHandDelayMs: 4000,
+  nextHandDelayMs: 8000,
   maxRounds: 8,
   forceShowCard: true,
 };

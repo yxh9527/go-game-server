@@ -31,10 +31,23 @@ export function createRoomLogic(decode) {
     const roomIndex = params.roomIndex === undefined || params.roomIndex === "" ? undefined : num(params.roomIndex, 0);
     const smallBlind = params.smallBlind === undefined || params.smallBlind === "" ? undefined : num(params.smallBlind, 0);
     const bigBlind = params.bigBlind === undefined || params.bigBlind === "" ? undefined : num(params.bigBlind, 0);
+    const ante = params.ante === undefined || params.ante === "" ? undefined : num(params.ante, 0);
+    const carryMin = params.carryMin === undefined || params.carryMin === "" ? undefined : num(params.carryMin, 0);
     const forceShowCard = params.forceShowCard === undefined || params.forceShowCard === ""
       ? undefined
       : truthy(params.forceShowCard);
-    const scored = (rows || []).map((row) => {
+    // Visibility is a room identity, never a soft preference that can fall
+    // back to a forced-show table when the requested no-show tier is missing.
+    const scored = (rows || []).filter((row) => num(row.state, 1) === 1
+      && (cfgId === undefined || num(row.game_room_config_id, 0) === cfgId)
+      && (roomType === undefined || num(row.room_type, 0) === roomType)
+      && (playMode === undefined || num(row.play_mode, 0) === playMode)
+      && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)
+      && (bigBlind === undefined || num(row.big_blind, 0) === bigBlind)
+      && (num(row.room_type, 0) !== 25 || ((ante === undefined || roomAnte(row) === ante)
+        && (carryMin === undefined || num(row.carry_min, 0) === carryMin)))
+      && (forceShowCard === undefined || truthy(row.force_show_card) === forceShowCard))
+      .map((row) => {
       let score = 0;
       if (cfgId !== undefined && num(row.game_room_config_id, 0) === cfgId) {
         score += 8;
@@ -67,12 +80,18 @@ export function createRoomLogic(decode) {
     return num(row.game_room_config_id, 0) * 10000 + num(row.room_index, 0);
   }
 
+  function roomAnte(row) {
+    let payload = {};
+    try { payload = JSON.parse(row.payload || "{}"); } catch {}
+    return num(row.ante, num(payload.ante, 10));
+  }
+
   function enterRoomPayload(row, params, config) {
-    const roomType = num(params.roomType, num(row.room_type, 0));
-    const playMode = num(params.playMode, num(row.play_mode, 0));
+    const roomType = num(row.room_type, 0);
+    const playMode = num(row.play_mode, 0);
     const roomIndex = num(params.roomIndex, num(row.room_index, 0));
-    const smallBlind = num(params.smallBlind, num(row.small_blind, 0));
-    const bigBlind = num(params.bigBlind, num(row.big_blind, 0));
+    const smallBlind = num(row.small_blind, 0);
+    const bigBlind = num(row.big_blind, 0);
     return {
       roomId: assignRoomId(row),
       roomType,
@@ -80,10 +99,15 @@ export function createRoomLogic(decode) {
       roomIndex,
       smallBlind,
       bigBlind,
-      carryMin: num(params.carryMin, num(row.carry_min, 0)),
-      forceShowCard: row.force_show_card,
+      ...(roomType === 25 ? { ante: roomAnte(row), initialBet: roomAnte(row),
+        roomClassification: num(row.room_classification, 2), seeCardNo: 0 } : {}),
+      carryMin: num(row.carry_min, 0),
+      forceShowCard: truthy(row.force_show_card),
       gameRoomConfigId: num(row.game_room_config_id, 0),
-      key: `${roomType}/${smallBlind}/${bigBlind}`,
+      key: roomType === 19 ? [roomType, smallBlind, bigBlind, false, playMode,
+        bigBlind, 2, num(row.carry_min, 0), 0, truthy(row.force_show_card)].join('/')
+        : roomType === 25 ? [25, playMode, roomAnte(row), num(row.room_classification, 2), num(row.carry_min, 0)].join('/')
+          : `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",
       // Ordinary games also load the shared Bairen panel and unsubscribe on
       // exit. Its original socket selector requires this endpoint even when

@@ -132,7 +132,7 @@ test("holdem replay records action order, deal streets, and client detail amount
 
 test("non-finite raise amount is ignored and a later fold still settles the hand", () => {
   const table = createTexasTable(700005, 19, { small_blind: 10, big_blind: 20, carry_min: 500 });
-  const first = { uid: 1, name: "a", point: 1000, pos: 0, state: 1, lastOperation: 0, totalBet: 0, streetBet: 0, dealer: false, hole: [0, 1] };
+  const first = { uid: 1, name: "a", point: 990, pos: 0, state: 1, lastOperation: 0, totalBet: 10, streetBet: 10, dealer: false, hole: [0, 1] };
   const second = { uid: 2, name: "b", point: 980, pos: 1, state: 1, lastOperation: 0, totalBet: 20, streetBet: 20, dealer: true, hole: [2, 3] };
   table.members.push(first, second);
   table.phase = "playing";
@@ -150,9 +150,9 @@ test("non-finite raise amount is ignored and a later fold still settles the hand
 
   onTexasAction(io, table, { userId: first.uid }, { uid: first.uid, operation: OP.ADD, operationData: "NaN" });
 
-  assert.equal(first.point, 1000);
-  assert.equal(first.totalBet, 0);
-  assert.equal(first.streetBet, 0);
+  assert.equal(first.point, 990);
+  assert.equal(first.totalBet, 10);
+  assert.equal(first.streetBet, 10);
   assert.equal(table.hand.pot, 30);
   assert.equal(table.hand.actorUid, first.uid);
   assert.equal(io.messages.some((message) => message.msgid === PUSH.DZPK_ACTION_BET_PUSH), false);

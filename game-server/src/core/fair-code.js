@@ -83,6 +83,11 @@ export function finishFairHand(table, results) {
   record.boardCount = table.hand?.board?.length || 0;
   for (const result of results) {
     if (result.showCards?.length && result.showCards.every((card) => card >= 0)) record.revealed.add(Number(result.uid));
+    record.revealedCards ||= new Set();
+    for (const card of record.pokerList) {
+      if (Number(card.ownerUid) === Number(result.uid)
+        && result.showCards?.includes(JSON.parse(card.pokerInfo).index)) record.revealedCards.add(card.deckIndex);
+    }
   }
 }
 
@@ -108,7 +113,7 @@ export function fairCodeDetail(table, uid, inning) {
     const publicIndex = card.deckIndex - record.holeEnd;
     const boardIndex = [1, 2, 3, 5, 7].indexOf(publicIndex);
     const visible = record.finishedAt && (card.ownerUid != null
-      ? Number(card.ownerUid) === Number(uid) || record.revealed.has(Number(card.ownerUid))
+      ? Number(card.ownerUid) === Number(uid) || record.revealed.has(Number(card.ownerUid)) || record.revealedCards?.has(card.deckIndex)
       : record.isHoldem && boardIndex >= 0 && boardIndex < record.boardCount);
     // The server never releases the keys of undealt or unrevealed opponent
     // cards. Negative placeholders identify hidden dealt cards in the client's

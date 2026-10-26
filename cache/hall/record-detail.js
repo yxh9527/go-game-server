@@ -1,10 +1,12 @@
-export async function getDevHoldemRecordDetail(runtime, gameRoomId, inningNum) {
+export async function getDevHoldemRecordDetail(runtime, gameRoomId, inningNum, params = {}) {
   if (!gameRoomId || !inningNum) return null;
   const configured = String(runtime.config.game_server || "127.0.0.1:11041");
   const base = /^https?:\/\//i.test(configured) ? configured : `http://${configured}`;
   const endpoint = new URL("/internal/dev/holdem-record-detail", base);
   endpoint.searchParams.set("roomId", String(gameRoomId));
   endpoint.searchParams.set("inningNum", String(inningNum));
+  if (params.userId) endpoint.searchParams.set("userId", String(params.userId));
+  if (params.token || params.userToken) endpoint.searchParams.set("token", String(params.token || params.userToken));
   const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
   if (!response.ok) return null;
   const body = await response.json();

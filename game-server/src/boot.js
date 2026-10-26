@@ -64,7 +64,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
-    extraDirs: env.isDev ? [path.resolve(here, "../../cache/holdem"), path.resolve(here, "../../cache/game-server")] : [],
+    extraDirs: env.isDev ? [path.resolve(here, "../../cache/holdem"), path.resolve(here, "../../cache/zjh"), path.resolve(here, "../../cache/game-server"), path.resolve(here, "../../cache/rpc")] : [],
     entry: path.join(here, "create-handler.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("registry.js"),
     onReload: apply,

@@ -484,7 +484,7 @@ test("original verify button groups real hand and board cards and masks folded o
       for (const player of table.members) {
         const rows = seats.get(player.pos).rows;
         assert.equal(rows.length, 2);
-        const visible = !fold || player.uid !== foldedUid || player.uid === uid;
+        const visible = !fold || player.uid === uid;
         assert.ok(rows.every((row) => row.show === visible));
         if (visible) assert.deepEqual(Array.from(rows, (row) => row.info.index), player.hole);
         else assert.ok(rows.every((row) => row.info.index < 0));

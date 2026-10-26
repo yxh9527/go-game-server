@@ -69,7 +69,8 @@ test("random variation is smooth, request-independent and survives hot reload", 
     for (let refresh = 0; refresh < 10; refresh++) assert.equal(first.decorate(room, row, time).totalPeople, count);
   }
   assert.ok(new Set(counts).size > 1);
-  assert.ok(counts.every((count, i) => !i || Math.abs(count - counts[i - 1]) <= 3));
+  assert.ok(counts.filter((count, i) => i && count !== counts[i - 1]).length > 30);
+  assert.ok(counts.every((count, i) => !i || Math.abs(count - counts[i - 1]) <= 15));
   const alternate = await createRoomPopulation({ seed: "other" });
   assert.notDeepEqual(counts, counts.map((_, i) => alternate.decorate(room, row, start + i * 5000).totalPeople));
 });
@@ -91,6 +92,31 @@ test("range, entry decay and each time-period amplitude are configurable", async
   const noisy = wider.decorate(room, row, at(4)).totalPeople;
   assert.ok(Math.abs(noisy - baseline) <= baseline * 0.2 + 1);
   assert.notEqual(noisy, baseline);
+});
+
+test("high-entry rooms retain daily trends and visible variation within short refresh windows", async () => {
+  const population = await createRoomPopulation();
+  const trend = await createRoomPopulation({ randomAmplitude: 0 });
+  for (const gameType of [19, 21, 1000, 1002, 1004, 99999]) {
+    for (const carryMin of [500, 5000, 30000, 100000000]) {
+      const source = { game_type: gameType };
+      const target = { carryMin };
+      const low = trend.decorate(target, source, at(4)).totalPeople;
+      const noon = trend.decorate(target, source, at(12)).totalPeople;
+      const afternoon = trend.decorate(target, source, at(14)).totalPeople;
+      const peak = trend.decorate(target, source, at(24)).totalPeople;
+      assert.ok(low < afternoon && afternoon < noon && noon < peak, JSON.stringify({ gameType, carryMin, low, noon, afternoon, peak }));
+      for (const hour of [0, 4, 10, 13, 20]) {
+        const counts = Array.from({ length: 24 }, (_, i) => population.decorate(target, source, at(hour) + i * 5000).totalPeople);
+        assert.ok(new Set(counts).size > 1, JSON.stringify({ gameType, carryMin, hour, counts }));
+        assert.ok(counts.every(count => count >= 8 && count <= 100));
+      }
+    }
+  }
+  const fixed = await createRoomPopulation({ minPeople: 42, maxPeople: 42 });
+  assert.equal(fixed.decorate({ carryMin: 100000000 }, row, at(4)).totalPeople, 42);
+  const legacy = await createRoomPopulation({ minimumActivityShare: 0, randomAmplitude: 0 });
+  assert.equal(legacy.decorate({ carryMin: 100000000 }, row, at(4)).totalPeople, 8);
 });
 
 test("invalid settings are normalized without NaN or inverted time trends", async () => {

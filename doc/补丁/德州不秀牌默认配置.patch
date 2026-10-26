@@ -1,0 +1,31 @@
+diff --git a/app/tables/gogame/seed.go b/app/tables/gogame/seed.go
+--- a/app/tables/gogame/seed.go
++++ b/app/tables/gogame/seed.go
+@@ -38,6 +38,7 @@ func SeedIfEmpty(m, p *gorm.DB) {
+ 	seedTickets(m, now)
+ 	seedRates(m, now)
+ 	seedRooms(m, now)
++	seedNoShowIfMissing(m, now)
+ 	seedZjhIfMissing(m, now)
+ 	seedMatches(m, now)
+ }
+@@ -204,3 +205,19 @@
+ }
+ 
++func seedNoShowIfMissing(m *gorm.DB, now int64) {
++	rooms := []*RoomConfig{
++		texasRoom(now, 1924, 10, 20, 500, 0, 2, 20, 3, false, "德州不秀牌 10/20"),
++		texasRoom(now, 1925, 100, 200, 5000, 0, 2, 200, 3, false, "德州不秀牌 100/200"),
++		texasRoom(now, 1926, 300, 600, 30000, 0, 2, 600, 3, false, "德州不秀牌 300/600"),
++	}
++	for _, room := range rooms {
++		var count int64
++		result := m.Model(&RoomConfig{}).Where("game_room_config_id = ? AND room_type = ?", room.GameRoomConfigId, room.RoomType).Count(&count)
++		if result.Error != nil || count > 0 {
++			continue
++		}
++		m.Create(room)
++	}
++}
++
+ func texasRoom(now int64, cfgID, sb, bb, carryMin int64, playMode, class int32, initialBet, seeCardNo int64, showCard bool, name string) *RoomConfig {

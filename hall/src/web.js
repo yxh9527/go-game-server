@@ -9,6 +9,7 @@ import { rel } from "./rel.js";
 export { clientVersion };
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const roomListRefresh = await rel(import.meta.url, "./room-list-refresh.js", version);
 export const HALL_DEV_PATCH = env.isDev
   ? (await rel(import.meta.url, "../../cache/hall/dev-patch.js", version)).HALL_DEV_PATCH
   : "";
@@ -128,6 +129,19 @@ export function mountWeb(app, runtime) {
     renderHall(req, res);
   });
 
+  // Apply the current hall's common polling adapter to the served response,
+  // without editing the original static bundle or changing protocol fields.
+  const chunks = path.join(staticRoot, "hall/_next/static/chunks");
+  if (fs.existsSync(chunks)) {
+    const bundles = fs.readdirSync(chunks).filter(name => /^434[.-][a-f0-9]+\.js$/.test(name));
+    for (const name of bundles) {
+      const source = fs.readFileSync(path.join(chunks, name), "utf8");
+      const adapted = roomListRefresh.adaptRoomListRefresh(source);
+      app.get("/_next/static/chunks/" + name, (_req, res) => {
+        res.set("Cache-Control", "no-store").type("js").send(adapted);
+      });
+    }
+  }
   app.use("/_next", express.static(path.join(staticRoot, "hall/_next")));
   app.use("/l01", express.static(path.join(staticRoot, "hall/l01")));
   app.use("/avator", express.static(path.join(staticRoot, "avator")));

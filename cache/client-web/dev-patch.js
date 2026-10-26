@@ -5,14 +5,7 @@ export const CLIENT_DEV_PATCH = `<script>
   var rawError = console.error.bind(console);
   function keepConsole() {
     console.log = rawLog;
-    console.warn = function () {
-      rawWarn.apply(console, arguments);
-      try {
-        if (arguments[0] === "进入游戏" && arguments[1]) {
-          loadGameScene({ module: "Holdem", scene: String(arguments[1]) });
-        }
-      } catch (e) {}
-    };
+    console.warn = rawWarn;
     console.error = rawError;
     if (window.cc) {
       cc.log = rawLog;
@@ -20,6 +13,7 @@ export const CLIENT_DEV_PATCH = `<script>
       cc.error = rawError;
       if (cc.app && !cc.app.webImgPool) cc.app.webImgPool = Object.create(null);
       hookPersist();
+      hookSceneRequests();
     }
   }
   keepConsole();
@@ -431,7 +425,7 @@ export const CLIENT_DEV_PATCH = `<script>
     document.__gogameLaunchObs = true;
     try {
       var obs = new MutationObserver(function () {
-        if (sceneReady || isHoldemScene()) hideLaunchOverlay();
+        if (sceneReady || isActiveGameScene()) hideLaunchOverlay();
       });
       obs.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
     } catch (e) {}
@@ -442,7 +436,7 @@ export const CLIENT_DEV_PATCH = `<script>
       var SM = findSceneManager();
       if (SM) SM.isLoadingScene = false;
     } catch (e) {}
-    if (isHoldemScene()) hideLaunchOverlay();
+    if (isActiveGameScene()) hideLaunchOverlay();
   }
 
   function invokeStarts(scene) {
@@ -517,13 +511,35 @@ export const CLIENT_DEV_PATCH = `<script>
     }, 200);
   }
 
+  function hookSceneRequests() {
+    // The standalone dev launch skips the native loading view. Every game
+    // finishes preparation through this shared notification, carrying its
+    // actual bundle and scene. Do not infer a bundle from console messages.
+    var proto = cc.Notify && cc.Notify.prototype;
+    if (!proto || proto.__gogameSceneRequests || typeof proto.emitModule !== "function") return;
+    proto.__gogameSceneRequests = true;
+    var original = proto.emitModule;
+    proto.emitModule = function (module, event, action, options) {
+      var result = original.apply(this, arguments);
+      if (module === "common" && event === "loading" && action === "over" &&
+          options && options.module && options.scene && peekOpenGame()) {
+        var version = entryVersion;
+        setTimeout(function () {
+          if (currentEntry(version)) loadGameScene(options);
+        }, 0);
+      }
+      return result;
+    };
+  }
+
   var postedLoaded = false;
   var sceneReady = false;
   var loadingGame = false;
   var pendingGame = null;
   var HALL_WAIT = { launch: 1, webHallOb: 1, login: 1, HallScene: 1, api_hall: 1 };
-  function markActiveHoldemScene(opts, reason) {
-    if (!opts || opts.scene !== "gameHoldem" || !isHoldemScene()) return false;
+  function markActiveGameScene(opts, reason) {
+    var active = window.cc && cc.director && cc.director.getScene();
+    if (!opts || !active || active.name !== opts.scene || HALL_WAIT[opts.scene]) return false;
     loadingGame = false;
     sceneReady = true;
     clearLoadingScene();
@@ -536,7 +552,7 @@ export const CLIENT_DEV_PATCH = `<script>
     var version = entryVersion;
     if (!currentEntry(version)) return;
     if (!opts || !opts.scene || HALL_WAIT[opts.scene] || sceneReady) return;
-    if (markActiveHoldemScene(opts, "scene already active")) return;
+    if (markActiveGameScene(opts, "scene already active")) return;
     pendingGame = opts;
     if (loadingGame) return;
     var inst = findSceneManager();
@@ -551,7 +567,7 @@ export const CLIENT_DEV_PATCH = `<script>
       step("loadScene " + opts.module + " " + opts.scene);
       Promise.resolve(inst.loadScene(opts)).then(function (pack) {
         if (!currentEntry(version)) return null;
-        if (markActiveHoldemScene(opts, "skip duplicate scene")) return null;
+        if (markActiveGameScene(opts, "skip duplicate scene")) return null;
         return inst.runScene(pack);
       }).then(function () {
         if (!currentEntry(version)) return;
@@ -605,7 +621,7 @@ export const CLIENT_DEV_PATCH = `<script>
           step("loadSceneDirect err " + err);
           return;
         }
-        if (markActiveHoldemScene(opts, "skip duplicate scene")) return;
+        if (markActiveGameScene(opts, "skip duplicate scene")) return;
         try {
           cc.director.runSceneImmediate(sc, null, function () {
             if (!currentEntry(version)) return;
@@ -640,10 +656,10 @@ export const CLIENT_DEV_PATCH = `<script>
       run(b);
     });
   }
-  function isHoldemScene() {
+  function isActiveGameScene() {
     try {
       var scene = cc.director && cc.director.getScene();
-      return !!(scene && scene.name === "gameHoldem");
+      return !!(scene && (scene.name === "gameHoldem" || pendingGame && scene.name === pendingGame.scene));
     } catch (e) {
       return false;
     }
@@ -672,7 +688,7 @@ export const CLIENT_DEV_PATCH = `<script>
       cc.game.addPersistRootNode = function (node) {
         origPersist(node);
         try {
-          if (isHoldemScene() && isHiddenPersist(node) && muteNode(node)) step("persist hide " + (node && node.name));
+          if (isActiveGameScene() && isHiddenPersist(node) && muteNode(node)) step("persist hide " + (node && node.name));
         } catch (e) {}
       };
       step("persist hook");
@@ -684,7 +700,7 @@ export const CLIENT_DEV_PATCH = `<script>
       hookGameUtils();
       watchLaunchOverlay();
       hideLaunchOverlay();
-      if (!isHoldemScene()) return;
+      if (!isActiveGameScene()) return;
       var map = cc.game && cc.game._persistRootNodes;
       if (!map) return;
       var hidden = [];
@@ -735,7 +751,7 @@ export const CLIENT_DEV_PATCH = `<script>
       var origShow = GU.showLoading.bind(GU);
       var origHide = typeof GU.hideLoading === "function" ? GU.hideLoading.bind(GU) : null;
       GU.showLoading = function () {
-        if (sceneReady || isHoldemScene()) {
+        if (sceneReady || isActiveGameScene()) {
           if (origHide) origHide(true);
           hideConnectTips();
           return;
@@ -747,7 +763,7 @@ export const CLIENT_DEV_PATCH = `<script>
   }
   function hookObserverSeatDown() {
     try {
-      if (!isHoldemScene() || !cc.app || !cc.app.gameRoom) return;
+      if (!isActiveGameScene() || cc.director.getScene().name !== "gameHoldem" || !cc.app || !cc.app.gameRoom) return;
       var room = cc.app.gameRoom;
       if (!room.__gogameObserverSeatHook && typeof room.getIsOb === "function") {
         var originalGetIsOb = room.getIsOb;

@@ -1,5 +1,8 @@
 export const ZJH_SEND = {
   ACTION: 3562,
+  GAME_BACK: 3567,
+  SHOW_CARD: 3572,
+  HAND_CARD: 3574,
 };
 
 export const ZJH_PUSH = {
@@ -13,14 +16,19 @@ export const ZJH_PUSH = {
   BIPAI_RESULT: 3754,
   ROUND_INFO: 3756,
   PRE_OPERATION: 3780,
+  SEE_CARD: 3778,
+  GAME_BACK: 3746,
 };
 
 export const ZJH_OP = {
   ANTE: 1,
   FOLD: 2,
   CALL: 3,
-  LOOK: 4,
-  RAISE: 7,
+  RAISE: 4,
+  SHOW: 5,
+  ALL_IN: 6,
+  LOOK: 7,
   COMPARE: 8,
-  FOLD2: 10,
+  DISUSE: 9,
+  FOLLOW_ALWAYS: 10,
 };

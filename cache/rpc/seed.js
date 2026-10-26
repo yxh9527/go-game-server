@@ -7,12 +7,16 @@ export function seedRooms() {
     room({ game_type: 19, room_type: 19, game_room_config_id: 70, small_blind: 10, big_blind: 20, carry_min: 500, force_show_card: 1, play_mode: 0, name: "德州 10/20", category: "normal" }),
     room({ game_type: 19, room_type: 19, game_room_config_id: 1, small_blind: 100, big_blind: 200, carry_min: 5000, force_show_card: 1, play_mode: 0, name: "德州 100/200", category: "normal" }),
     room({ game_type: 19, room_type: 19, game_room_config_id: 2, small_blind: 300, big_blind: 600, carry_min: 30000, force_show_card: 1, play_mode: 0, name: "德州 300/600", category: "normal" }),
+    // Standard no-show tiers from doc/协议/大厅/德州-德州不秀牌大厅消息协议.md.
+    room({ game_type: 19, room_type: 19, game_room_config_id: 1924, small_blind: 10, big_blind: 20, carry_min: 500, force_show_card: 0, play_mode: 0, name: "德州不秀牌 10/20", category: "normal" }),
+    room({ game_type: 19, room_type: 19, game_room_config_id: 1925, small_blind: 100, big_blind: 200, carry_min: 5000, force_show_card: 0, play_mode: 0, name: "德州不秀牌 100/200", category: "normal" }),
+    room({ game_type: 19, room_type: 19, game_room_config_id: 1926, small_blind: 300, big_blind: 600, carry_min: 30000, force_show_card: 0, play_mode: 0, name: "德州不秀牌 300/600", category: "normal" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5803, play_mode: 0, room_index: 1, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 1", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5804, play_mode: 0, room_index: 2, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 2", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5805, play_mode: 0, room_index: 3, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 3", category: "hundred" }),
     room({ game_type: 1004, room_type: 61, game_room_config_id: 6101, room_index: 26, carry_min: 100000000, name: "麻将胡了", category: "slots" }),
     room({ game_type: 1004, room_type: 63, game_room_config_id: 6301, room_index: 26, carry_min: 100000000, name: "赏金女王", category: "slots" }),
-    room({ game_type: 21, room_type: 25, game_room_config_id: 2501, play_mode: 3, carry_min: 100, force_show_card: 1, name: "炸金花 底注10", category: "normal" }),
+    room({ game_type: 21, room_type: 25, game_room_config_id: 2501, play_mode: 3, ante: 10, carry_min: 100, force_show_card: 1, name: "炸金花 底注10", category: "normal" }),
   ];
 }
 
@@ -33,6 +37,19 @@ function room(row) {
     hundredMaxBet: row.hundred_max_bet || 0,
     key: `${roomType}/${row.small_blind || 0}/${row.big_blind || 0}`,
   };
+  if (roomType === 19) {
+    Object.assign(payloadObj, { straddle: false, initialBet: row.big_blind,
+      roomClassification: 2, aofBet: 0, seeCardNo: 3, openInsurance: false });
+    payloadObj.key = [roomType, payloadObj.smallBlind, payloadObj.bigBlind, false,
+      payloadObj.playMode, payloadObj.initialBet, 2, payloadObj.carryMin, 0,
+      payloadObj.forceShowCard].join('/');
+  }
+  if (roomType === 25) {
+    Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, straddle: false,
+      roomClassification: row.room_classification || 2, seeCardNo: 0, aofBet: 0 });
+    payloadObj.key = [25, payloadObj.playMode, row.ante, payloadObj.roomClassification,
+      payloadObj.carryMin].join('/');
+  }
   return {
     id: row.game_room_config_id,
     state: 1,

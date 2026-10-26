@@ -97,7 +97,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
-    extraDirs: env.isDev ? [path.resolve(here, "../../cache/hall")] : [],
+    extraDirs: env.isDev ? [path.resolve(here, "../../cache/hall"), path.resolve(here, "../../cache/rpc")] : [],
     entry: path.join(here, "create-app.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("store.js") || rel.endsWith("game-proxy.js") || rel.endsWith("static-proxy.js"),
     onReload: apply,

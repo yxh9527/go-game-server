@@ -183,7 +183,7 @@ export class SeatGame extends GameBase {
       return;
     }
     send(PUSH.JOIN_ROOM, this.publicMember(member));
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     send(PUSH.CARRYIN_RESULT, this.carryPanel(table, session));
     features.pushObservers(ctx);
   }
@@ -251,7 +251,7 @@ export class SeatGame extends GameBase {
       carryIn: amount,
       carryBalance: Number(member.point) || 0,
     });
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
   }
 
@@ -269,7 +269,7 @@ export class SeatGame extends GameBase {
     table.members = table.members.filter((item) => item.uid !== session.userId);
     this.watch(table, session);
     ctx.io.broadcast(PUSH.USER_STANDUP_ROOM, session.userId);
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
   }
 
@@ -374,7 +374,7 @@ export class SeatGame extends GameBase {
       });
       io.broadcast(PUSH.USER_STANDUP_ROOM, member.uid);
     }
-    io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
     return ids;
   }
@@ -396,7 +396,7 @@ export class SeatGame extends GameBase {
     // request a seat and complete the carry-in flow before joining a hand.
     this.watch(table, session);
     super.onJoin(ctx);
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
   }
 
@@ -409,6 +409,15 @@ export class SeatGame extends GameBase {
   }
 
   onPlayingSnapshot(_ctx) {}
+
+  pushRoomSnapshot(ctx) {
+    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
+    // ROOM_INFO clears the client's current hand. Restore per-player state
+    // after a seat/member update without broadcasting anyone's private cards.
+    if (!ctx.table.hand || !ctx.io.send) return;
+    ctx.io.forEachPlayer?.((session) => this.onPlayingSnapshot({ ...ctx, session,
+      send: (id, payload) => ctx.io.send(session.ws, id, payload) }));
+  }
 
   onMessage(ctx, msgid, payload) {
     if (features.handleRoomFeature(ctx, msgid, payload)) return true;
@@ -482,7 +491,7 @@ export class SeatGame extends GameBase {
     lifecycle.noteDeparture(table, person, completedBeforeLeave);
     ctx.io.broadcast(PUSH.USER_STANDUP_ROOM, uid);
     ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
-    ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(table));
+    this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
     return cash;
   }

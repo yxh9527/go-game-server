@@ -64,8 +64,8 @@ test("folded opponent holes, undealt board, and all remaining deck keys stay pri
   onTexasAction(io, table, { userId: folded }, { uid: folded, operation: OP.ABANDON });
   const own = fairCodeDetail(table, folded, 1);
   const watcher = fairCodeDetail(table, 99, 1);
-  assert.equal(own.pokerList.filter((card) => card.secretKey).length, 4);
-  assert.equal(watcher.pokerList.filter((card) => card.secretKey).length, 2);
+  assert.equal(own.pokerList.filter((card) => card.secretKey).length, 2);
+  assert.equal(watcher.pokerList.filter((card) => card.secretKey).length, 0);
   assert.ok(watcher.pokerList.slice(4).every((card) => card.secretKey === ""));
   assert.equal(fairCodeDetail(table, 123, 1), null);
   assert.deepEqual(fairCodeList(table, 123), []);
