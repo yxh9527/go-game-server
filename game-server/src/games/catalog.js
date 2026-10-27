@@ -7,6 +7,7 @@ const GAME_ENTRIES = [
   "./ggl-queen/index.js",
   "./zjh/index.js",
   "./niuniu/index.js",
+  "./sss/index.js",
 ];
 
 export async function loadGames(version) {

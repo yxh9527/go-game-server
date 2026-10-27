@@ -11,7 +11,7 @@ export function record(table, hand, results) {
       handCardListWithLaiZi: table.playMode === 7 ? result.handCardListWithLaiZi.slice() : [],
       posType: result.banker ? 1 : 0, cardTypePokers: result.handPais.slice() };
   });
-  table.history.push({ inning: table.currentInning, createdAt: Date.now(),
+  table.history.push({ inning: table.currentInning, createdAt: Date.now(), wildCardSpriteVersion: 1,
     viewers: [...hand.viewers], seeCardNo: (hand.rules || table.roomRules).seeCardNo, players });
   table.history = table.history.filter(row => Date.now() - row.createdAt < 8 * 3600000).slice(-1000);
 }
@@ -22,10 +22,15 @@ export function query(table, body, uid) {
   const page = Number(body.beginNum);
   const inning = body.inningNum !== undefined ? Number(body.inningNum) : page >= 0 ? page + 1 : 0;
   const row = records.find(r => r.inning === inning) || (!(inning > 0) ? records.at(-1) : null);
+  // Old in-memory records used 55..67. Convert only their network copy;
+  // persisted original hands and the room's stored history are unchanged.
+  const players = row?.players.map(player => !row.wildCardSpriteVersion && table.playMode === 7
+    ? { ...player, handCardListWithLaiZi: player.handCardListWithLaiZi.map(card => card >= 55 && card <= 67 ? card + 5 : card) }
+    : player) || [];
   return { gameRoomId: table.roomId, roomTypeName: 'qznn', ante: table.ante, seeCardNo: row?.seeCardNo ?? table.roomRules.seeCardNo,
     blind: JSON.stringify({ ante: table.ante, seeCardNo: table.roomRules.seeCardNo }),
     totalNum: records.at(-1)?.inning || 0,
-    dataInfo: { currentInningNum: row?.inning || inning || 0, firstGameList: row?.players || [],
+    dataInfo: { currentInningNum: row?.inning || inning || 0, firstGameList: players,
       playMode: table.playMode, endTime: row?.createdAt || 0,
       reportMsg: { reportFree: 0, bigBlind: 0, innerReport: false, playerList: [] } } };
 }

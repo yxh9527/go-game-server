@@ -23,7 +23,8 @@ export class NiuniuGame extends SeatGame {
       disusePoint: table.roomRules.disusePoint, allowCarryOut: true, hundredSwitch: false };
   }
   extraRoomInfo(table) {
-    return { qznn: this.params(table), playMode: table.playMode, laiZi: table.hand?.laiZi ?? -1,
+    return { qznn: this.params(table), playMode: table.playMode,
+      gameState: engine.gameState(table), laiZi: engine.laiZiValue(table),
       disusePoint: table.roomRules.disusePoint, allowCarryOut: true, chatHistory: [],
       roomClassification: Number(table.cfg.room_classification) || 2 };
   }

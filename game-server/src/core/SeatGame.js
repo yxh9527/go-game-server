@@ -194,7 +194,8 @@ export class SeatGame extends GameBase {
     if (!member) {
       return;
     }
-    send(PUSH.JOIN_ROOM, this.publicMember(member));
+    if (this.config.incrementalSeatUpdates) ctx.io.broadcast(PUSH.JOIN_ROOM, this.publicMember(member));
+    else send(PUSH.JOIN_ROOM, this.publicMember(member));
     this.pushRoomSnapshot(ctx);
     send(PUSH.CARRYIN_RESULT, this.carryPanel(table, session));
     features.pushObservers(ctx);
@@ -473,6 +474,9 @@ export class SeatGame extends GameBase {
   onPlayingSnapshot(_ctx) {}
 
   pushRoomSnapshot(ctx) {
+    // Robot traffic already sends JOIN/CARRY/STAND. Skip both ROOM_INFO and
+    // its per-player recovery snapshots: 3260 also resets live client UI.
+    if (ctx.incrementalSeatUpdates || this.config.incrementalSeatUpdates) return;
     ctx.io.broadcast(PUSH.ROOM_INFO, this.roomInfo(ctx.table));
     // ROOM_INFO clears the client's current hand. Restore per-player state
     // after a seat/member update without broadcasting anyone's private cards.

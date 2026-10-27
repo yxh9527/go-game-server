@@ -50,7 +50,7 @@ test('wildcards form the maximum hand without duplicating or leaking original ca
   const result = evaluate([1,14,27,40,52], wild, 1);
   assert.equal(result.niuJi,29);
   assert.equal(new Set(result.cardList).size,5);
-  assert.ok(result.handCardListWithLaiZi.every(c => c >= 55 && c <= 67));
+  assert.ok(result.handCardListWithLaiZi.every(c => c >= 60 && c <= 72));
   const low = evaluate(cards([2,8,11,12,13]), normal);
   const high = evaluate([40,7,23,37,12], normal);
   assert.ok(Number.isFinite(compareHands(low,high)));

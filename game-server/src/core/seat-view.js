@@ -1,10 +1,10 @@
-// The original Zjh/Qznn spectator layouts put wire position 0 at the bottom.
+// The original Zjh/Qznn/Sss spectator layouts put wire position 0 at the bottom.
 // Project each connection's seats at the transport boundary; the room, hand,
 // wallet, history and fair-code records always retain their real positions.
-const POSITION_MESSAGES = new Set([2202, 2206, 3260, 3606, 3610, 3731, 3732, 3741]);
+const POSITION_MESSAGES = new Set([2202, 2206, 3260, 3606, 3610, 3731, 3732, 3741, 3921, 3924]);
 
 function enabled(table) {
-  return table?.kind === 'normal' && ['zjh', 'niuniu'].includes(table.gameId);
+  return table?.kind === 'normal' && ['zjh', 'niuniu', 'sss'].includes(table.gameId);
 }
 function capacity(table) {
   return table.roomRules?.maxPeople || table.config?.maxPeople || 7;

@@ -57,7 +57,7 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
   const seated = (uid) => table.members.find((member) => member.uid === uid);
   const observer = (uid) => table.observers.find((member) => member.uid === uid);
   const roomContext = (profile, body = {}) => ({
-    ...ctx, session: profile.session, body, wallet,
+    ...ctx, session: profile.session, body, wallet, incrementalSeatUpdates: true,
     // ROOM_INFO invokes loginSuccess in the original client and interrupts a
     // live hand/settlement. Incremental JOIN/CARRY/STAND messages suffice.
     io: { ...io, broadcast: (id, payload) => {

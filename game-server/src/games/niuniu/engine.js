@@ -4,7 +4,7 @@ import { env } from '../../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH: MSG } = await rel(import.meta.url, './messages.js', v);
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
-const { evaluate, compareHands } = await rel(import.meta.url, './hand.js', v);
+const { evaluate, compareHands, logicalCards, rank } = await rel(import.meta.url, './hand.js', v);
 const robot = await rel(import.meta.url, './robot.js', v);
 const features = await rel(import.meta.url, '../../core/room-features.js', v);
 const fair = await rel(import.meta.url, '../../core/fair-code.js', v);
@@ -22,8 +22,10 @@ export function timeConfig(table) {
 const players = table => table.hand?.players || [];
 const owner = (table, uid) => players(table).find(p => p.uid === Number(uid));
 const sendUser = (io, uid, id, data) => io.sendUser?.(uid, id, data);
-const state = table => ({ grab: 'DEAL_PERFLOP', banker: 'CONFIRM_BANKER', bet: 'XIAN_RAISE',
+export const gameState = table => ({ grab: 'DEAL_PERFLOP', banker: 'CONFIRM_BANKER', bet: 'XIAN_RAISE',
   show: 'RUBBING_CARDS' })[table.hand?.stage] || 'NONE';
+// Internal laiZi is a zero-based card rank; SHOW_LAIZI and ROOM_INFO use A=1..K=13.
+export const laiZiValue = table => table.playMode === 7 && table.hand ? rank(table.hand.laiZi) : -1;
 function visibleCards(table, p, uid) {
   if (p.shown) return p.hole.slice();
   if (p.uid !== Number(uid)) return [];
@@ -36,7 +38,7 @@ function niuInfo(table, p, uid) {
     niuType: shown ? p.result.niuType : 0, belv: shown ? p.result.belv : 0,
     cardType: shown ? p.result.cardType : 'NONE', qilaiCardType: shown ? p.result.qilaiCardType : 'NONE',
     combinationsCard: shown ? p.result.combinationsCard.slice() : [],
-    handCardListWithLaiZi: shown ? p.result.handCardListWithLaiZi.slice() : cards.slice() };
+    handCardListWithLaiZi: shown ? logicalCards(p.result) : cards.slice() };
 }
 
 export function grabMax(table, p) {
@@ -56,7 +58,7 @@ export function betOptions(table, p) {
 export function snapshot(table, session) {
   const uid = session.userId, hand = table.hand;
   const me = owner(table, uid);
-  return { gameState: state(table), currentInning: table.currentInning,
+  return { gameState: gameState(table), currentInning: table.currentInning,
     gameStart: Boolean(hand), roomStart: true, timeConfig: timeConfig(table),
     leftTime: hand ? Math.max(0, hand.deadline - Date.now()) : 0,
     uidList: players(table).map(p => p.uid),
@@ -82,7 +84,7 @@ export function pushSnapshot(send, table, session) {
   if (table.hand) {
     table.hand.viewers.add(Number(session.userId));
     send(PUSH.NIUNIU_INNING_BEGIN_INFO, snapshot(table, session));
-    if (table.playMode === 7) send(MSG.LAIZI, table.hand.laiZi);
+    if (table.playMode === 7) send(MSG.LAIZI, laiZiValue(table));
   }
 }
 
@@ -116,7 +118,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     }
   });
   io.broadcast(MSG.CONFIG, timeConfig(table));
-  if (table.playMode === 7) io.broadcast(MSG.LAIZI, laiZi);
+  if (table.playMode === 7) io.broadcast(MSG.LAIZI, laiZiValue(table));
   io.forEachPlayer?.(session => io.send(session.ws, MSG.DEAL, players(table).map(p => {
     const cards = visibleCards(table, p, session.userId);
     return { uid: p.uid, pos: p.pos, grabBankerMax: grabMax(table, p), cardList: cards,

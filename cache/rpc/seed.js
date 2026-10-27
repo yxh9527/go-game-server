@@ -44,6 +44,15 @@ export function seedRooms() {
       sort_index: 2400 + index, category: 'normal',
       name: `${mode === 7 ? '七癞牛牛' : mode === 0 ? '全暗牛牛' : `看${see}张牛牛`} 底注${ante}`,
     })),
+    ...[
+      [2707, 1, 1, 2, 100], [2703, 0, 200, 4, 20000], [2706, 1, 50, 2, 5000],
+      [2709, 1, 200, 4, 20000], [2705, 1, 10, 2, 1000], [2701, 0, 10, 2, 1000],
+      [2704, 0, 500, 4, 50000], [2702, 0, 50, 2, 5000],
+    ].map(([id, mode, ante, classification, carry], index) => room({
+      game_type: 27, room_type: 27, game_room_config_id: id, play_mode: mode,
+      ante, carry_min: carry, room_classification: classification, sort_index: 2700 + index,
+      name: `十三水${mode ? '八鬼' : '四鬼'} 底注${ante}`, category: 'normal',
+    })),
   ];
 }
 
@@ -84,6 +93,11 @@ function room(row) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, seeCardNo: row.see_card_no,
       roomClassification: row.room_classification, maxPeople: 7 });
     payloadObj.key = [24, row.play_mode, row.ante, row.see_card_no, row.room_classification, row.carry_min].join('/');
+  }
+  if (roomType === 27) {
+    Object.assign(payloadObj, { ante: row.ante, initialBet: 0, seeCardNo: 0,
+      roomClassification: row.room_classification, maxPeople: 4, straddle: false });
+    payloadObj.key = [27, row.play_mode, row.ante, row.room_classification, row.carry_min].join('/');
   }
   return {
     id: row.game_room_config_id,

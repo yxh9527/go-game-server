@@ -1,5 +1,5 @@
 // Card IDs follow the original client: 0..51 diamond/club/heart/spade A..K;
-// 52 small joker, 53 big joker, 54 sky; 55..67 are wildcard A..K sprites.
+// 52 small joker, 53 big joker, 54 sky; 60..72 are wildcard A..K sprites.
 export const rank = card => card % 13 + 1;
 const point = value => Math.min(value, 10);
 const enabled = (codes, code) => codes.includes(0) || codes.includes(code);
@@ -79,6 +79,12 @@ export function compareHands(a, b) {
   return Math.sign(a.strength - b.strength || a.tie[0] - b.tie[0]);
 }
 
+// Rebuild display IDs from the evaluated ranks, including resident hands
+// evaluated before a hot update. Original cards and payout ranks stay intact.
+export function logicalCards(result) {
+  return result.cardList.map((card, i) => result.wildMask[i] ? 59 + result.values[i] : card);
+}
+
 export function evaluate(cards, rules, laiZi = -1) {
   const wild = rules.playMode === 7;
   if (cards.length !== 5 || new Set(cards).size !== 5 || cards.some(c => !Number.isInteger(c) || c < 0 || c > (wild ? 54 : 51))) {
@@ -99,8 +105,7 @@ export function evaluate(cards, rules, laiZi = -1) {
     for (let n = minimum; n <= 13; n++) { values[indices[depth]] = n; visit(depth + 1, n); }
   }
   visit(0, 1);
-  const logical = cards.map((c, i) => wildMask[i] ? 54 + best.values[i] : c);
   const combinations = best.triple.map(i => cards[i]);
-  return { ...best, cardList: cards.slice(), handCardListWithLaiZi: logical,
-    combinationsCard: combinations, wildMask };
+  const result = { ...best, cardList: cards.slice(), combinationsCard: combinations, wildMask };
+  return { ...result, handCardListWithLaiZi: logicalCards(result) };
 }
