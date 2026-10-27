@@ -5,6 +5,7 @@ const { default: config, roomRules } = await rel(import.meta.url, './config.js',
 const { SEND, PUSH } = await rel(import.meta.url, './messages.js', v);
 const engine = await rel(import.meta.url, './engine.js', v);
 const casino = await rel(import.meta.url, './casino.js', v);
+const banker = await rel(import.meta.url, './banker.js', v);
 const features = await rel(import.meta.url, '../../core/room-features.js', v);
 export class BlackjackGame extends SeatGame {
   constructor() { super(config); }
@@ -51,6 +52,10 @@ export class BlackjackGame extends SeatGame {
   }
   onSitDown(ctx) {
     if (casino.isCasino(ctx.table) && !ctx.session.bot) {
+      if (banker.isActive(ctx.table, ctx.session.userId)) {
+        ctx.send(9999, { msgCode: 95046, errorMsg: '上庄中不能入座' });
+        return;
+      }
       const pos = casino.DISPLAY_SEATS.indexOf(ctx.body?.position ?? ctx.body?.pos);
       if (pos < 0) return;
       const existing = ctx.table.members.find(m => m.uid === ctx.session.userId);
@@ -87,10 +92,13 @@ export class BlackjackGame extends SeatGame {
   }
   holdSeatUntilRoundEnd(table, member) { return table.hand?.players.some(p => p.uid === member.uid) || false; }
   onJoin(ctx) {
+    banker.bind(ctx.table, ctx.session);
     if (casino.isCasino(ctx.table)) casino.bindWalletSeat(ctx.table.members.find(m => m.uid === ctx.session.userId), ctx.session);
     super.onJoin(ctx); ctx.send(2206, this.roomInfo(ctx.table));
+    banker.push(ctx, ctx.send);
   }
   onLoginRoom(ctx) {
+    banker.bind(ctx.table, ctx.session);
     if (casino.isCasino(ctx.table)) casino.bindWalletSeat(ctx.table.members.find(m => m.uid === ctx.session.userId), ctx.session);
     super.onLoginRoom(ctx);
     // JOIN's 9212 can precede asynchronous LiveBlackJack loading. Its onLoad
@@ -99,14 +107,21 @@ export class BlackjackGame extends SeatGame {
     if (casino.isCasino(ctx.table)) {
       const member = ctx.table.members.find(m => m.uid === ctx.session.userId);
       ctx.send(9212, member ? casino.availablePoint(member) : ctx.session.wallet);
+      banker.push(ctx, ctx.send);
     }
   }
   afterRound(ctx) {
     const funding = casino.flushWalletFunding(ctx);
-    return funding ? funding.then(() => super.afterRound(ctx)) : super.afterRound(ctx);
+    const next = () => {
+      const bank = banker.flush(ctx);
+      return bank ? bank.then(() => super.afterRound(ctx)) : super.afterRound(ctx);
+    };
+    return funding ? funding.then(next) : next();
   }
+  onLeave(ctx) { banker.leave(ctx); return super.onLeave(ctx); }
   onPlayingSnapshot(ctx) { engine.pushSnapshot(ctx.send, ctx.table, ctx.session); }
   onMessage(ctx, id, body = {}) {
+    if (banker.request(ctx, id, body)) return true;
     if (super.onMessage(ctx, id, body)) return true;
     if (id === SEND.START) { this.queueStart(ctx.table); return true; }
     if (id === SEND.HISTORY) { ctx.send(PUSH.HISTORY, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
@@ -120,13 +135,24 @@ export class BlackjackGame extends SeatGame {
     }
     return false;
   }
-  startRound(ctx) { engine.begin(ctx.io, ctx.table); }
+  startRound(ctx) {
+    // Shared tick can reach startRound after scheduling on this same tick.
+    // Complete the casino boundary before engine.begin freezes liability.
+    if (!banker.ready(ctx.table)) return;
+    engine.begin(ctx.io, ctx.table);
+  }
   playTick(ctx, now) {
     const hand = ctx.table.hand;
     engine.tick(ctx.io, ctx.table, now);
     // END has consumed the round interval. Reuse common payout, admission and
     // lifecycle guards now instead of adding another one-second server tick.
-    if (hand && !ctx.table.hand && !this.afterRound(ctx)) super.tick(ctx);
+    if (hand && !ctx.table.hand) {
+      const pending = this.afterRound(ctx);
+      // create-handler also awaits the resident wallet task after tick. This
+      // local probe must handle its chain while that caller owns the retry.
+      if (pending) pending.catch(() => {});
+      else super.tick(ctx);
+    }
   }
 }
 export default new BlackjackGame();

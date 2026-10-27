@@ -6,6 +6,7 @@ const { SEND, PUSH, STATE, ACTION } = await rel(import.meta.url, './messages.js'
 const cards = await rel(import.meta.url, './hand.js', v);
 const robot = await rel(import.meta.url, './robot.js', v);
 const casino = await rel(import.meta.url, './casino.js', v);
+const banker = await rel(import.meta.url, './banker.js', v);
 const features = await rel(import.meta.url, '../../core/room-features.js', v);
 const fair = await rel(import.meta.url, '../../core/fair-code.js', v);
 const history = env.isDev ? await rel(import.meta.url, '../../../../cache/game-server/blackjack-history.js', v) : null;
@@ -117,7 +118,7 @@ export function pushSnapshot(send, table, session) {
 }
 export function begin(io, table, now = Date.now(), deckOverride) {
   if (table.hand) return false;
-  const members = table.members.filter(m => casino.availablePoint(m) >= table.ante && !m.carryDeadline && !m.pendingDeparture);
+  const members = table.members.filter(m => casino.availablePoint(m) >= table.ante && !m.carryDeadline && !m.pendingDeparture && !banker.isActive(table, m.uid));
   if (!members.length) { table.phase = 'idle'; return false; }
   const newShoe = !table.shoe || table.shoe.cursor >= table.shoe.cutIndex || table.shoe.cards.length - table.shoe.cursor < 40;
   if (deckOverride || newShoe) table.shoe = { cards: deckOverride?.slice() || shuffle(cards.makeShoe()), cursor: 0,
@@ -129,6 +130,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     turn: 0, settled: false, actionList: [],
     viewers: new Set([...(table.observers || []), ...members].filter(m => !m.bot).map(m => m.uid)) };
   table.hand.players = members.sort((a,b) => a.pos - b.pos).map((m, i) => newPlayer(m, i, now));
+  banker.freeze(table);
   features.beginHandStats(table, table.hand.players);
   // Variable length hands commit the real remaining shoe, without assigning
   // undealt cards to any player. Only actually issued indices are disclosed.
@@ -141,7 +143,7 @@ export function joinBettingHand(io, table, uid, now = Date.now()) {
   if (!casino.isCasino(table) || !h || h.settled || h.state !== STATE.BET || now >= h.deadline) return false;
   if (player(table, uid)) return false;
   const m = table.members.find(m => m.uid === Number(uid));
-  if (!m || m.carryDeadline || m.pendingDeparture || casino.availablePoint(m) < h.rules.ante) return false;
+  if (!m || m.carryDeadline || m.pendingDeparture || banker.isActive(table, uid) || casino.availablePoint(m) < h.rules.ante) return false;
   h.players.push(newPlayer(m, h.players.length, now));
   h.players.sort((a, b) => a.pos - b.pos).forEach((p, i) => { p.actionOrder = i; });
   features.beginHandStats(table, h.players);
@@ -156,7 +158,7 @@ export function casinoBetError(table, uid, body = {}, now = Date.now(), automati
   const h = table.hand;
   if (!h || h.settled || h.state !== STATE.BET || !automatic && now >= h.deadline) return 'ILLEGAL_OPERATION';
   const p = player(table, uid), m = table.members.find(m => m.uid === Number(uid));
-  if (!m || m.carryDeadline || !automatic && m.pendingDeparture || p && p.member !== m
+  if (!m || m.carryDeadline || banker.isActive(table, uid) || !automatic && m.pendingDeparture || p && p.member !== m
     || body.targetPos !== undefined && body.targetPos !== casino.displaySeat(m.pos)
     || (body.pairAmount ?? 0) !== 0 || (body.notPairAmount ?? 0) !== 0) return 'BET_FAILED';
   const amount = body.betAmount, total = (p?.mainBet || 0) + amount;
@@ -173,6 +175,7 @@ function deal(io, table, now) {
   const h = table.hand;
   // A seated funded player defaults to the minimum bet at the deadline.
   for (const p of h.players) if (!p.mainBet) act(io, table, p.uid, SEND.BET, { betAmount: h.rules.ante }, now, true);
+  banker.lock(io, table);
   h.dealer = [draw(table), draw(table)];
   h.state = STATE.DEAL; h.stateStart = now;
   for (const p of h.players) {
@@ -287,12 +290,18 @@ export function settle(io, table, now = Date.now()) {
   });
   h.results = results; h.pot = results.reduce((n, r) => n + r.xiaZhuData, 0);
   for (const p of h.players) actionRow(table, p, ACTION.SETTLE);
-  features.finishHandStats(table, results); fair.finishFairHand(table, results);
+  // The original client starts its player animation before banker overlays.
+  // Banker accounting is appended below after 4551, using the same hand.
+  const bankerResults = banker.settle(table, results);
+  if (bankerResults.length) h.statsPlayers.push(...bankerResults);
+  features.finishHandStats(table, [...results, ...bankerResults]); fair.finishFairHand(table, results);
   history?.record(table, h, results);
   // State 8 starts the original chip-collection/award animation; keep it alive
   // through the configured interval before resetting any seat or card model.
   broadcast(io, table);
   emit(io, table, PUSH.SETTLE, { ...snapshot(table), actionList: h.actionList.filter(a => a.actionType === ACTION.SETTLE), settleList: results });
+  for (const r of bankerResults) io.sendUser?.(r.uid, 4562, { score: r.score, take: r.take, areas: r.areas });
+  if (h.bankers?.length) io.broadcast(4561, banker.list(table, h.bankerTotals));
   features.pushRanking({ table, io });
   return true;
 }
