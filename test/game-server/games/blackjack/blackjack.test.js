@@ -260,7 +260,7 @@ test('four native lobby tiers route by full identity and no casino/hundred fallb
     assert.equal(logic.enterRoomPayload(r,{},{}).key,p.key);}
   assert.equal(logic.findRoom(rows,{roomType:31,playMode:0,ante:999}),null);
   assert.equal(logic.findRoom(rows,{roomType:31,playMode:1}),null);
-  assert.throws(()=>new BlackjackGame().createTable(1,31,{play_mode:1}),/ordinary blackjack/);
+  assert.throws(()=>new BlackjackGame().createTable(1,31,{play_mode:2}),/Unsupported blackjack/);
 });
 
 test('observer bottom chair uses the real player and all native action/recovery coordinates agree', () => {

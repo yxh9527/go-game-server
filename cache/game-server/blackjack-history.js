@@ -21,5 +21,5 @@ export function query(table, body, uid) {
   const row = records.find(r => r.inning === inning) || (!(inning > 0) ? records.at(-1) : null);
   return { currentInning: row?.inning || 0, total: records.at(-1)?.inning || 0,
     gameBackInfo: { gameRoomId: table.roomId, gameId: table.roomId, roomTypeName: 'bj21', ante: table.ante,
-      playMode: 0, inningInfo: [row ? structuredClone(row.players) : []] } };
+      playMode: table.playMode || 0, inningInfo: [row ? structuredClone(row.players) : []] } };
 }

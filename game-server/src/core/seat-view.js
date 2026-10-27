@@ -4,7 +4,8 @@
 const POSITION_MESSAGES = new Set([2202, 2206, 3260, 3606, 3610, 3731, 3732, 3741, 3921, 3924, 4550, 4551, 4553, 4554]);
 
 function enabled(table) {
-  return table?.kind === 'normal' && ['zjh', 'niuniu', 'sss', 'blackjack'].includes(table.gameId);
+  return table?.kind === 'normal' && !(table.gameId === 'blackjack' && table.playMode === 1)
+    && ['zjh', 'niuniu', 'sss', 'blackjack'].includes(table.gameId);
 }
 function capacity(table) {
   return table.roomRules?.maxPeople || table.config?.maxPeople || 7;
@@ -40,6 +41,15 @@ export function needsSeatViewRefresh(table, session) {
 }
 
 export function projectSeatMessage(table, session, id, payload) {
+  // LiveBlackJack's 9212 consumer assigns the payload directly to __myPoint.
+  // Its betting UI requires carried score, rather than the ordinary uid/point
+  // envelope or the remaining account wallet after carry-in.
+  if (table?.gameId === 'blackjack' && table.playMode === 1 && id === 9212) {
+    const member = table.members.find(m => m.uid === session.userId);
+    if (member?.casinoWalletSession) return member.point + Number(session.wallet || 0);
+    return member?.point
+      ?? (typeof payload === 'number' ? payload : payload.point);
+  }
   if (!enabled(table) || !POSITION_MESSAGES.has(id) || payload == null) return payload;
   if (id === 2206) session.seatView = { key: key(table), offset: desiredOffset(table, session) };
   const offset = current(table, session)?.offset || 0;

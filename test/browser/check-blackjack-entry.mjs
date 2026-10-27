@@ -37,7 +37,7 @@ try {
   await evalRoot(`Array.from(document.querySelectorAll('span,p,div,a')).find(e=>e.textContent==='二十一点'&&e.children.length===0)?.click()`);
   await delay(2500);
   console.log('ROOMS',await evalRoot(`Array.from(document.querySelectorAll('[class*="roomList"] li')).map(e=>e.innerText)`));
-  assert.equal(await evalRoot(`(()=>{const list=document.querySelectorAll('[class*="roomList"] li');if(list.length!==5)return list.length;list[${tier}].click();return true;})()`),true);
+  assert.equal(await evalRoot(`(()=>{const all=Array.from(document.querySelectorAll('[class*="roomList"] li')),list=all.filter(e=>e.innerText.includes('/'));if(all.length!==5||list.length!==4)return all.length;list[${tier}].click();return true;})()`),true);
   await delay(18000);
   let session;
   for(const candidate of sessions){const r=await send('Runtime.evaluate',{expression:'window.cc&&cc.director.getScene()?.name',returnByValue:true},candidate);if(r.result?.result?.value==='bjk')session=candidate;}
