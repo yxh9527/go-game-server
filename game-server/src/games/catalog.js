@@ -8,6 +8,7 @@ const GAME_ENTRIES = [
   "./zjh/index.js",
   "./niuniu/index.js",
   "./sss/index.js",
+  "./blackjack/index.js",
 ];
 
 export async function loadGames(version) {

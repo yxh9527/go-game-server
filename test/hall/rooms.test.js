@@ -3,8 +3,23 @@ import test from "node:test";
 import * as decode from "../../hall/src/decode.js";
 import { createRoomLogic } from "../../hall/src/rooms.js";
 import { publicWsHost } from "../../hall/src/web.js";
+import { seedRooms } from "../../cache/rpc/seed.js";
 
 const rooms = createRoomLogic(decode);
+
+test('blackjack lobby keeps four ordinary tiers and the documented casino mode', () => {
+  const rows=seedRooms();
+  const blackjack=rooms.filterRooms(rows,{gameType:31});
+  assert.equal(blackjack.length,5);
+  assert.equal(rooms.filterRooms(rows,{gameType:31,playMode:0}).length,4);
+  const casino=rooms.filterRooms(rows,{gameType:31,playMode:1});
+  assert.equal(casino.length,1);assert.equal(casino[0].game_room_config_id,3110);
+  const p=JSON.parse(casino[0].payload);
+  assert.equal(p.key,'31/1/100/4/0');assert.equal(p.playMode,1);assert.equal(p.maxPeople,5);
+  const selected=rooms.findRoom(rows,p);assert.equal(selected,casino[0]);
+  const entered=rooms.enterRoomPayload(selected,p,{});
+  assert.equal(entered.gameRoomConfigId,3110);assert.equal(entered.playMode,1);assert.equal(entered.key,p.key);
+});
 const rows = [
   { game_type: 19, room_type: 19, game_room_config_id: 70, play_mode: 0, room_index: 0, small_blind: 10, big_blind: 20, force_show_card: 1, state: 1, sort_index: 1 },
   { game_type: 1002, room_type: 58, game_room_config_id: 5803, play_mode: 0, room_index: 1, small_blind: 0, big_blind: 0, force_show_card: 0, state: 1, sort_index: 1 },

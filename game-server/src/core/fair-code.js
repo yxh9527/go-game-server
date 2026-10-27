@@ -82,6 +82,14 @@ export function finishFairHand(table, results) {
   record.finishedAt = Date.now();
   record.boardCount = table.hand?.board?.length || 0;
   for (const result of results) {
+    // Variable-hand games commit a neutral shoe before betting. They may
+    // disclose only the physical indices actually dealt face up this hand.
+    if (record.holeCount === 0 && Array.isArray(result.publicDeckIndices)) {
+      record.revealedCards ||= new Set();
+      for (const index of result.publicDeckIndices) {
+        if (Number.isInteger(index) && index >= 0 && index < record.pokerList.length) record.revealedCards.add(index);
+      }
+    }
     if (result.showCards?.length && result.showCards.every((card) => card >= 0)) record.revealed.add(Number(result.uid));
     record.revealedCards ||= new Set();
     for (const card of record.pokerList) {
@@ -114,7 +122,7 @@ export function fairCodeDetail(table, uid, inning) {
     const boardIndex = [1, 2, 3, 5, 7].indexOf(publicIndex);
     const visible = record.finishedAt && (card.ownerUid != null
       ? Number(card.ownerUid) === Number(uid) || record.revealed.has(Number(card.ownerUid)) || record.revealedCards?.has(card.deckIndex)
-      : record.isHoldem && boardIndex >= 0 && boardIndex < record.boardCount);
+      : record.revealedCards?.has(card.deckIndex) || record.isHoldem && boardIndex >= 0 && boardIndex < record.boardCount);
     // The server never releases the keys of undealt or unrevealed opponent
     // cards. Negative placeholders identify hidden dealt cards in the client's
     // getCardByPokerIndex without publishing their actual rank/suit.

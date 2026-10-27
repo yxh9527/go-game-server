@@ -23,7 +23,7 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
-    if (["zjh", "niuniu", "sss"].includes(table.gameId)) {
+    if (["zjh", "niuniu", "sss", "blackjack"].includes(table.gameId)) {
       // Refresh only room policy; preserve the resident hand, seats and clocks.
       table.roomRules = gameOf(table.roomType).roomPolicy(table);
     }
