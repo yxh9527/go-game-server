@@ -69,8 +69,17 @@ test('Zjh binary flow: spectator, seat, carry, circle, reconnect, hot reload, se
   assert.equal(snap.currentOperatorId, hand.actorUid);
   assert.equal(snap.pot, 40);
   await act(ZJH_OP.COMPARE, { targetUid: peers.find((p) => p.uid !== hand.actorUid && p.uid !== 199).uid, operationData: 0 });
+  assert.ok(table.hand.comparisonPause, 'comparison animation precedes settlement');
+  await request(actor, SEND.SEND_LEVEL_OUT);
+  assert.ok(table.members.find(p => p.uid === actor.uid).pendingDeparture);
+  assert.ok(!actor.messages.some(m => m.msgid === ZJH_PUSH.INNING_RESULT));
+  runtime.hotVersion = 'zjh-comparing';
+  handler = await createHandler(runtime);
+  assert.equal(table.hand, hand, 'pending comparison and cash-out survive hot loading');
+  table.hand.comparisonPause.until = 0;
+  await handler.tick();
   assert.equal(table.hand, null);
-  const settlement = actor.messages.find((m) => m.msgid === ZJH_PUSH.INNING_RESULT).payload;
+  const settlement = peers[2].messages.find((m) => m.msgid === ZJH_PUSH.INNING_RESULT).payload;
   assert.equal(settlement.reduce((sum, p) => sum + p.score, 0), 0);
   assert.ok(settlement.every((p) => p.handPais.length === 3 && p.icon));
   await request(peers[2], ZJH_SEND.GAME_BACK, { roomId: table.roomId, beginNum: 0, endNum: 0 });

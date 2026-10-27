@@ -16,12 +16,17 @@ export async function createHandler(runtime) {
   const lifecycle = await rel(import.meta.url, "./core/room-lifecycle.js", v);
   const poolModule = await rel(import.meta.url, "./core/room-pool.js", v);
   const features = await rel(import.meta.url, "./core/room-features.js", v);
+  const seatView = await rel(import.meta.url, "./core/seat-view.js", v);
   const localHttp = runtime.env === "dev"
     ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
     : null;
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
+    if (["zjh", "niuniu"].includes(table.gameId)) {
+      // Refresh only room policy; preserve the resident hand, seats and clocks.
+      table.roomRules = gameOf(table.roomType).roomPolicy(table);
+    }
     if (table.gameId === "holdem" && Number(table.roomType) === 19 && Number(table.cfg?.play_mode || 0) === 0) {
       // Adopt the corrected wire mode without replacing the live room/hand.
       table.playMode = 1;
@@ -38,6 +43,10 @@ export async function createHandler(runtime) {
 
   function send(ws, msgid, payload) {
     if (ws.readyState === 1) {
+      const session = runtime.registry.session(ws);
+      const table = session?.inRoom !== false && session
+        ? runtime.registry.getTable(session.roomId, session.agentId, session.gameId) : null;
+      if (table) payload = seatView.projectSeatMessage(table, session, msgid, payload);
       ws.send(codec.encodeFrame(msgid, payload));
     }
   }
@@ -47,6 +56,15 @@ export async function createHandler(runtime) {
       env: runtime.env,
       wallet: runtime.wallet,
       send,
+      prepareRoundSeats(roomInfo) {
+        for (const [ws, session] of runtime.registry.sessions) {
+          if (session.inRoom !== false && session.roomId === table.roomId
+            && Number(session.agentId || 0) === Number(table.agentId || 0)
+            && session.gameId === table.gameId && seatView.needsSeatViewRefresh(table, session)) {
+            send(ws, PUSH.ROOM_INFO, roomInfo);
+          }
+        }
+      },
       sessionFor(uid) {
         return [...runtime.registry.sessions.values()].find((session) => session.inRoom !== false
           && Number(session.userId) === Number(uid) && Number(session.roomId) === Number(table.roomId)
@@ -428,7 +446,8 @@ export async function createHandler(runtime) {
       });
       return;
     }
-    const handled = game.onMessage(ctxOf(ws, session, table), msgid, payload || {});
+    const request = seatView.restoreSeatRequest(table, session, msgid, payload || {});
+    const handled = await game.onMessage(ctxOf(ws, session, table), msgid, request);
     await game.afterRound?.(ctxOf(ws, session, table));
     if (table.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
       await expireRoom(table);

@@ -3,7 +3,7 @@ import { rel } from "../../rel.js";
 import { env } from "../../../../shared/rpc/env.js";
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
-const { default: gameConfig } = await rel(import.meta.url, "./config.js", version);
+const { default: gameConfig, roomRules } = await rel(import.meta.url, "./config.js", version);
 const { compareWithSuit: compare3, evaluate3 } = await rel(import.meta.url, "./hand.js", version);
 const { ZJH_OP: OP, ZJH_PUSH: MSG } = await rel(import.meta.url, "./messages.js", version);
 const { PUSH } = await rel(import.meta.url, "../../messages.js", version);
@@ -17,32 +17,43 @@ const history = env.isDev ? await rel(import.meta.url, "../../../../cache/zjh/hi
 export const { botChoose } = robot;
 const hidden = () => [-1, -1, -1];
 
+// Partial-open games expose only the owner's initial one/two cards. The
+// remaining cards stay secret until LOOK; other players still see three backs.
+function ownerCards(table, player) {
+  if (!player) return hidden();
+  const count = player.looked || player.publicCards ? 3 : table.playMode === 2 ? 2 : table.playMode === 5 ? 1 : 0;
+  return player.hole.map((card, index) => index < count ? card : -1);
+}
+
 export function ctjhParams(table) {
+  const rules = roomRules(table.cfg, table);
   return {
     ante: table.ante, initialBet: table.ante, smallBlind: 0, bigBlind: 0,
     allInRepetCard: false, delayLook: false, openInsurance: false, openMen: false,
-    forceShowCard: table.forceShowCard, forceShowType: 1,
+    forceShowCard: table.forceShowCard, forceShowType: table.forceShowType ?? 1,
     compareRule: 1, maxRounds: table.maxRounds, maxSingleBet: 0,
     mustMenRound: 1, compareRound: 0, compareTime: 2, allowCompareMen: false,
     jinHuaTime: 0, baoZiTime: 0, criticalFlag: false, criticalAnte: 0,
     carryMin: table.carryMin, carryMax: -1, carryDefault: table.carryMin,
     betTime: table.betTime, gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
-    gameName: table.cfg?.name || gameConfig.name, gameStartNum: 2,
-    observed: true, randomSit: false, openAuditCarry: false,
-    banTalk: false, banEmulator: false, taxType: 0, taxPercent: 0, openTaxNoLimit: true,
+    gameName: table.cfg?.name || gameConfig.name, gameStartNum: rules.gameStartNum,
+    observed: true, randomSit: rules.randomSit, openAuditCarry: false,
+    banTalk: rules.banTalk, banEmulator: rules.banEmulator,
+    taxType: rules.taxType, taxPercent: rules.taxPercent, maxTax: rules.maxTax, openTaxNoLimit: true,
   };
 }
 
 export function zjhConf(table) {
   return { roomType: gameConfig.confRoomType, ctjhParams: ctjhParams(table),
-    minPeople: gameConfig.minPeople, maxPeople: gameConfig.maxPeople,
+    minPeople: roomRules(table.cfg, table).gameStartNum, maxPeople: roomRules(table.cfg, table).maxPeople,
     playMode: table.playMode || 3, allowCarryOut: true, hundredSwitch: false,
     gameRoomConfigId: Number(table.cfg?.game_room_config_id || 2501),
     roomClassification: table.roomClassification || 2 };
 }
 
 export function extraRoomInfo(table) {
-  const memberList = memberListSeats(table.members, gameConfig.maxPeople);
+  const rules = roomRules(table.cfg, table);
+  const memberList = memberListSeats(table.members, rules.maxPeople);
   // 3260 subtracts this hand's xiaZhuData during original-client reconstruction.
   if (table.hand) for (const seat of memberList) {
     const player = participants(table).find((p) => p.uid === seat.uid);
@@ -50,7 +61,7 @@ export function extraRoomInfo(table) {
   }
   return { ctjh: ctjhParams(table), playMode: table.playMode || 3,
     roomClassification: table.roomClassification || 2, delayLeftCount: 0,
-    chatHistory: [], disusePoint: table.carryMin, memberList };
+    chatHistory: [], disusePoint: rules.disusePoint, memberList };
 }
 
 const seated = (table) => table.members.filter((m) => m.point > 0 && !m.carryDeadline);
@@ -65,7 +76,7 @@ const sendUser = (io, uid, id, data) => {
 export function beginHand(io, table) {
   if (table.hand || lifecycle.isExpired(table)) return;
   const players = seated(table).sort((a, b) => a.pos - b.pos);
-  if (players.length < 2) { table.phase = "idle"; return; }
+  if (players.length < roomRules(table.cfg, table).gameStartNum) { table.phase = "idle"; return; }
   const dealer = players.find((p) => p.pos > table.dealerPos) || players[0];
   table.dealerPos = dealer.pos;
   const first = players.find((p) => p.pos > dealer.pos) || players[0];
@@ -75,7 +86,7 @@ export function beginHand(io, table) {
   for (const p of players) Object.assign(p, { dealer: p === dealer, folded: false,
     looked: false, hole: [], streetBet: 0, totalBet: 0, lastOperation: 0,
     openingPoint: p.point, selectedShow: [], followAlways: false, preFold: false,
-    blindBet: 0, seenBet: 0 });
+    blindBet: 0, seenBet: 0, publicCards: false });
   table.hand = { participants: players, deck: shuffle(makeDeck()), deckPos: 0,
     pot: 0, currentBet: table.ante, round: 1, actorUid: first.uid,
     acted: new Set(), bankerId: dealer.uid, firstUid: first.uid, events: [],
@@ -91,7 +102,12 @@ export function beginHand(io, table) {
     smallBlindId: 0, bigBlindId: 0, straddleUid: 0, underTheGunUid: first.uid });
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_PERFLOP");
   for (const p of players) { p.hole = table.hand.deck.slice(table.hand.deckPos, table.hand.deckPos + 3); table.hand.deckPos += 3; }
-  io.broadcast(MSG.DEAL_DI, players.map((p) => ({ uid: p.uid, cardList: hidden() })));
+  if (table.playMode === 2 || table.playMode === 5) {
+    // A single broadcast would leak the owner's partially visible hand to
+    // opponents and observers. Send exactly one recipient-specific deal.
+    for (const uid of table.hand.viewers) sendUser(io, uid, MSG.DEAL_DI,
+      players.map((p) => ({ uid: p.uid, cardList: p.uid === uid ? ownerCards(table, p) : hidden() })));
+  } else io.broadcast(MSG.DEAL_DI, players.map((p) => ({ uid: p.uid, cardList: hidden() })));
   io.broadcast(MSG.ROUND_INFO, 1);
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_PERFLOP");
   prompt(io, table);
@@ -162,6 +178,20 @@ function pay(io, table, p, op, amount, round) {
   if (p.looked) p.seenBet = (p.seenBet || 0) + amount;
   else p.blindBet = (p.blindBet || 0) + amount;
   pushBet(io, table, p, op, amount, round);
+  if (op === OP.ALL_IN && table.forceShowCard && ctjhParams(table).forceShowType === 2) revealCards(io, p);
+}
+
+function revealCards(io, player) {
+  if (player.publicCards) return;
+  player.publicCards = true;
+  io.broadcast(MSG.SHOWCARD, { uid: player.uid, pos: player.pos,
+    holeCardList: player.hole.slice(), cardTypeInfo: evaluate3(player.hole) });
+}
+
+function discard(io, table, player, operation) {
+  player.folded = true;
+  pushBet(io, table, player, operation, 0);
+  if (table.forceShowCard && ctjhParams(table).forceShowType === 1) revealCards(io, player);
 }
 
 export function onZjhAction(io, table, session, body) {
@@ -172,6 +202,7 @@ export function onZjhAction(io, table, session, body) {
 
 function applyAction(io, table, uid, op, data, targetUid) {
   if (table.phase !== "playing" || !table.hand) return false;
+  if (table.hand.comparisonPause) return false;
   const p = live(table).find((m) => m.uid === uid);
   if (!p || p.point <= 0) return false;
   if (op === OP.FOLLOW_ALWAYS) {
@@ -196,7 +227,7 @@ function applyAction(io, table, uid, op, data, targetUid) {
     if (data != null && (!Number.isFinite(Number(data))
       || Math.abs(Number(data) * 100 - option.data.score) > 0.000001)) return false;
   }
-  if (op === OP.FOLD) { p.folded = true; pushBet(io, table, p, op, 0); }
+  if (op === OP.FOLD) discard(io, table, p, op);
   else if (op === OP.COMPARE) {
     const target = live(table).find((m) => m.uid === Number(targetUid) && m !== p);
     if (!target) return false;
@@ -208,7 +239,12 @@ function applyAction(io, table, uid, op, data, targetUid) {
     const comparison = { uid, target: target.uid, winner: winner.uid, isLast: live(table).length === 1 };
     Object.assign(table.hand.events.at(-1), { targetUid: target.uid, winUid: winner.uid, ...comparison });
     io.broadcast(MSG.BIPAI_RESULT, comparison);
-    pushBet(io, table, loser, OP.DISUSE, 0);
+    discard(io, table, loser, OP.DISUSE);
+    // The native comparison panel owns three seconds of animation callbacks.
+    // A new comparison/settlement before it closes destroys their target nodes.
+    // Keep the pause on the resident hand so hot loading cannot skip it.
+    table.hand.comparisonPause = { fromUid: p.uid, until: Date.now() + gameConfig.compareAnimationMs };
+    return true;
   } else {
     pay(io, table, p, op, option.data.score);
     if (op === OP.RAISE) table.hand.currentBet *= 2;
@@ -238,6 +274,18 @@ function nextActor(io, table, from) {
 
 export function tickPlaying(io, table, now = Date.now()) {
   if (table.phase !== "playing" || !table.hand) return;
+  const pause = table.hand.comparisonPause;
+  if (pause) {
+    if (now < pause.until) return;
+    const from = participants(table).find(p => p.uid === pause.fromUid);
+    delete table.hand.comparisonPause;
+    nextActor(io, table, from);
+    return;
+  }
+  // Also bring already-folded hands into sync after a business hot update.
+  if (table.forceShowCard && ctjhParams(table).forceShowType === 1) {
+    for (const player of participants(table)) if (player.folded) revealCards(io, player);
+  }
   const p = actorOf(table);
   if (!p) return settle(io, table);
   if (p.preFold) { applyAction(io, table, p.uid, OP.FOLD); return; }
@@ -262,20 +310,20 @@ function settle(io, table) {
     for (const [uid, amount] of result.payout) payouts.set(uid, amount);
   } else {
     const winners = ranked.filter((r) => compare3(r.eval, ranked[0].eval) === 0);
-    const order = winners.sort((a, b) => ((a.member.pos - table.dealerPos + gameConfig.maxPeople - 1) % gameConfig.maxPeople)
-      - ((b.member.pos - table.dealerPos + gameConfig.maxPeople - 1) % gameConfig.maxPeople));
+    const capacity = roomRules(table.cfg, table).maxPeople;
+    const order = winners.sort((a, b) => ((a.member.pos - table.dealerPos + capacity - 1) % capacity)
+      - ((b.member.pos - table.dealerPos + capacity - 1) % capacity));
     order.forEach((r, i) => payouts.set(r.member.uid, Math.floor(hand.pot / order.length) + (i < hand.pot % order.length ? 1 : 0)));
   }
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "SETTLE");
   const results = players.map((p) => {
     const won = payouts.get(p.uid) || 0;
     p.point += won;
-    const publicCards = table.forceShowCard || (ranked.length > 1 && !p.folded);
+    const publicCards = p.publicCards || table.forceShowCard || (ranked.length > 1 && !p.folded);
     const cards = publicCards ? p.hole.slice() : p.hole.map((card) => p.selectedShow?.includes(card) ? card : -1);
     const visible = cards.every((c) => c >= 0);
     const user = userInfoOf(p);
-    if (visible) io.broadcast(MSG.SHOWCARD, { uid: p.uid, pos: p.pos,
-      holeCardList: cards, cardTypeInfo: evaluate3(cards) });
+    if (visible) revealCards(io, p);
     return { uid: p.uid, name: user.name, icon: user.icon, pos: p.pos, banker: p.dealer,
       xiaZhuData: p.totalBet, score: won - p.totalBet, point: p.point, isWin: won > 0,
       handPais: visible ? cards.slice() : [], showCards: cards,
@@ -298,15 +346,17 @@ function settle(io, table) {
 export function foldIfPlaying(io, table, uid) {
   const p = live(table).find((m) => m.uid === uid);
   if (!p || !table.hand) return;
-  p.folded = true;
-  pushBet(io, table, p, OP.FOLD, 0);
+  // Leaving cannot undo the winner of a completed comparison and erase its pot.
+  if (table.hand.comparisonPause && live(table).length === 1) return;
+  discard(io, table, p, OP.FOLD);
+  if (table.hand.comparisonPause) return;
   if (live(table).length < 2) settle(io, table);
   else if (table.hand.actorUid === uid) nextActor(io, table, p);
 }
 
 export function onHandCardReq(send, table, session) {
   const p = participants(table).find((p) => p.uid === Number(session.userId));
-  send(PUSH.DZPK_HAND_CARD_RES, { handCard: p?.looked ? p.hole.slice() : hidden(), commonCard: [] });
+  send(PUSH.DZPK_HAND_CARD_RES, { handCard: ownerCards(table, p), commonCard: [] });
 }
 
 export function onShowCardReq(send, table, session, body) {
@@ -330,15 +380,23 @@ export function pushPlayingSnapshot(send, table, session) {
     uidList: participants(table).map((p) => p.uid), gameState: "BET_PERFLOP",
     memberDeskInfos: participants(table).map((p) => ({ uid: p.uid, pos: p.pos, state: 3,
       banker: p.dealer, xiaZhuData: p.totalBet, lastOperation: p.lastOperation,
-      isLooked: p.looked, isShow: false,
-      handPais: p.uid === Number(session.userId) && p.looked ? p.hole.slice() : hidden(),
-      showCards: hidden() })),
+      isLooked: p.looked, isShow: Boolean(p.publicCards),
+      // The original inningInfo turns any visible handPais into a SHOWCARD
+      // event. Partial private cards must use 3282 below, which restores them
+      // without replaying openCard on every room/seat snapshot.
+      handPais: p.publicCards || p.uid === Number(session.userId) && p.looked ? p.hole.slice() : hidden(),
+      showCards: p.publicCards ? p.hole.slice() : hidden() })),
     pot: hand.pot, roundBetMap: Object.fromEntries(participants(table).map((p) => [p.uid, p.totalBet])),
     currentOperatorId: hand.actorUid, leftTime: turnPayload(table).leftTime,
     buyDelayCount: 0, delayLeftCount: 0, smallBlindId: 0, bigBlindId: 0, straddleUid: 0,
     underTheGunUid: hand.firstUid || hand.actorUid, flopPokerList: [], turnPoker: -1, riverPoker: -1,
     finalBetPlayerId: 0, finalBetPlayerPoint: 0 });
+  const self = participants(table).find(p => p.uid === Number(session.userId));
+  if (self && !self.looked && !self.publicCards && (table.playMode === 2 || table.playMode === 5)) {
+    send(PUSH.DZPK_HAND_CARD_RES, { handCard: ownerCards(table, self), commonCard: [] });
+  }
   send(MSG.ROUND_INFO, hand.round);
+  if (hand.comparisonPause) return;
   send(MSG.OPERATION_PLAYER, turnPayload(table));
   if (Number(session.userId) === hand.actorUid) send(MSG.OPERATION, actionOptions(table, actorOf(table)));
   else {

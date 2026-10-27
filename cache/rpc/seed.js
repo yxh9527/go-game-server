@@ -16,7 +16,34 @@ export function seedRooms() {
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5805, play_mode: 0, room_index: 3, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 3", category: "hundred" }),
     room({ game_type: 1004, room_type: 61, game_room_config_id: 6101, room_index: 26, carry_min: 100000000, name: "麻将胡了", category: "slots" }),
     room({ game_type: 1004, room_type: 63, game_room_config_id: 6301, room_index: 26, carry_min: 100000000, name: "赏金女王", category: "slots" }),
-    room({ game_type: 21, room_type: 25, game_room_config_id: 2501, play_mode: 3, ante: 10, carry_min: 100, force_show_card: 1, name: "炸金花 底注10", category: "normal" }),
+    ...[
+      [2501, 3, 10, 100, 2, "炸金花"],
+      [16, 3, 100, 1000, 2, "炸金花"],
+      [17, 3, 500, 5000, 4, "炸金花"],
+      [125, 3, 2000, 50000, 4, "炸金花"],
+      [134, 2, 100, 1000, 2, "看二张"],
+      [73, 2, 500, 5000, 2, "看二张"],
+      [74, 2, 2000, 50000, 4, "看二张"],
+      [2503, 5, 10, 100, 2, "看一张"],
+      [2502, 5, 100, 1000, 2, "看一张"],
+    ].map(([id, mode, ante, carry, classification, name], index) => room({
+      game_type: 21, room_type: 25, game_room_config_id: id, play_mode: mode,
+      ante, carry_min: carry, room_classification: classification,
+      sort_index: 2500 + index, force_show_card: 1,
+      name: `${name} 底注${ante}`, category: "normal",
+    })),
+    ...[
+      [71,3,20,3,2,2000], [2410,7,30,4,2,20000], [19,3,10,4,2,1000],
+      [69,3,50,4,4,5000], [2406,0,10,0,2,1000], [2401,3,200,3,4,50000],
+      [2402,7,1,4,2,500], [2403,7,50,4,2,50000], [126,3,200,4,4,50000],
+      [131,7,10,4,2,5000], [2411,3,100,4,4,20000], [72,3,50,3,4,10000],
+      [2408,0,50,0,2,5000], [2412,3,1,3,4,100],
+    ].map(([id, mode, ante, see, classification, carry], index) => room({
+      game_type: 20, room_type: 24, game_room_config_id: id, play_mode: mode,
+      ante, see_card_no: see, room_classification: classification, carry_min: carry,
+      sort_index: 2400 + index, category: 'normal',
+      name: `${mode === 7 ? '七癞牛牛' : mode === 0 ? '全暗牛牛' : `看${see}张牛牛`} 底注${ante}`,
+    })),
   ];
 }
 
@@ -46,9 +73,17 @@ function room(row) {
   }
   if (roomType === 25) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, straddle: false,
-      roomClassification: row.room_classification || 2, seeCardNo: 0, aofBet: 0 });
+      roomClassification: row.room_classification || 2, seeCardNo: 0, aofBet: 0,
+      maxPeople: 7, disusePoint: Math.max(0, row.carry_min - row.ante),
+      randomSit: true, banTalk: true, banEmulator: false });
+    if (row.play_mode === 2) Object.assign(payloadObj, { taxType: 2, taxPercent: 500 });
     payloadObj.key = [25, payloadObj.playMode, row.ante, payloadObj.roomClassification,
       payloadObj.carryMin].join('/');
+  }
+  if (roomType === 24) {
+    Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, seeCardNo: row.see_card_no,
+      roomClassification: row.room_classification, maxPeople: 7 });
+    payloadObj.key = [24, row.play_mode, row.ante, row.see_card_no, row.room_classification, row.carry_min].join('/');
   }
   return {
     id: row.game_room_config_id,

@@ -28,7 +28,7 @@ export function remainingSeconds(table, now = Date.now()) {
 }
 
 export function hasHumanPresence(table) {
-  return (table.members || []).some((member) => !member.bot)
+  return (table.members || []).some((member) => !member.bot && !member.pendingDeparture)
     || (table.observers || []).some((member) => !member.bot);
 }
 

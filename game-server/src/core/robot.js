@@ -41,7 +41,8 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
   settings.minStayMs = Math.max(0, settings.minStayMs);
   settings.observerLifetimeMs = Math.max(1000, settings.observerLifetimeMs);
   settings.walletBuyIns = Math.max(1, Math.min(10, settings.walletBuyIns));
-  const limit = Math.max(0, Math.min(game.maxPeople() - 1, Math.floor(finite(table.botTarget, game.maxPeople() - 1))));
+  const capacity = game.maxPeople(table);
+  const limit = Math.max(0, Math.min(capacity - 1, Math.floor(finite(table.botTarget, capacity - 1))));
   const state = table.robotTraffic ||= {
     nextCheckAt: now + delay(settings.checkMinMs, settings.checkMaxMs, rng),
     nextUid: FIRST_UID, profiles: new Map(),
@@ -125,13 +126,13 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
   }
   // Keep a free chair for a real player. A vacancy is an opportunity, not an
   // instruction to refill the entire table immediately.
-  if (table.members.length >= game.maxPeople() - 1
+  if (table.members.length >= capacity - 1
     || table.members.filter((member) => member.bot).length >= limit
     || !animationEnded || rng() >= settings.joinProbability) return;
   let profile = [...state.profiles.values()].find((item) => !seated(item.session.userId)
     && now >= item.canSitAt && item.session.wallet >= Math.max(1, finite(table.carryMin, 0)));
   if (!profile) {
-    if (state.profiles.size >= game.maxPeople() * 2) return;
+    if (state.profiles.size >= capacity * 2) return;
     const used = new Set([...table.members, ...table.observers].map((member) => member.uid));
     const history = table.roomFeatures?.players;
     while (used.has(state.nextUid) || history?.has(state.nextUid)) state.nextUid += 1;
@@ -144,7 +145,7 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
     game.watch(table, profile.session);
   }
   const positions = new Set(table.members.map((member) => member.pos));
-  const free = Array.from({ length: game.maxPeople() }, (_, pos) => pos).filter((pos) => !positions.has(pos));
+  const free = Array.from({ length: capacity }, (_, pos) => pos).filter((pos) => !positions.has(pos));
   const position = free[Math.floor(rng() * free.length)];
   game.onSitDown(roomContext(profile, { position }));
   const member = seated(profile.session.userId);

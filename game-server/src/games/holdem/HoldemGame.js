@@ -52,9 +52,8 @@ export class HoldemGame extends SeatGame {
   }
 
   onMessage(ctx, msgid, payload) {
-    if (super.onMessage(ctx, msgid, payload)) {
-      return true;
-    }
+    const common = super.onMessage(ctx, msgid, payload);
+    if (common) return common;
     if (msgid === SEND.LOGIN_ROOM) {
       this.onLoginRoom(ctx);
       return true;

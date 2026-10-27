@@ -33,6 +33,9 @@ export function createRoomLogic(decode) {
     const bigBlind = params.bigBlind === undefined || params.bigBlind === "" ? undefined : num(params.bigBlind, 0);
     const ante = params.ante === undefined || params.ante === "" ? undefined : num(params.ante, 0);
     const carryMin = params.carryMin === undefined || params.carryMin === "" ? undefined : num(params.carryMin, 0);
+    const seeCardNo = params.seeCardNo === undefined || params.seeCardNo === "" ? undefined : num(params.seeCardNo, 0);
+    const classification = params.roomClassification === undefined || params.roomClassification === ""
+      ? undefined : num(params.roomClassification, 2);
     const forceShowCard = params.forceShowCard === undefined || params.forceShowCard === ""
       ? undefined
       : truthy(params.forceShowCard);
@@ -44,8 +47,10 @@ export function createRoomLogic(decode) {
       && (playMode === undefined || num(row.play_mode, 0) === playMode)
       && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)
       && (bigBlind === undefined || num(row.big_blind, 0) === bigBlind)
-      && (num(row.room_type, 0) !== 25 || ((ante === undefined || roomAnte(row) === ante)
-        && (carryMin === undefined || num(row.carry_min, 0) === carryMin)))
+      && (![24, 25].includes(num(row.room_type, 0)) || ((ante === undefined || roomAnte(row) === ante)
+        && (carryMin === undefined || num(row.carry_min, 0) === carryMin)
+        && (classification === undefined || roomClassification(row) === classification)))
+      && (num(row.room_type, 0) !== 24 || seeCardNo === undefined || roomSeeCardNo(row) === seeCardNo)
       && (forceShowCard === undefined || truthy(row.force_show_card) === forceShowCard))
       .map((row) => {
       let score = 0;
@@ -86,6 +91,18 @@ export function createRoomLogic(decode) {
     return num(row.ante, num(payload.ante, 10));
   }
 
+  function roomClassification(row) {
+    let payload = {};
+    try { payload = JSON.parse(row.payload || "{}"); } catch {}
+    return num(row.room_classification, num(payload.roomClassification, 2));
+  }
+
+  function roomSeeCardNo(row) {
+    let payload = {};
+    try { payload = JSON.parse(row.payload || "{}"); } catch {}
+    return num(row.see_card_no, num(payload.seeCardNo, 4));
+  }
+
   function enterRoomPayload(row, params, config) {
     const roomType = num(row.room_type, 0);
     const playMode = num(row.play_mode, 0);
@@ -99,15 +116,16 @@ export function createRoomLogic(decode) {
       roomIndex,
       smallBlind,
       bigBlind,
-      ...(roomType === 25 ? { ante: roomAnte(row), initialBet: roomAnte(row),
-        roomClassification: num(row.room_classification, 2), seeCardNo: 0 } : {}),
+      ...([24, 25].includes(roomType) ? { ante: roomAnte(row), initialBet: roomAnte(row),
+        roomClassification: roomClassification(row), seeCardNo: roomType === 24 ? roomSeeCardNo(row) : 0 } : {}),
       carryMin: num(row.carry_min, 0),
       forceShowCard: truthy(row.force_show_card),
       gameRoomConfigId: num(row.game_room_config_id, 0),
       key: roomType === 19 ? [roomType, smallBlind, bigBlind, false, playMode,
         bigBlind, 2, num(row.carry_min, 0), 0, truthy(row.force_show_card)].join('/')
-        : roomType === 25 ? [25, playMode, roomAnte(row), num(row.room_classification, 2), num(row.carry_min, 0)].join('/')
-          : `${roomType}/${smallBlind}/${bigBlind}`,
+        : roomType === 25 ? [25, playMode, roomAnte(row), roomClassification(row), num(row.carry_min, 0)].join('/')
+          : roomType === 24 ? [24, playMode, roomAnte(row), roomSeeCardNo(row), roomClassification(row), num(row.carry_min, 0)].join('/')
+            : `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",
       // Ordinary games also load the shared Bairen panel and unsubscribe on
       // exit. Its original socket selector requires this endpoint even when

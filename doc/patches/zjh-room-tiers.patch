@@ -1,0 +1,79 @@
+diff --git a/app/tables/gogame/seed.go b/app/tables/gogame/seed.go
+index 90096a3..890fefe 100644
+--- a/app/tables/gogame/seed.go
++++ b/app/tables/gogame/seed.go
+@@ -190,18 +190,47 @@ func seedRooms(m *gorm.DB, now int64) {
+ 		baccaratRoom(now, 5805, 0, 3, "经典百家乐 3"),
+ 		scratchRoom(now, ScratchMahjong, 6101, 26, "麻将胡了"),
+ 		scratchRoom(now, ScratchQueen, 6301, 26, "赏金女王"),
+-		zjhRoom(now, 2501, 10, 100, 3, "炸金花 底注10"),
+ 	}
+-	m.Create(rooms)
++	m.Create(append(rooms, zjhRooms(now)...))
++}
++
++// zjhRooms follows the nine non-critical tiers in the original lobby.
++func zjhRooms(now int64) []*RoomConfig {
++	tiers := []struct {
++		id, ante, carry int64
++		mode, class     int32
++		name            string
++	}{
++		{2501, 10, 100, 3, 2, "炸金花 底注10"},
++		{16, 100, 1000, 3, 2, "炸金花 底注100"},
++		{17, 500, 5000, 3, 4, "炸金花 底注500"},
++		{125, 2000, 50000, 3, 4, "炸金花 底注2000"},
++		{134, 100, 1000, 2, 2, "看二张 底注100"},
++		{73, 500, 5000, 2, 2, "看二张 底注500"},
++		{74, 2000, 50000, 2, 4, "看二张 底注2000"},
++		{2503, 10, 100, 5, 2, "看一张 底注10"},
++		{2502, 100, 1000, 5, 2, "看一张 底注100"},
++	}
++	rooms := make([]*RoomConfig, 0, len(tiers))
++	for index, tier := range tiers {
++		room := zjhRoom(now, tier.id, tier.ante, tier.carry, tier.mode, tier.class, tier.name)
++		room.SortIndex = int32(2500 + index)
++		rooms = append(rooms, room)
++	}
++	return rooms
+ }
+ 
+ func seedZjhIfMissing(m *gorm.DB, now int64) {
+-	var n int64
+-	m.Model(&RoomConfig{}).Where("room_type = ?", ZjhRoomType).Count(&n)
+-	if n > 0 {
+-		return
++	// Backfill each missing tier even when the original low-stakes room exists.
++	// Preserve existing operator configuration, including disabled rooms.
++	for _, room := range zjhRooms(now) {
++		var count int64
++		result := m.Model(&RoomConfig{}).Where("game_room_config_id = ? AND room_type = ?", room.GameRoomConfigId, room.RoomType).Count(&count)
++		if result.Error != nil || count > 0 {
++			continue
++		}
++		m.Create(room)
+ 	}
+-	m.Create(zjhRoom(now, 2501, 10, 100, 3, "炸金花 底注10"))
+ }
+ 
+ func seedNoShowIfMissing(m *gorm.DB, now int64) {
+@@ -408,8 +437,8 @@ func scratchRoom(now int64, roomType int32, cfgID int64, roomIndex int32, name s
+ 	}
+ }
+ 
+-func zjhRoom(now int64, cfgID, ante, carryMin int64, playMode int32, name string) *RoomConfig {
+-	key := fmt.Sprintf("%d/0/0/false/%d/%d/2/%d/0", ZjhRoomType, playMode, ante, carryMin)
++func zjhRoom(now int64, cfgID, ante, carryMin int64, playMode, class int32, name string) *RoomConfig {
++	key := fmt.Sprintf("%d/%d/%d/%d/%d", ZjhRoomType, playMode, ante, class, carryMin)
+ 	payload := mustJSON(map[string]any{
+ 		"roomType":            ZjhRoomType,
+ 		"gameRoomConfigId":    cfgID,
+@@ -427,7 +456,7 @@ func zjhRoom(now int64, cfgID, ante, carryMin int64, playMode int32, name string
+ 		"straddle":            false,
+ 		"carryMin":            carryMin,
+ 		"playMode":            playMode,
+-		"roomClassification":  2,
++		"roomClassification":  class,
+ 		"ante":                ante,
+ 		"scoreMode":           nil,
+ 		"initialBet":          ante,

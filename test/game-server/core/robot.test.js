@@ -241,7 +241,7 @@ for (const type of [19, 25]) {
     f.traffic(); f.traffic(1000); f.traffic(1000);
     const member = f.table.members[0];
     const profile = f.table.robotTraffic.profiles.get(member.uid);
-    member.point = 499;
+    member.point = type === 25 ? f.game.roomPolicy(f.table).disusePoint : 499;
     f.table.roomFeatures.settledInning = 1;
     f.table.currentInning = 1;
     const total = f.funds();

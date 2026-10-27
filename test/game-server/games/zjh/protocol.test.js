@@ -52,6 +52,68 @@ test('calls complete a circle instead of settling, look doubles the next cost wi
   assert.equal(f.messages.filter((m) => m.id === MSG.ACTION_BET).at(-1).data.currentBetScore, 20);
 });
 
+for (const [mode, visible] of [[2, 2], [5, 1]]) {
+  test(`partial-open mode ${mode} preserves private cards on deal, request, reconnect and LOOK`, () => {
+    const f = fixture(3, { play_mode: mode });
+    const deals = f.messages.filter(m => m.id === MSG.DEAL_DI);
+    assert.equal(deals.length, 4);
+    for (const message of deals) {
+      assert.ok(message.uid, 'deals must be private');
+      for (const hand of message.data) {
+        const own = hand.uid === message.uid;
+        assert.equal(hand.cardList.filter(c => c >= 0).length, own ? visible : 0);
+        if (own) assert.deepEqual(hand.cardList.slice(0, visible), f.table.members.find(p => p.uid === hand.uid).hole.slice(0, visible));
+      }
+    }
+    const uid = f.table.hand.actorUid;
+    const checkSnapshot = expected => {
+      const frames = [];
+      engine.pushPlayingSnapshot((id, data) => frames.push({ id, data }), f.table, { userId: uid });
+      for (const p of frames.find(m => m.id === 3260).data.memberDeskInfos) {
+        assert.equal(p.handPais.filter(c => c >= 0).length, p.uid === uid && expected === 3 ? 3 : 0);
+      }
+      if (expected < 3) assert.equal(frames.find(m => m.id === 3282).data.handCard.filter(c => c >= 0).length, expected);
+      engine.onHandCardReq((id, data) => assert.equal(data.handCard.filter(c => c >= 0).length, expected), f.table, { userId: uid });
+    };
+    checkSnapshot(visible);
+    assert.equal(engine.callAmount(f.table, f.table.members.find(p => p.uid === uid)), 10);
+    f.roundTwo(); f.act(OP.LOOK, undefined, {}, uid);
+    checkSnapshot(3);
+    assert.equal(engine.callAmount(f.table, f.table.members.find(p => p.uid === uid)), 20);
+    while (f.table.hand) f.act(OP.CALL);
+    assert.equal(f.table.members.reduce((s, p) => s + p.point, 0), 3000);
+  });
+}
+
+test('partial snapshot hydration uses the original non-animated hand response', () => {
+  const f = fixture(3, { play_mode: 5 });
+  const uid = f.table.hand.actorUid;
+  const source = fs.readFileSync(new URL('../../../../static/client/2.0.1279/assets/Zjh/index.df153.js', import.meta.url), 'utf8');
+  const anchor = "W['prototype']['onPushSelfHandCard']=";
+  const start = source.indexOf(anchor) + anchor.length;
+  const end = source.indexOf(",W['prototype']['onPushSelfSeeCard']", start);
+  const rendered = [];
+  const render = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+    cc: { app: { gameRoom: { isLoginIngRoom: false, getIsOb: () => false,
+      getMyMemberInfo: () => ({}), getIsJoinGame: () => true } }, isValid: () => true },
+    H: { default: { userData: { uid } } }, setTimeout: fn => fn(),
+  });
+  const ui = { node: {}, setSelfCard(cards) { this.cards = cards; }, reflashUserHolds: data => rendered.push(data) };
+  for (let repeat = 0; repeat < 3; repeat++) {
+    const frames = [];
+    engine.pushPlayingSnapshot((id, data) => frames.push({ id, data }), f.table, { userId: uid });
+    const snapshot = frames.find(m => m.id === 3260).data;
+    assert.ok(snapshot.memberDeskInfos.every(p => p.handPais.every(c => c < 0)), 'snapshot cannot turn partial cards into a show-card event');
+    const response = frames.find(m => m.id === 3282).data;
+    render.call(ui, response);
+    assert.equal(ui.cards.filter(c => c >= 0).length, 1);
+    assert.equal(rendered.at(-1).isAni, false);
+  }
+  const observerFrames = [];
+  engine.pushPlayingSnapshot((id, data) => observerFrames.push({ id, data }), f.table, { userId: 99 });
+  assert.ok(!observerFrames.some(m => m.id === 3282));
+});
+
 test('unknown, nonfinite, spoofed and stale amount actions cannot move chips or turn', () => {
   const f = fixture();
   const initial = JSON.stringify(f.table);
@@ -79,6 +141,54 @@ test('compare uses targetUid, validates it before payment, resolves suits and ma
   assert.ok(compareWithSuit(evaluate3(actor.hole), evaluate3(target.hole)) > 0);
 });
 
+test('comparison pauses block overlapping actions and survive reconnect and hot loading', async (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture(); f.roundTwo(); f.act(OP.LOOK);
+  const hand = f.table.hand, actor = hand.participants.find(p => p.uid === hand.actorUid);
+  const target = hand.participants.find(p => p.uid !== actor.uid);
+  f.act(OP.COMPARE, 0, { targetUid: target.uid });
+  assert.deepEqual(hand.comparisonPause, { fromUid: actor.uid, until: now + 3500 });
+  const afterCompare = f.messages.length, balances = hand.participants.map(p => p.point);
+  f.act(OP.CALL); f.act(OP.FOLD); f.act(OP.COMPARE, 0, { targetUid: target.uid });
+  assert.equal(f.messages.length, afterCompare);
+  assert.deepEqual(hand.participants.map(p => p.point), balances);
+  const reconnect = [];
+  engine.pushPlayingSnapshot((id, data) => reconnect.push({ id, data }), f.table, { userId: actor.uid });
+  assert.ok(reconnect.some(m => m.id === 3260));
+  assert.ok(!reconnect.some(m => [MSG.OPERATION, MSG.OPERATION_PLAYER, MSG.PRE_OPERATION].includes(m.id)));
+  const reloaded = await import('../../../../game-server/src/games/zjh/engine.js?v=comparison-timing');
+  now += 3499;
+  reloaded.tickPlaying(f.io, f.table, now);
+  assert.equal(f.messages.length, afterCompare, 'no next action/settlement before native panel closes');
+  now++;
+  reloaded.tickPlaying(f.io, f.table, now);
+  assert.equal(f.table.hand, hand);
+  assert.equal(hand.comparisonPause, undefined);
+  assert.equal(hand.deadline, now + f.table.betTime * 1000, 'next player gets the full action clock');
+  assert.equal(f.messages.filter(m => m.id === MSG.BIPAI_RESULT).length, 1);
+  assert.ok(f.messages.slice(afterCompare).some(m => m.id === MSG.OPERATION_PLAYER));
+});
+
+test('last comparison settles only after the animation and a concurrent departure cannot skip it', (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture(2); f.roundTwo(); f.act(OP.LOOK);
+  const actor = f.table.members.find(p => p.uid === f.table.hand.actorUid);
+  const target = f.table.members.find(p => p.uid !== actor.uid);
+  f.act(OP.COMPARE, 0, { targetUid: target.uid });
+  const hand = f.table.hand;
+  assert.equal(f.messages.filter(m => m.id === MSG.INNING_RESULT).length, 0);
+  const winner = hand.participants.find(p => !p.folded);
+  engine.foldIfPlaying(f.io, f.table, winner.uid);
+  assert.equal(f.table.hand, hand, 'exit cannot destroy the active comparison animation');
+  now += 3500;
+  engine.tickPlaying(f.io, f.table, now);
+  assert.equal(f.table.hand, null);
+  assert.equal(f.messages.filter(m => m.id === MSG.INNING_RESULT).length, 1);
+  assert.equal(f.table.members.reduce((sum, p) => sum + p.point, 0), 2000);
+});
+
 test('folding and removed seats preserve committed chips and all participant results', () => {
   const f = fixture();
   const departed = f.table.members.find((p) => p.uid === f.table.hand.actorUid);
@@ -93,6 +203,70 @@ test('folding and removed seats preserve committed chips and all participant res
   assert.equal(f.table.members.reduce((sum, p) => sum + p.point, cash), 3000);
   assert.equal(f.table.roomFeatures.players.get(departed.uid).totalHands, 1);
   assert.equal(f.table.roomFeatures.totalHands, 1);
+});
+
+for (const departure of [false, true]) {
+  test(`fold-show rule reveals immediately${departure ? ' when leaving the table' : ' on fold'} and survives snapshots`, () => {
+    const f = fixture(3, { play_mode: 5, force_show_type: 1 });
+    const p = f.table.members.find(p => p.uid === f.table.hand.actorUid);
+    const cards = p.hole.slice();
+    f.messages.length = 0;
+    if (departure) engine.foldIfPlaying(f.io, f.table, p.uid);
+    else f.act(OP.FOLD);
+    const shows = f.messages.filter(m => m.id === MSG.SHOWCARD);
+    assert.equal(shows.length, 1, 'fold must reveal before the other two players finish');
+    assert.deepEqual(shows[0].data.holeCardList, cards);
+    assert.equal(shows[0].uid, undefined, 'the reveal is public');
+    assert.ok(f.table.hand, 'the other players still have their hand');
+    assert.equal(f.messages[0].id, MSG.ACTION_BET, 'acknowledge the fold before showing cards');
+    if (departure) f.table.members = f.table.members.filter(m => m !== p);
+    for (const uid of [p.uid, 99]) {
+      const frames = [];
+      engine.pushPlayingSnapshot((id, data) => frames.push({ id, data }), f.table, { userId: uid });
+      const infos = frames.find(m => m.id === 3260).data.memberDeskInfos;
+      const shown = infos.find(m => m.uid === p.uid);
+      assert.equal(shown.isShow, true);
+      assert.deepEqual(shown.showCards, cards);
+      assert.deepEqual(shown.handPais, cards);
+      assert.ok(infos.filter(m => m.uid !== p.uid).every(m => m.handPais.every(c => c === -1)));
+    }
+    f.messages.length = 0;
+    engine.foldIfPlaying(f.io, f.table, p.uid);
+    while (f.table.hand) f.act(OP.CALL);
+    assert.ok(!f.messages.some(m => m.id === MSG.SHOWCARD && m.data.uid === p.uid), 'settlement must not replay the fold reveal');
+    const result = f.messages.find(m => m.id === MSG.INNING_RESULT).data.find(m => m.uid === p.uid);
+    assert.deepEqual(result.showCards, cards);
+    assert.equal(result.score, -10);
+  });
+}
+
+test('end-of-hand-only and disabled reveal configurations do not expose a fold early', () => {
+  for (const cfg of [{ force_show_type: 0 }, { force_show_card: 0, force_show_type: 1 }]) {
+    const f = fixture(3, { play_mode: 5, ...cfg });
+    assert.equal(engine.ctjhParams(f.table).forceShowType, cfg.force_show_type);
+    f.messages.length = 0;
+    f.act(OP.FOLD);
+    assert.ok(!f.messages.some(m => m.id === MSG.SHOWCARD));
+  }
+});
+
+test('all-in reveal timing and hot-update fold recovery publish each hand only once', () => {
+  const f = fixture(3, { play_mode: 5, force_show_type: 2 });
+  const p = f.table.members.find(p => p.uid === f.table.hand.actorUid);
+  p.point = 5;
+  f.messages.length = 0;
+  f.act(OP.ALL_IN);
+  assert.deepEqual(f.messages.find(m => m.id === MSG.SHOWCARD).data.holeCardList, p.hole);
+  assert.equal(p.publicCards, true);
+
+  const old = fixture(3, { play_mode: 5 });
+  const folded = old.table.members.find(p => p.uid === old.table.hand.actorUid);
+  old.act(OP.FOLD);
+  delete folded.publicCards; // Old resident hand lacked this field before hot update.
+  old.messages.length = 0;
+  engine.tickPlaying(old.io, old.table);
+  engine.tickPlaying(old.io, old.table);
+  assert.equal(old.messages.filter(m => m.id === MSG.SHOWCARD).length, 1);
 });
 
 test('short stack all-in completes with finite nonnegative balances and conserved chips', () => {

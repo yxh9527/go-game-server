@@ -35,25 +35,33 @@ export class SeatGame extends GameBase {
     return {};
   }
 
-  maxPeople() {
-    return this.config.maxPeople || 9;
+  roomPolicy(table) {
+    return table?.roomRules || {};
   }
 
-  minPeople() {
-    return this.config.minPeople || 2;
+  maxPeople(table) {
+    return this.roomPolicy(table).maxPeople || this.config.maxPeople || 9;
+  }
+
+  minPeople(table) {
+    return this.roomPolicy(table).gameStartNum || this.config.minPeople || 2;
+  }
+
+  shouldStandAfterRound(table, member) {
+    return member.point <= 0 || member.point < Math.max(0, Number(table.carryMin) || 0);
   }
 
   nextSeat(table) {
     const used = new Set(table.members.map((item) => item.pos));
     let pos = 0;
-    while (used.has(pos) && pos < this.maxPeople()) {
+    while (used.has(pos) && pos < this.maxPeople(table)) {
       pos += 1;
     }
     return pos;
   }
 
   seated(table) {
-    return table.members.filter((item) => item.point > 0);
+    return table.members.filter((item) => item.point > 0 && !item.pendingDeparture);
   }
 
   publicMember(member) {
@@ -71,11 +79,11 @@ export class SeatGame extends GameBase {
       currentInning: table.currentInning,
       gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
       leftTime: lifecycle.remainingSeconds(table),
-      maxPeople: this.maxPeople(),
+      maxPeople: this.maxPeople(table),
       roomState: table.phase === "playing" ? 2 : 1,
-      memberList: memberListSeats(table.members, this.maxPeople()),
+      memberList: memberListSeats(table.members, this.maxPeople(table)),
       OBmemberList: features.observerList(table),
-      roomStart: this.seated(table).length >= this.minPeople(),
+      roomStart: this.seated(table).length >= this.minPeople(table),
       memberNum: table.members.length,
       ...this.extraRoomInfo(table),
     };
@@ -97,10 +105,14 @@ export class SeatGame extends GameBase {
     const buyIn = opts.buyIn !== undefined ? Math.max(Number(opts.buyIn) || 0, 0) : this.buyIn(table, session);
     const used = new Set(table.members.map((item) => item.pos));
     let pos = Number(opts.pos);
-    if (!Number.isInteger(pos) || pos < 0 || pos >= this.maxPeople() || used.has(pos)) {
+    if (this.roomPolicy(table).randomSit) {
+      const free = Array.from({ length: this.maxPeople(table) }, (_, i) => i).filter((i) => !used.has(i));
+      pos = free[Math.floor(Math.random() * free.length)];
+    }
+    if (!Number.isInteger(pos) || pos < 0 || pos >= this.maxPeople(table) || used.has(pos)) {
       pos = this.nextSeat(table);
     }
-    if (pos >= this.maxPeople()) return null;
+    if (pos >= this.maxPeople(table)) return null;
     if (buyIn > 0 && !debit(session, buyIn, host).ok) return null;
     const member = {
       uid: session.userId,
@@ -161,7 +173,7 @@ export class SeatGame extends GameBase {
       carryDefault: carryMin,
       carryMax,
       configCarryMax: carryMax,
-      carryBalance: 0,
+      carryBalance: Number(member?.point) || 0,
       accountBalance: wallet,
       leftTime,
       freezePoint: 0,
@@ -261,6 +273,11 @@ export class SeatGame extends GameBase {
     if (!member) {
       return;
     }
+    if (this.holdSeatUntilRoundEnd(table, member)) {
+      member.standAfterRound = true;
+      ctx.send(PUSH.NEXT_ROUND_STANDUP_RES, true);
+      return;
+    }
     if (!(member.carryDeadline > 0 && member.point === 0)) {
       this.abandonIfPlaying(ctx, member);
       features.recordCarryOut(table, member, member.point);
@@ -275,8 +292,52 @@ export class SeatGame extends GameBase {
 
   afterSit(_table, _member, _session) {}
 
+  holdSeatUntilRoundEnd(_table, _member) { return false; }
+
+  onCarryOut(ctx) {
+    const { table, session, body } = ctx;
+    const member = table.members.find(p => p.uid === session.userId);
+    const amount = body.carryOutAmount;
+    if (table.hand || table.partialCarryOut || !member || member.carryDeadline
+        || !Number.isSafeInteger(amount) || amount <= 0 || amount > member.point - table.carryMin) {
+      ctx.send(PUSH.CARRY_OUT_RES, { status: 0, point: member?.point || 0 });
+      return true;
+    }
+    member.point -= amount;
+    table.partialCarryOut = { member, session, amount, credited: false, persisted: false };
+    return this.flushPartialCarryOut(ctx).then(() => true);
+  }
+
+  flushPartialCarryOut(ctx) {
+    const { table, io } = ctx;
+    if (table.partialCarryOutTask) return table.partialCarryOutTask;
+    const payout = table.partialCarryOut;
+    if (!payout) return;
+    const task = (async () => {
+      if (!payout.credited) {
+        const result = await credit(payout.session, payout.amount, ctx);
+        if (result?.ok === false) throw new Error('Partial cash-out rejected');
+        payout.credited = true;
+        features.recordCarryOut(table, payout.member, payout.amount);
+      }
+      if (!payout.persisted) {
+        await walletOf(ctx).persist(payout.session);
+        payout.persisted = true;
+      }
+      delete table.partialCarryOut;
+      io.sendUser?.(payout.member.uid, PUSH.CARRY_OUT_RES, { status: 1, point: payout.member.point });
+      io.sendUser?.(payout.member.uid, PUSH.GAME_POINT_UPDATE, { uid: payout.member.uid, point: payout.session.wallet });
+      this.pushRoomSnapshot(ctx);
+    })();
+    table.partialCarryOutTask = task;
+    task.catch(error => ctx.runtime?.log?.error('partial cash-out failed; will retry', error.message))
+      .finally(() => { if (table.partialCarryOutTask === task) delete table.partialCarryOutTask; });
+    return task;
+  }
+
   afterRound(ctx) {
     const { table, io } = ctx;
+    if (table.partialCarryOut) return this.flushPartialCarryOut(ctx);
     if (table.admissionTask) return table.admissionTask;
     if (table.phase === "playing" || table.hand) return;
     // Tournament chips/elimination belong to match, not cash-table buy-ins.
@@ -285,11 +346,10 @@ export class SeatGame extends GameBase {
     const inning = table.roomFeatures?.settledInning || 0;
     if (!table.roundAdmission) {
       if (!inning || inning <= (table.admissionCheckedInning || 0) || lifecycle.isExpired(table)) return;
-      const minimum = Math.max(0, Number(table.carryMin) || 0);
       const now = Date.now();
       const players = table.members.filter((member) =>
         !(member.carryDeadline > now && member.point === 0)
-        && (member.point <= 0 || member.point < minimum));
+        && (member.standAfterRound || member.pendingDeparture || this.shouldStandAfterRound(table, member)));
       if (!players.length) {
         table.admissionCheckedInning = inning;
         return;
@@ -308,7 +368,7 @@ export class SeatGame extends GameBase {
         const { member, amount } = payout;
         if (!Number.isFinite(amount) || amount < 0) throw new Error("Invalid post-hand seat balance");
         if (!payout.session) {
-          payout.session = (member.bot ? table.robotTraffic?.profiles.get(member.uid)?.session : null)
+          payout.session = member.departureSession || (member.bot ? table.robotTraffic?.profiles.get(member.uid)?.session : null)
             || io.sessionFor?.(member.uid)
             || (ctx.session?.userId === member.uid ? ctx.session : null);
           if (!payout.session) {
@@ -335,8 +395,10 @@ export class SeatGame extends GameBase {
           payout.persisted = true;
         }
         table.members = table.members.filter((item) => item !== member);
-        this.watch(table, member.bot ? { ...payout.session, bot: true } : payout.session);
-        if (member.bot) table.observers.find((item) => item.uid === member.uid).bot = true;
+        if (!member.pendingDeparture) {
+          this.watch(table, member.bot ? { ...payout.session, bot: true } : payout.session);
+          if (member.bot) table.observers.find((item) => item.uid === member.uid).bot = true;
+        }
         payout.removed = true;
         io.broadcast(PUSH.USER_STANDUP_ROOM, member.uid);
         if (!member.bot) io.sendUser?.(member.uid, PUSH.GAME_POINT_UPDATE, {
@@ -345,7 +407,7 @@ export class SeatGame extends GameBase {
       }
       table.admissionCheckedInning = check.inning;
       delete table.roundAdmission;
-      if (this.seated(table).length < this.minPeople()) table.phase = "idle";
+      if (this.seated(table).length < this.minPeople(table)) table.phase = "idle";
       // ROOM_INFO resets original-client settlement animations. The existing
       // stand-up message is queued by the client until its settlement ends.
       features.pushObservers(ctx);
@@ -380,11 +442,11 @@ export class SeatGame extends GameBase {
   }
 
   queueStart(table) {
-    if (table.standby || table.admissionTask || table.roundAdmission || lifecycle.isExpired(table)) return;
+    if (table.standby || table.admissionTask || table.roundAdmission || table.partialCarryOut || lifecycle.isExpired(table)) return;
     if (!lifecycle.syncActivity(table)) return;
     const ready = this.seated(table);
     const hasHuman = ready.some((item) => !item.bot);
-    if (table.phase === "idle" && (Number(table.roomType) !== 101 || hasHuman) && ready.length >= this.minPeople()) {
+    if (table.phase === "idle" && (Number(table.roomType) !== 101 || hasHuman) && ready.length >= this.minPeople(table)) {
       table.phase = "starting";
       table.startAt = Math.max(table.startAt, Date.now() + (this.config.startDelayMs || 3000));
     }
@@ -422,6 +484,16 @@ export class SeatGame extends GameBase {
   onMessage(ctx, msgid, payload) {
     if (features.handleRoomFeature(ctx, msgid, payload)) return true;
     ctx.body = payload || {};
+    if (msgid === SEND.CARRY_OUT_REQ) return this.onCarryOut(ctx);
+    if (msgid === SEND.SEND_NEXT_ROUND_STANDUP) {
+      const member = ctx.table.members.find(item => item.uid === ctx.session.userId);
+      if (member) {
+        member.standAfterRound = !member.standAfterRound;
+        ctx.send(PUSH.NEXT_ROUND_STANDUP_RES, member.standAfterRound);
+        if (member.standAfterRound && !ctx.table.hand) this.onStandUp(ctx);
+      }
+      return true;
+    }
     if (msgid === SEND.SEND_SITDOWN) {
       this.onSitDown(ctx);
       return true;
@@ -443,7 +515,7 @@ export class SeatGame extends GameBase {
 
   tick(ctx) {
     const table = ctx.table;
-    if (table.admissionTask || table.roundAdmission) return;
+    if (table.admissionTask || table.roundAdmission || table.partialCarryOut) return;
     const now = Date.now();
     this.expirePendingCarry(ctx, now);
     if (lifecycle.isExpired(table, now)) {
@@ -453,9 +525,12 @@ export class SeatGame extends GameBase {
     if (table.standby) return;
     if (!lifecycle.syncActivity(table, now)) return;
     robot.tickRoom(this, ctx, now);
-    if (this.seated(table).length < this.minPeople() && table.phase === "starting") table.phase = "idle";
+    if (this.seated(table).length < this.minPeople(table) && table.phase === "starting") table.phase = "idle";
     this.queueStart(table);
     if (table.phase === "starting" && now >= table.startAt) {
+      // Rotate spectator wire coordinates only between hands, after the
+      // settlement delay. Incremental bot joins must not reset a live scene.
+      ctx.io.prepareRoundSeats?.(this.roomInfo(table));
       this.startRound(ctx);
       return;
     }
@@ -479,6 +554,16 @@ export class SeatGame extends GameBase {
     if (!member) {
       table.observers = (table.observers || []).filter((item) => item.uid !== uid);
       lifecycle.noteDeparture(table, person, completedBeforeLeave);
+      ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
+      features.pushObservers(ctx);
+      return 0;
+    }
+    if (this.holdSeatUntilRoundEnd(table, member)) {
+      member.pendingDeparture = true;
+      member.departureSession = ctx.session;
+      member.standAfterRound = true;
+      table.observers = table.observers.filter(item => item.uid !== uid);
+      lifecycle.noteDeparture(table, member, completedBeforeLeave);
       ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
       features.pushObservers(ctx);
       return 0;

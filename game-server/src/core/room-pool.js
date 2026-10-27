@@ -8,7 +8,7 @@ export function createRoomPool(runtime, gameOf) {
   // registry.js and the network listener stay resident during hot updates.
   const state = registry.roomPoolState ||= { nextIndexes: new Map() };
   const eligible = (table) => table.kind === "normal" && Number(table.roomType) !== 101;
-  const capacityOf = (table) => gameOf(table.roomType)?.maxPeople?.() || 0;
+  const capacityOf = (table) => gameOf(table.roomType)?.maxPeople?.(table) || 0;
 
   function track(table) {
     if (!eligible(table)) return;

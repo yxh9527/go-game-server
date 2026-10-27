@@ -123,8 +123,8 @@ export function ranking(table, now = Date.now()) {
     currentActivePoint: number(table.currentActivePoint),
     averagePot: data.totalHands ? Math.round(data.totalPot / data.totalHands) : 0,
     gameTime: lifecycle.ROOM_LIFETIME_SECONDS, lastTime: lifecycle.remainingSeconds(table, now),
-    taxType: number(table.config?.taxType),
-    taxPercent: number(table.config?.taxPercent), insuranceProfit: 0,
+    taxType: number(table.roomRules?.taxType ?? table.config?.taxType),
+    taxPercent: number(table.roomRules?.taxPercent ?? table.config?.taxPercent), insuranceProfit: 0,
   };
 }
 
