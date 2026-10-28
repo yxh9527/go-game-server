@@ -12,6 +12,7 @@ export async function createHandler(runtime) {
   const holdemEngine = await rel(import.meta.url, "./games/holdem/engine.js", v);
   const zjhEngine = await rel(import.meta.url, "./games/zjh/engine.js", v);
   const sgayEngine = await rel(import.meta.url, "./games/sgay/engine.js", v);
+  const mahjongEngine = await rel(import.meta.url, "./games/mahjong/engine.js", v);
   const games = await catalog.loadGames(v);
   const fair = await rel(import.meta.url, "./core/fair-code.js", v);
   const lifecycle = await rel(import.meta.url, "./core/room-lifecycle.js", v);
@@ -24,7 +25,7 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
-    if (["zjh", "niuniu", "sss", "blackjack", "sgay"].includes(table.gameId)) {
+    if (["zjh", "niuniu", "sss", "blackjack", "sgay", "mahjong"].includes(table.gameId)) {
       // Refresh only room policy; preserve the resident hand, seats and clocks.
       table.roomRules = gameOf(table.roomType).roomPolicy(table);
     }
@@ -540,6 +541,8 @@ export async function createHandler(runtime) {
       if (table) return zjhEngine.historyDetail(table, inningNum, userId);
       const sgayTable = runtime.registry.getTable(roomId, agentId, "sgay");
       if (sgayTable) return sgayEngine.historyDetail(sgayTable, inningNum, userId);
+      const mahjongTable = runtime.registry.getTable(roomId, agentId, "mahjong");
+      if (mahjongTable) return mahjongEngine.historyDetail(mahjongTable, inningNum, userId);
     }
     const table = runtime.registry.listByRoomType(19).find((item) => Number(item.roomId) === Number(roomId));
     return table ? holdemEngine.texasHistoryDetail(table, inningNum) : null;

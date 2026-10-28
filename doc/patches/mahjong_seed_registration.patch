@@ -1,0 +1,11 @@
+diff --git a/app/tables/gogame/seed.go b/app/tables/gogame/seed.go
+--- a/app/tables/gogame/seed.go
++++ b/app/tables/gogame/seed.go
+@@ -39,6 +39,7 @@ func SeedIfEmpty(m, p *gorm.DB) {
+ 	seedHoldemCatalogIfMissing(m, now)
+ 	seedZjhIfMissing(m, now)
+ 	seedSgayIfMissing(m, now)
++	seedMahjongIfMissing(m, now)
+ 	seedMatches(m, now)
+ }
+ 

@@ -52,7 +52,7 @@ export function createRoomLogic(decode) {
       && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)
       && (bigBlind === undefined || num(row.big_blind, 0) === bigBlind)
       && (num(row.room_type, 0) !== 19 || matchesHoldem(row, params))
-      && (![24, 25, 27, 31, 32].includes(num(row.room_type, 0)) || ((ante === undefined || roomAnte(row) === ante)
+      && (![24, 25, 26, 27, 28, 30, 31, 32].includes(num(row.room_type, 0)) || ((ante === undefined || roomAnte(row) === ante)
         && (carryMin === undefined || num(row.carry_min, 0) === carryMin)
         && (classification === undefined || roomClassification(row) === classification)))
       && (num(row.room_type, 0) !== 24 || seeCardNo === undefined || roomSeeCardNo(row) === seeCardNo)
@@ -130,13 +130,13 @@ export function createRoomLogic(decode) {
       smallBlind,
       bigBlind,
       ...(roomType === 19 ? holdemRoomSettings(row) : {}),
-      ...([24, 25, 27, 31, 32].includes(roomType) ? { ante: roomAnte(row), initialBet: [27, 31, 32].includes(roomType) ? 0 : roomAnte(row),
+      ...([24, 25, 26, 27, 28, 30, 31, 32].includes(roomType) ? { ante: roomAnte(row), initialBet: [26, 27, 28, 30, 31, 32].includes(roomType) ? 0 : roomAnte(row),
         roomClassification: roomClassification(row), seeCardNo: roomType === 24 ? roomSeeCardNo(row) : 0 } : {}),
       carryMin: num(row.carry_min, 0),
       forceShowCard: truthy(row.force_show_card),
       gameRoomConfigId: num(row.game_room_config_id, 0),
       key: roomType === 19 ? holdemRoomKey(row)
-        : [25, 27, 31, 32].includes(roomType) ? [roomType, playMode, roomAnte(row), roomClassification(row), num(row.carry_min, 0)].join('/')
+        : [25, 26, 27, 28, 30, 31, 32].includes(roomType) ? [roomType, playMode, roomAnte(row), roomClassification(row), num(row.carry_min, 0)].join('/')
           : roomType === 24 ? [24, playMode, roomAnte(row), roomSeeCardNo(row), roomClassification(row), num(row.carry_min, 0)].join('/')
             : `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",

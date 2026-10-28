@@ -124,9 +124,10 @@ export function tickRoom(game, ctx, now = Date.now(), rng = Math.random) {
     game.onLeave(roomContext(profile));
     state.profiles.delete(uid);
   }
-  // Keep a free chair for a real player. A vacancy is an opportunity, not an
-  // instruction to refill the entire table immediately.
-  if (table.members.length >= capacity - 1
+  // Full-table games must be able to start once a human occupies the reserved
+  // seat. Other games, and observer-only full-table rooms, keep a free chair.
+  const reserve = game.minPeople(table) === capacity && table.members.some(member => !member.bot) ? 0 : 1;
+  if (table.members.length >= capacity - reserve
     || table.members.filter((member) => member.bot).length >= limit
     || !animationEnded || rng() >= settings.joinProbability) return;
   let profile = [...state.profiles.values()].find((item) => !seated(item.session.userId)

@@ -10,6 +10,7 @@ const GAME_ENTRIES = [
   "./sss/index.js",
   "./blackjack/index.js",
   "./sgay/index.js",
+  "./mahjong/index.js",
 ];
 
 export async function loadGames(version) {

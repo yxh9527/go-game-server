@@ -80,6 +80,16 @@ export function seedRooms() {
         ante, carry_min: carry, room_classification: classification, sort_index: 3200 + index,
         tax_type: 2, tax_percent: 500, name: `三公暗一(底注${ante / 100})`, category: 'normal',
       })),
+    ...[
+      [2601,26,0,10,2,2000], [2602,26,0,50,2,10000], [2603,26,0,200,4,50000],
+      [2604,26,1,10,2,2000], [2605,26,1,50,2,10000], [2606,26,1,200,4,50000],
+      [2801,28,2,10,2,2000], [2802,28,2,50,2,10000], [2803,28,2,200,2,50000],
+      [2804,28,4,10,2,2000], [2805,28,4,50,2,10000], [2806,28,4,200,2,50000],
+      [3001,30,0,10,2,2000], [3002,30,1,10,2,2000], [3003,30,0,50,2,10000],
+      [3004,30,1,50,2,10000], [3005,30,0,20,4,4000], [3006,30,1,20,4,4000],
+    ].map(([id,type,mode,ante,classification,carry]) => room({ game_type:type, room_type:type,
+      game_room_config_id:id, play_mode:mode, ante, room_classification:classification, carry_min:carry,
+      name:`${{26:'极速麻将',28:'长沙麻将',30:'红中血流'}[type]} ${type===28?mode:mode===1?2:4}人 底注${ante/100}`, category:'normal' })),
   ];
 }
 
@@ -125,10 +135,11 @@ function room(row) {
       roomClassification: row.room_classification, maxPeople: 7 });
     payloadObj.key = [24, row.play_mode, row.ante, row.see_card_no, row.room_classification, row.carry_min].join('/');
   }
-  if ([27, 31, 32].includes(roomType)) {
+  if ([26, 27, 28, 30, 31, 32].includes(roomType)) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: 0, seeCardNo: 0,
       roomClassification: row.room_classification, maxPeople: roomType === 32 ? 7 : roomType === 31 ? row.play_mode === 1 ? 5 : 3 : 4, straddle: false });
     payloadObj.key = [roomType, row.play_mode, row.ante, row.room_classification, row.carry_min].join('/');
+    if ([26, 28, 30].includes(roomType)) payloadObj.maxPeople = roomType === 28 ? row.play_mode : row.play_mode === 1 ? 2 : 4;
   }
   return {
     id: row.game_room_config_id,
