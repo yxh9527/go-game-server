@@ -4,13 +4,25 @@ function payload(obj) {
 
 export function seedRooms() {
   return [
-    room({ game_type: 19, room_type: 19, game_room_config_id: 70, small_blind: 10, big_blind: 20, carry_min: 500, force_show_card: 1, play_mode: 0, name: "德州 10/20", category: "normal" }),
-    room({ game_type: 19, room_type: 19, game_room_config_id: 1, small_blind: 100, big_blind: 200, carry_min: 5000, force_show_card: 1, play_mode: 0, name: "德州 100/200", category: "normal" }),
-    room({ game_type: 19, room_type: 19, game_room_config_id: 2, small_blind: 300, big_blind: 600, carry_min: 30000, force_show_card: 1, play_mode: 0, name: "德州 300/600", category: "normal" }),
-    // Standard no-show tiers from doc/协议/大厅/德州-德州不秀牌大厅消息协议.md.
-    room({ game_type: 19, room_type: 19, game_room_config_id: 1924, small_blind: 10, big_blind: 20, carry_min: 500, force_show_card: 0, play_mode: 0, name: "德州不秀牌 10/20", category: "normal" }),
-    room({ game_type: 19, room_type: 19, game_room_config_id: 1925, small_blind: 100, big_blind: 200, carry_min: 5000, force_show_card: 0, play_mode: 0, name: "德州不秀牌 100/200", category: "normal" }),
-    room({ game_type: 19, room_type: 19, game_room_config_id: 1926, small_blind: 300, big_blind: 600, carry_min: 30000, force_show_card: 0, play_mode: 0, name: "德州不秀牌 300/600", category: "normal" }),
+    // Captured op=38 catalogs: 13 forced-show and 6 no-show configurations.
+    ...[
+      [70, 10, 20, 500, 0, 2, true], [1921, 10, 20, 500, 2, 2, true],
+      [1, 100, 200, 5000, 0, 2, true], [1922, 100, 200, 5000, 2, 2, true],
+      [2, 300, 600, 30000, 0, 2, true], [1923, 300, 600, 30000, 2, 2, true],
+      [3, 500, 1000, 50000, 0, 4, true], [4, 1000, 2000, 100000, 0, 4, true],
+      [5, 2000, 4000, 200000, 0, 4, true],
+      [1927, 100, 200, 100, 8, 2, true], [121, 500, 1000, 500, 8, 2, true],
+      [123, 5000, 10000, 5000, 8, 4, true], [1920, 30000, 60000, 30000, 8, 4, true],
+      [1924, 10, 20, 500, 0, 2, false], [1928, 10, 20, 500, 2, 2, false],
+      [1925, 100, 200, 5000, 0, 2, false], [1929, 100, 200, 5000, 2, 2, false],
+      [1926, 300, 600, 30000, 0, 2, false], [1930, 300, 600, 30000, 2, 2, false],
+    ].map(([id, sb, bb, carry, mode, classification, show], index) => room({
+      game_type: 19, room_type: 19, game_room_config_id: id, small_blind: sb, big_blind: bb,
+      carry_min: carry, play_mode: mode, room_classification: classification, force_show_card: Number(show),
+      straddle: mode === 8, initial_bet: mode === 8 ? 0 : bb, aof_bet: mode === 8 ? carry : 0,
+      sort_index: 1900 + index, category: 'normal',
+      name: `${mode === 8 ? 'AOF必推' : mode === 2 ? '暴击德州' : '德州'}${show ? '秀牌' : '不秀牌'} ${sb}/${bb}`,
+    })),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5803, play_mode: 0, room_index: 1, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 1", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5804, play_mode: 0, room_index: 2, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 2", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5805, play_mode: 0, room_index: 3, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 3", category: "hundred" }),
@@ -62,6 +74,12 @@ export function seedRooms() {
     room({ game_type: 31, room_type: 31, game_room_config_id: 3110, play_mode: 1,
       ante: 100, carry_min: 0, room_classification: 4,
       name: '赌场21点(底注1/1000000)', category: 'normal' }),
+    ...[[3203, 3000, 4, 30000], [3204, 5000, 4, 50000], [3201, 500, 2, 5000], [3202, 1000, 2, 10000]]
+      .map(([id, ante, classification, carry], index) => room({
+        game_type: 32, room_type: 32, game_room_config_id: id, play_mode: 0,
+        ante, carry_min: carry, room_classification: classification, sort_index: 3200 + index,
+        tax_type: 2, tax_percent: 500, name: `三公暗一(底注${ante / 100})`, category: 'normal',
+      })),
   ];
 }
 
@@ -83,10 +101,14 @@ function room(row) {
     key: `${roomType}/${row.small_blind || 0}/${row.big_blind || 0}`,
   };
   if (roomType === 19) {
-    Object.assign(payloadObj, { straddle: false, initialBet: row.big_blind,
-      roomClassification: 2, aofBet: 0, seeCardNo: 3, openInsurance: false });
-    payloadObj.key = [roomType, payloadObj.smallBlind, payloadObj.bigBlind, false,
-      payloadObj.playMode, payloadObj.initialBet, 2, payloadObj.carryMin, 0,
+    Object.assign(payloadObj, { straddle: row.straddle ?? false, initialBet: row.initial_bet ?? row.big_blind,
+      roomClassification: row.room_classification ?? 2, aofBet: row.aof_bet ?? 0,
+      ante: 0, seeCardNo: 3, openInsurance: false });
+    if (row.play_mode === 2) Object.assign(payloadObj, {
+      criticalFlag: true, criticalAnte: 100, criticalInterval: '5-8',
+    });
+    payloadObj.key = [roomType, payloadObj.smallBlind, payloadObj.bigBlind, payloadObj.straddle,
+      payloadObj.playMode, payloadObj.initialBet, payloadObj.roomClassification, payloadObj.carryMin, payloadObj.aofBet,
       payloadObj.forceShowCard].join('/');
   }
   if (roomType === 25) {
@@ -103,9 +125,9 @@ function room(row) {
       roomClassification: row.room_classification, maxPeople: 7 });
     payloadObj.key = [24, row.play_mode, row.ante, row.see_card_no, row.room_classification, row.carry_min].join('/');
   }
-  if ([27, 31].includes(roomType)) {
+  if ([27, 31, 32].includes(roomType)) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: 0, seeCardNo: 0,
-      roomClassification: row.room_classification, maxPeople: roomType === 31 ? row.play_mode === 1 ? 5 : 3 : 4, straddle: false });
+      roomClassification: row.room_classification, maxPeople: roomType === 32 ? 7 : roomType === 31 ? row.play_mode === 1 ? 5 : 3 : 4, straddle: false });
     payloadObj.key = [roomType, row.play_mode, row.ante, row.room_classification, row.carry_min].join('/');
   }
   return {

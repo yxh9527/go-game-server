@@ -513,7 +513,7 @@ test("dev holdem record detail matches the Holdem history detail parser", async 
   assert.deepEqual(inningResults[0].cardTypePokers, [1, 2, 3, 4, 5]);
   assert.deepEqual(inningResults[0].commonPokerList, [3, 4, 5]);
   assert.deepEqual(inningResults[0].operateList.map((action) => action.gameState), [4, 3, 5]);
-  assert.deepEqual(inningInfo, { forceShowCard: false });
+  assert.deepEqual(inningInfo, { forceShowCard: false, playMode: 0, initialBet: 20 });
   assert.deepEqual(rounds.map((round) => round.gameState), [1, 5, 4, 11]);
   assert.equal(rounds[1].pot, 90);
   assert.equal(rounds[2].roundBetScore, 10);

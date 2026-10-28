@@ -14,7 +14,9 @@ const robot = await rel(import.meta.url, "./robot.js", version);
 const features = await rel(import.meta.url, "../../core/room-features.js", version);
 const fair = await rel(import.meta.url, "../../core/fair-code.js", version);
 const lifecycle = await rel(import.meta.url, "../../core/room-lifecycle.js", version);
+const { holdemRoomSettings, assertHoldemPlayable } = await rel(import.meta.url, "../../../../shared/holdem-room.js", version);
 const { buildPots, awardPots } = await rel(import.meta.url, "./pots.js", version);
+const { initializeCritical, nextHandRules } = await rel(import.meta.url, "./critical.js", version);
 const localHistory = env.isDev
   ? await rel(import.meta.url, "../../../../cache/holdem/history.js", version)
   : null;
@@ -45,8 +47,7 @@ function positionNames(playerCount) {
 }
 
 export function createTexasTable(roomId, roomType, cfg) {
-  const smallBlind = num(cfg, "small_blind", gameConfig.defaultSmallBlind);
-  const bigBlind = num(cfg, "big_blind", gameConfig.defaultBigBlind);
+  assertHoldemPlayable(cfg, roomType);
   const table = lifecycle.initializeLifetime({
     gameId: gameConfig.id,
     kind: gameConfig.kind,
@@ -59,12 +60,11 @@ export function createTexasTable(roomId, roomType, cfg) {
     members: [],
     observers: [],
     history: [],
-    smallBlind,
-    bigBlind,
-    carryMin: num(cfg, "carry_min", gameConfig.defaultCarryMin),
-    forceShowCard: Number(cfg?.force_show_card) === 1,
+    ...holdemRoomSettings(cfg),
+    criticalFlag: Number(roomType) !== 101 && holdemRoomSettings(cfg).criticalFlag,
+    forceShowCard: holdemRoomSettings(cfg).forceShowCard,
     playMode: holdemPlayMode(cfg, roomType),
-    roomClassification: 2,
+    roomClassification: holdemRoomSettings(cfg).roomClassification,
     betTime: gameConfig.betTime,
     dealerPos: 0,
     phase: "idle",
@@ -72,13 +72,14 @@ export function createTexasTable(roomId, roomType, cfg) {
     hand: null,
   });
   features.initializeRoomStats(table);
+  initializeCritical(table);
   return table;
 }
 
 export function holdemPlayMode(cfg, roomType = cfg?.room_type) {
-  const mode = num(cfg, "play_mode", 0);
-  // Normal hall selector is 0; allocated rooms and WebSocket config use 1.
-  return Number(roomType) !== 101 && mode === 0 ? 1 : mode;
+  const mode = holdemRoomSettings(cfg).playMode;
+  // Cash hall selectors 0/2/8 correspond to room wire modes 1/3/9.
+  return Number(roomType) !== 101 && [0, 2, 8].includes(mode) ? mode + 1 : mode;
 }
 
 export function dzpkParams(table) {
@@ -86,8 +87,11 @@ export function dzpkParams(table) {
     gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
     smallBlind: table.smallBlind,
     bigBlind: table.bigBlind,
-    initialBet: table.bigBlind,
-    straddle: false,
+    initialBet: table.initialBet ?? table.bigBlind,
+    straddle: table.straddle ?? false,
+    criticalFlag: Boolean(table.criticalFlag),
+    criticalAnte: table.criticalAnte ?? 100,
+    criticalInterval: table.criticalInterval ?? '5-8',
     delayLook: true,
     openInsurance: false,
     forceShowCard: table.forceShowCard,
@@ -286,6 +290,8 @@ export function beginHand(io, table) {
     table.phase = "idle";
     return;
   }
+  const startTime = Date.now();
+  const handRules = nextHandRules(table, startTime);
   table.phase = "playing";
   table.roomState = 2;
   table.currentInning += 1;
@@ -315,6 +321,8 @@ export function beginHand(io, table) {
   }
   const deck = shuffle(makeDeck());
   table.hand = {
+    ...handRules,
+    startTime,
     deck,
     deckPos: 0,
     // Existing hands survive hot reload and retain their original deal layout.
@@ -322,7 +330,7 @@ export function beginHand(io, table) {
     board: [],
     street: "BET_PERFLOP",
     pot: 0,
-    currentBet: table.bigBlind,
+    currentBet: handRules.critical ? 0 : table.bigBlind,
     minRaise: table.bigBlind,
     actorUid: utg.uid,
     lastRaiseUid: bb.uid,
@@ -341,8 +349,11 @@ export function beginHand(io, table) {
   io.broadcast(PUSH.NIUNIU_CURRENT_INNING_BEGIN_INFO, {
     currentInning: table.currentInning,
     uidList: players.map((p) => p.uid),
-    startTime: Date.now(),
-    playMode: table.playMode,
+    startTime,
+    playMode: handRules.playMode,
+    smallBlind: table.smallBlind,
+    bigBlind: table.bigBlind,
+    initialBet: handRules.initialBet,
   });
   io.broadcast(PUSH.DZPK_ZHUANG_PUSH, {
     bankerId: dealer.uid,
@@ -354,11 +365,13 @@ export function beginHand(io, table) {
   io.broadcast(PUSH.QIPAI_RESULT, { result: true, currentInning: table.currentInning });
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FRONT");
   for (const player of players) {
-    postInitialBet(io, table, player, table.bigBlind);
+    postInitialBet(io, table, player, handRules.initialBet);
   }
-  io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_BLIND");
-  postBlind(io, table, sb, table.smallBlind, OP.BLIND);
-  postBlind(io, table, bb, table.bigBlind, OP.BLIND);
+  if (!handRules.critical) {
+    io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_BLIND");
+    postBlind(io, table, sb, table.smallBlind, OP.BLIND);
+    postBlind(io, table, bb, table.bigBlind, OP.BLIND);
+  }
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "DEAL_PERFLOP");
   for (const p of players) {
     p.hole = [deck[table.hand.deckPos], deck[table.hand.deckPos + 1]];
@@ -375,6 +388,10 @@ export function beginHand(io, table) {
     }
   });
   table.hand.street = "BET_PERFLOP";
+  if (handRules.critical) {
+    nextStreet(io, table);
+    return;
+  }
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_PERFLOP");
   promptActor(io, table);
 }
@@ -748,6 +765,10 @@ export function pushPlayingSnapshot(send, table, session) {
 function sendSnapshot(send, table, session) {
   const hand = table.hand;
   send(PUSH.NIUNIU_INNING_BEGIN_INFO, {
+    playMode: hand.playMode ?? 0,
+    initialBet: hand.initialBet ?? table.initialBet ?? table.bigBlind,
+    smallBlind: table.smallBlind,
+    bigBlind: table.bigBlind,
     gameState: hand.street,
     gameStateStartTime: Date.now(),
     pot: hand.pot,

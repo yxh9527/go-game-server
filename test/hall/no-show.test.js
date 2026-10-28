@@ -23,7 +23,7 @@ test('no-show tiers have distinct keys and cannot select a forced-show or unsupp
   }
   for (const params of [
     { gameRoomConfigId: 70, forceShowCard: false },
-    { roomType: 19, forceShowCard: false, playMode: 2 },
+    { roomType: 19, forceShowCard: false, playMode: 7 },
     { roomType: 19, forceShowCard: false, smallBlind: 123, bigBlind: 456 },
     { gameRoomConfigId: 99999 },
   ]) assert.equal(rooms.findRoom(rows, params), null);
@@ -40,7 +40,7 @@ test('dev seed adoption refreshes configs without replacing runtime tables or wa
   const watcher = runtime.devRoomConfigWatcher;
   await refreshRoomConfigs(runtime);
   assert.equal(runtime.devRoomConfigWatcher, watcher);
-  assert.equal(runtime.configs.filter((r) => r.room_type === 19).length, 6);
+  assert.equal(runtime.configs.filter((r) => r.room_type === 19).length, 19);
   assert.equal(runtime.roomStore.rows.length, (await store.listRooms()).length);
   assert.equal(runtime.wallet, storedWallet);
   assert.equal(runtime.tables[0], table);

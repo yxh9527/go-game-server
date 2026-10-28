@@ -5,6 +5,8 @@ const v = new URL(import.meta.url).searchParams.get("v") || "0";
 const { SEND, PUSH } = await rel(import.meta.url, "../../messages.js", v);
 const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
+const { holdemRoomSettings, assertHoldemPlayable } = await rel(import.meta.url, "../../../../shared/holdem-room.js", v);
+const { initializeCritical } = await rel(import.meta.url, "./critical.js", v);
 
 export class HoldemGame extends SeatGame {
   constructor() {
@@ -12,19 +14,15 @@ export class HoldemGame extends SeatGame {
   }
 
   extraTableFields(roomRow) {
-    const n = (key, fallback) => {
-      const value = Number(roomRow?.[key]);
-      return Number.isFinite(value) ? value : fallback;
-    };
-    return {
-      smallBlind: n("small_blind", this.config.defaultSmallBlind),
-      bigBlind: n("big_blind", this.config.defaultBigBlind),
-      carryMin: n("carry_min", this.config.defaultCarryMin),
-      forceShowCard: Number(roomRow?.force_show_card) === 1,
+    assertHoldemPlayable(roomRow);
+    const fields = {
+      ...holdemRoomSettings(roomRow),
+      criticalFlag: Number(roomRow?.room_type) !== 101 && holdemRoomSettings(roomRow).criticalFlag,
       playMode: engine.holdemPlayMode(roomRow),
-      roomClassification: 2,
       betTime: this.config.betTime,
     };
+    initializeCritical(fields);
+    return fields;
   }
 
   buildConf(table) {

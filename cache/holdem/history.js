@@ -162,7 +162,7 @@ export function texasHistoryPayload(table, request = {}) {
     isOfflineData: false,
     smallBlind: table.smallBlind,
     bigBlind: table.bigBlind,
-    initialBet: table.bigBlind,
+    initialBet: table.initialBet ?? table.bigBlind,
     beginNum: list.length ? list[0].currentInningNum : 0,
     endNum: list.length ? list[list.length - 1].currentInningNum : 0,
     totalNum,
@@ -172,7 +172,7 @@ export function texasHistoryPayload(table, request = {}) {
     blind: JSON.stringify({
       smallBlind: table.smallBlind,
       bigBlind: table.bigBlind,
-      initialBet: table.bigBlind,
+      initialBet: table.initialBet ?? table.bigBlind,
       isStraddle: false,
     }),
     gameRoomId: table.roomId,
@@ -258,6 +258,7 @@ export function texasHistoryDetail(table, inningNum) {
   });
   events.sort((a, b) => Number(a.replayOrder ?? 0) - Number(b.replayOrder ?? 0));
   const roomConfig = {
+    playMode: table.playMode,
     maxPeople: Number(table.config?.maxPeople) || 7,
     roomType: Number(table.roomType),
     roomId: Number(table.roomId),
@@ -265,6 +266,9 @@ export function texasHistoryDetail(table, inningNum) {
       smallBlind: Number(replay.smallBlind ?? table.smallBlind) || 0,
       bigBlind: Number(replay.bigBlind ?? table.bigBlind) || 0,
       initialBet: Number(replay.initialBet ?? table.bigBlind) || 0,
+      criticalFlag: Boolean(table.criticalFlag),
+      criticalAnte: table.criticalAnte ?? 100,
+      criticalInterval: table.criticalInterval ?? '5-8',
     },
   };
   const detail = {
@@ -306,7 +310,8 @@ export function texasHistoryDetail(table, inningNum) {
       return result;
     })),
     // HoldemHistoryModel.onPushRecordDetail parses this field unconditionally.
-    inningInfo: JSON.stringify({ forceShowCard }),
+    inningInfo: JSON.stringify({ forceShowCard, playMode: replay.playMode ?? 0,
+      initialBet: replay.initialBet ?? table.initialBet ?? table.bigBlind }),
     roundList: JSON.stringify(events.map((action) => {
       const cards = Array.isArray(action.cards) ? action.cards : [];
       const board = Array.isArray(action.board) ? action.board : cards.slice(2);
@@ -376,7 +381,8 @@ export function recordHand(table, hand, results) {
     currentInningNum: table.currentInning,
     smallBlind: table.smallBlind,
     bigBlind: table.bigBlind,
-    initialBet: table.bigBlind,
+    initialBet: hand.initialBet ?? table.initialBet ?? table.bigBlind,
+    playMode: hand.playMode ?? 0,
     pot: hand.pot,
     forceShowCard: Boolean(table.forceShowCard),
     firstGameList: replayPlayers,

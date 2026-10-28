@@ -14,6 +14,7 @@ export async function createApp(runtime) {
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const populationMod = await rel(import.meta.url, "./room-population.js", v);
+  const { assertHoldemPlayable } = await rel(import.meta.url, "../../shared/holdem-room.js", v);
   const population = await populationMod.createRoomPopulation(runtime.config.room_population, v);
   const rooms = roomMod.createRoomLogic(decode);
   const localRecords = runtime.env === "dev"
@@ -142,7 +143,7 @@ export async function createApp(runtime) {
     const selected = rooms.filterRooms(runtime.roomStore.list(), params);
     // Display population is shared by all games. Real occupancy is consulted
     // only when disabled; listing never creates or wakes a game room.
-    const poolRooms = !population.enabled && selected.some((row) => [19, 24, 25].includes(Number(row.room_type)))
+    const poolRooms = !population.enabled && selected.some((row) => [19, 24, 25, 32].includes(Number(row.room_type)))
       && params.userId && (params.token || params.userToken)
       ? await roomPool.requestRoomPool(runtime, params, "list") : [];
     const now = Date.now();
@@ -151,7 +152,7 @@ export async function createApp(runtime) {
       roomClassifications: [],
       roomInfoData: selected.map((row) => {
         const result = toClient.toClientRoom(row);
-        if (!population.enabled && [19, 24, 25].includes(Number(row.room_type))) {
+        if (!population.enabled && [19, 24, 25, 32].includes(Number(row.room_type))) {
           const live = poolRooms.filter((table) => table.gameRoomConfigId === Number(row.game_room_config_id)
             && table.roomType === Number(row.room_type));
           result.totalPeople = live.reduce((sum, table) => sum + table.totalPeople, 0);
@@ -171,13 +172,14 @@ export async function createApp(runtime) {
     if (!row) {
       return [];
     }
+    if (Number(row.room_type) === 19) assertHoldemPlayable(row);
     const domain = web.publicWsHost(req, runtime.config, runtime.env);
     const payload = rooms.enterRoomPayload(row, params, {
       ...runtime.config,
       game_server: domain,
       hundred_server: runtime.env === "dev" ? domain : (runtime.config.hundred_server || domain),
     });
-    if ([19, 24, 25].includes(Number(row.room_type))) {
+    if ([19, 24, 25, 32].includes(Number(row.room_type))) {
       const allocation = await roomPool.requestRoomPool(runtime, params, "allocate", {
         gameRoomConfigId: Number(row.game_room_config_id), roomType: Number(row.room_type),
         roomIndex: params.roomIndex ?? row.room_index ?? 0,

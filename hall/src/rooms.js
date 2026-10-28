@@ -1,3 +1,7 @@
+import { rel } from "./rel.js";
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { holdemRoomSettings, holdemRoomKey } = await rel(import.meta.url, '../../shared/holdem-room.js', v);
+
 export function createRoomLogic(decode) {
   const { num, truthy } = decode;
 
@@ -47,7 +51,8 @@ export function createRoomLogic(decode) {
       && (playMode === undefined || num(row.play_mode, 0) === playMode)
       && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)
       && (bigBlind === undefined || num(row.big_blind, 0) === bigBlind)
-      && (![24, 25, 27, 31].includes(num(row.room_type, 0)) || ((ante === undefined || roomAnte(row) === ante)
+      && (num(row.room_type, 0) !== 19 || matchesHoldem(row, params))
+      && (![24, 25, 27, 31, 32].includes(num(row.room_type, 0)) || ((ante === undefined || roomAnte(row) === ante)
         && (carryMin === undefined || num(row.carry_min, 0) === carryMin)
         && (classification === undefined || roomClassification(row) === classification)))
       && (num(row.room_type, 0) !== 24 || seeCardNo === undefined || roomSeeCardNo(row) === seeCardNo)
@@ -85,6 +90,14 @@ export function createRoomLogic(decode) {
     return num(row.game_room_config_id, 0) * 10000 + num(row.room_index, 0);
   }
 
+  function matchesHoldem(row, params) {
+    const fields = holdemRoomSettings(row);
+    if (params.key !== undefined && params.key !== '' && params.key !== holdemRoomKey(row)) return false;
+    return ['straddle', 'initialBet', 'ante', 'roomClassification', 'carryMin', 'aofBet', 'seeCardNo']
+      .every(key => params[key] === undefined || params[key] === ''
+        || (key === 'straddle' ? truthy(params[key]) : num(params[key], NaN)) === fields[key]);
+  }
+
   function roomAnte(row) {
     let payload = {};
     try { payload = JSON.parse(row.payload || "{}"); } catch {}
@@ -116,14 +129,14 @@ export function createRoomLogic(decode) {
       roomIndex,
       smallBlind,
       bigBlind,
-      ...([24, 25, 27, 31].includes(roomType) ? { ante: roomAnte(row), initialBet: [27, 31].includes(roomType) ? 0 : roomAnte(row),
+      ...(roomType === 19 ? holdemRoomSettings(row) : {}),
+      ...([24, 25, 27, 31, 32].includes(roomType) ? { ante: roomAnte(row), initialBet: [27, 31, 32].includes(roomType) ? 0 : roomAnte(row),
         roomClassification: roomClassification(row), seeCardNo: roomType === 24 ? roomSeeCardNo(row) : 0 } : {}),
       carryMin: num(row.carry_min, 0),
       forceShowCard: truthy(row.force_show_card),
       gameRoomConfigId: num(row.game_room_config_id, 0),
-      key: roomType === 19 ? [roomType, smallBlind, bigBlind, false, playMode,
-        bigBlind, 2, num(row.carry_min, 0), 0, truthy(row.force_show_card)].join('/')
-        : [25, 27, 31].includes(roomType) ? [roomType, playMode, roomAnte(row), roomClassification(row), num(row.carry_min, 0)].join('/')
+      key: roomType === 19 ? holdemRoomKey(row)
+        : [25, 27, 31, 32].includes(roomType) ? [roomType, playMode, roomAnte(row), roomClassification(row), num(row.carry_min, 0)].join('/')
           : roomType === 24 ? [24, playMode, roomAnte(row), roomSeeCardNo(row), roomClassification(row), num(row.carry_min, 0)].join('/')
             : `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",

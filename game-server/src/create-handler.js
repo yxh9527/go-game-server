@@ -11,6 +11,7 @@ export async function createHandler(runtime) {
   const catalog = await rel(import.meta.url, "./games/catalog.js", v);
   const holdemEngine = await rel(import.meta.url, "./games/holdem/engine.js", v);
   const zjhEngine = await rel(import.meta.url, "./games/zjh/engine.js", v);
+  const sgayEngine = await rel(import.meta.url, "./games/sgay/engine.js", v);
   const games = await catalog.loadGames(v);
   const fair = await rel(import.meta.url, "./core/fair-code.js", v);
   const lifecycle = await rel(import.meta.url, "./core/room-lifecycle.js", v);
@@ -23,7 +24,7 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
-    if (["zjh", "niuniu", "sss", "blackjack"].includes(table.gameId)) {
+    if (["zjh", "niuniu", "sss", "blackjack", "sgay"].includes(table.gameId)) {
       // Refresh only room policy; preserve the resident hand, seats and clocks.
       table.roomRules = gameOf(table.roomType).roomPolicy(table);
     }
@@ -180,7 +181,7 @@ export async function createHandler(runtime) {
       respond({ code: 200, data: pool.allocate(agentId, cfg, body.roomIndex) });
     } catch (error) {
       runtime.log.error("room pool query failed", error.message);
-      respond({ code: 503, error: "房间暂不可用" });
+      respond({ code: 503, error: error.code === 503 ? error.message : "房间暂不可用" });
     }
   }
 
@@ -537,6 +538,8 @@ export async function createHandler(runtime) {
     if (userId != null && agentId != null) {
       const table = runtime.registry.getTable(roomId, agentId, "zjh");
       if (table) return zjhEngine.historyDetail(table, inningNum, userId);
+      const sgayTable = runtime.registry.getTable(roomId, agentId, "sgay");
+      if (sgayTable) return sgayEngine.historyDetail(sgayTable, inningNum, userId);
     }
     const table = runtime.registry.listByRoomType(19).find((item) => Number(item.roomId) === Number(roomId));
     return table ? holdemEngine.texasHistoryDetail(table, inningNum) : null;
