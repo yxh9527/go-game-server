@@ -90,6 +90,15 @@ export function createRoomLogic(decode) {
     return num(row.game_room_config_id, 0) * 10000 + num(row.room_index, 0);
   }
 
+  function hundredHostRoom(rows) {
+    // Captured op=45 for roomType=50 opens a normal Holdem observer table.
+    // Bairen is an overlay of that scene, not a roomType=50 scene.
+    return (rows || []).filter(row => num(row.state, 1) === 1
+      && num(row.room_type, 0) === 19 && num(row.play_mode, 0) === 0)
+      .sort((a, b) => num(a.carry_min, 0) - num(b.carry_min, 0)
+        || num(a.sort_index, 0) - num(b.sort_index, 0))[0] || null;
+  }
+
   function matchesHoldem(row, params) {
     const fields = holdemRoomSettings(row);
     if (params.key !== undefined && params.key !== '' && params.key !== holdemRoomKey(row)) return false;
@@ -147,5 +156,5 @@ export function createRoomLogic(decode) {
     };
   }
 
-  return { filterRooms, findRoom, assignRoomId, enterRoomPayload };
+  return { filterRooms, findRoom, assignRoomId, hundredHostRoom, enterRoomPayload };
 }

@@ -2,10 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as decode from "../../hall/src/decode.js";
 import { createRoomLogic } from "../../hall/src/rooms.js";
-import { publicWsHost } from "../../hall/src/web.js";
+import { publicHundredWsHost, publicWsHost } from "../../hall/src/web.js";
 import { seedRooms } from "../../cache/rpc/seed.js";
 
 const rooms = createRoomLogic(decode);
+
+test('hundred Holdem lists all five modes and selects a configured ordinary host', () => {
+  const rows = seedRooms();
+  const hundred = rooms.filterRooms(rows, { gameType: 1000 }).filter(row => row.room_type === 50);
+  assert.deepEqual(hundred.map(row => row.play_mode), [1, 2, 3, 4, 5]);
+  for (const row of hundred) {
+    const payload = JSON.parse(row.payload);
+    assert.equal(payload.hundredGame, 1);
+    assert.equal(payload.roomClassification, 0);
+    assert.equal(payload.key, `50/0/0/false/${row.play_mode}/0/0/0/0`);
+    assert.equal(rooms.findRoom(rows, payload), row);
+  }
+  const host = rooms.hundredHostRoom(rows);
+  assert.equal(host.room_type, 19);
+  assert.equal(host.play_mode, 0);
+  assert.equal(host.game_room_config_id, 70);
+  assert.equal(rooms.hundredHostRoom(hundred), null, 'never fabricate a host configuration');
+  assert.equal(rooms.hundredHostRoom([{ ...host, state: 0 }]), null);
+});
 
 test('blackjack lobby keeps four ordinary tiers and the documented casino mode', () => {
   const rows=seedRooms();
@@ -65,4 +84,6 @@ test("dev public ws host rewrites lobby.localhost to www.localhost", () => {
     "dev",
   );
   assert.equal(host, "www.localhost:11042");
+  assert.equal(publicHundredWsHost({ headers: { host: "lobby.localhost:11042" } }, {}, "dev"),
+    "hundred.localhost:11042");
 });

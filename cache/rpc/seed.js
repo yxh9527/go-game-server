@@ -130,7 +130,8 @@ function room(row) {
   if (roomType === 50) {
     const modeNames = { 1: "暗五公牌", 2: "明三公牌", 3: "明二公牌", 4: "明一公牌", 5: "全暗" };
     Object.assign(payloadObj, {
-      roomClassification: 2,
+      hundredGame: 1, openHundredGame: false,
+      roomClassification: 0, ante: 0, initialBet: 0, straddle: false, seeCardNo: 0,
       maxBet: row.hundred_max_bet,
       hundredParams: {
         gameName: `${modeNames[row.play_mode] || "百人德州"}(底注1)`,
@@ -139,7 +140,7 @@ function room(row) {
         betAreaOdds: { 1: 1.91, 2: 0.5, 3: 16.44, 4: 1.61, 5: 2.03, 6: 13.22, 7: 4.9 },
       },
     });
-    payloadObj.key = [roomType, row.play_mode, row.game_room_config_id].join("/");
+    payloadObj.key = [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0].join("/");
   }
   if (roomType === 25) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, straddle: false,

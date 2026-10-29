@@ -1,7 +1,9 @@
-import { HundredGame } from "../../core/HundredGame.js";
-import { SEND, PUSH } from "../../messages.js";
-import config, { roomRules } from "./config.js";
-import * as engine from "./engine.js";
+import { rel } from '../../rel.js';
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { HundredGame } = await rel(import.meta.url, '../../core/HundredGame.js', v);
+const { SEND, PUSH } = await rel(import.meta.url, '../../messages.js', v);
+const { default: config, roomRules } = await rel(import.meta.url, './config.js', v);
+const engine = await rel(import.meta.url, './engine.js', v);
 
 export class HundredHoldemGame extends HundredGame {
   constructor() { super(config); }
@@ -20,7 +22,8 @@ export class HundredHoldemGame extends HundredGame {
     const uid = Number(session.userId);
     const removed = table.visitors.delete(uid);
     if (removed) table.people = Math.max(0, table.people - 1);
-    table.playerSessions.delete(uid);
+    // Preserve ownership of unsettled bets even after the viewer disconnects.
+    if (!table.playerBets.has(uid) || table.hand?.settled) table.playerSessions.delete(uid);
     return removed;
   }
 
@@ -29,14 +32,17 @@ export class HundredHoldemGame extends HundredGame {
     return { rules, playMode: rules.playMode, state: engine.PHASE.IDLE, inning: 1,
       people: 0, visitors: new Set(), playerSessions: new Map(), playerBets: new Map(),
       totalBetsByArea: Object.fromEntries(Array.from({ length: 7 }, (_, i) => [i + 1, 0])),
-      ways: { 1: [] }, boardTypeStats: {}, cardColor: 0, phaseEndsAt: 0, hand: null };
+      ways: { 1: { max: 100, ways: [] }, 2: { max: 33, ways: [] },
+        3: { max: 5, ways: [0, 0, 0, 0, 0] } },
+      boardTypeStats: {}, typeHistory: [], systemInningScore: 0, systemTodayTotalScore: 0,
+      cardColor: 0, phaseEndsAt: 0, hand: null };
   }
 
   buildConf(table) {
     return { roomType: 50, gameRoomConfigId: table.rules.gameRoomConfigId,
       playMode: table.rules.playMode, hundredSwitch: false,
       hundredParams: { gameName: table.rules.gameName, gameRoomConfigId: table.rules.gameRoomConfigId,
-        maxBet: table.rules.maxBet, betAreaOdds: table.rules.betAreaOdds } };
+        maxBet: table.rules.maxBet, betAreaOdds: engine.configuredOdds(table) } };
   }
 
   enterSnapshot(table, session) { return engine.roomSnapshot(table, session); }
@@ -61,10 +67,10 @@ export class HundredHoldemGame extends HundredGame {
   registerRooms(ctx, body = {}) {
     const { runtime, table, session } = ctx;
     const configs = (runtime.configs || []).filter(row => Number(row.state ?? 1) === 1
-      && Number(row.room_type) === 50 && Number(row.play_mode) === Number(table.rules.playMode));
+      && Number(row.room_type) === 50);
     const list = [];
     configs.forEach((row, index) => {
-      const roomIndex = Math.max(1, Number(row.room_index) || index + 1);
+      const roomIndex = Number(row.room_index) || 0;
       const roomId = Number(row.game_room_config_id) * 10000 + roomIndex;
       let sibling = runtime.registry.getTable(roomId, session.agentId, this.id);
       if (!sibling && roomId !== Number(table.roomId)) {
@@ -97,6 +103,8 @@ export class HundredHoldemGame extends HundredGame {
     if (id === SEND.ENTER) {
       const uid = Number(session.userId);
       const added = this.addViewer(table, session);
+      session.hundredRoomIds ||= new Set();
+      session.hundredRoomIds.add(Number(table.roomId));
       table.playerSessions.set(uid, session);
       ctx.send(PUSH.ENTER_RESPONSE, this.enterSnapshot(table, session));
       if (added) ctx.io.broadcast(PUSH.PLAYER_NUM_CHANGE, {
@@ -134,7 +142,8 @@ export class HundredHoldemGame extends HundredGame {
           roomType: 50, roomId: room.roomId, playerNum: room.people });
       }
       session.hundredRoomIds?.clear();
-      session.inRoom = false;
+      session.hundredInRoom = false;
+      if (session.gameId === this.id) session.inRoom = false;
       return true;
     }
     if (super.onMessage(ctx, id, body)) return true;

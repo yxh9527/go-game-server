@@ -491,27 +491,12 @@ export const CLIENT_DEV_PATCH = `<script>
     step("deliver handleOpenGame " + reason + " roomId=" + (value && value.joinRoom && value.joinRoom.roomId));
     try {
       fn(value);
-      scheduleGameScene(value);
     } catch (e) {
       delivered = false;
       deliveryStep("handleOpenGame err " + e);
       return false;
     }
     return true;
-  }
-  function scheduleGameScene(value) {
-    var join = value && value.joinRoom;
-    var conn = value && value.connectRoomData;
-    var rt = Number((join && join.roomType) || (conn && conn.roomType) || 0);
-    var options = rt === 19 || rt === 50 || rt === 101
-      ? { module: "Holdem", scene: "gameHoldem" }
-      : null;
-    if (!options) return;
-    var version = entryVersion;
-    setTimeout(function () {
-      if (!currentEntry(version)) return;
-      loadGameScene(options);
-    }, 200);
   }
 
   function hookSceneRequests() {

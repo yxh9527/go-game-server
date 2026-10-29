@@ -1,11 +1,28 @@
-import { credit, debit } from "../../wallet/index.js";
-import { makeDeck, shuffle, evaluate7, compareRank } from "../holdem/cards.js";
-import { PUSH } from "../../messages.js";
+import { rel } from '../../rel.js';
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { credit, debit } = await rel(import.meta.url, '../../wallet/index.js', v);
+const { makeDeck, shuffle, evaluate7, compareRank } = await rel(import.meta.url, '../holdem/cards.js', v);
+const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
 
 export const PHASE = Object.freeze({ IDLE: 0, DEALING: 1, BETTING: 2, SHOWDOWN: 4, SETTLING: 5, STATS: 6, ENDED: 7 });
 const areaIds = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
 const emptyTotals = () => Object.fromEntries(areaIds.map(id => [id, 0]));
 const safeMoney = value => Number.isSafeInteger(value) && value > 0;
+
+// Config odds are objects; per-hand areaOdds are plain numbers in the client.
+export function configuredOdds(table) {
+  return Object.fromEntries(areaIds.map(id => [id, { id, odds: table.rules.betAreaOdds[id] }]));
+}
+
+export function roadSnapshot(table) {
+  // Migrate display metadata only; do not replace a resident hand or its bets.
+  if (Array.isArray(table.ways?.[1])) {
+    table.ways = { 1: { max: 100, ways: table.ways[1].slice().reverse().map(row =>
+      row.winner === 'player' ? 1 : row.winner === 'banker' ? -1 : 0) },
+      2: { max: 33, ways: [] }, 3: { max: 5, ways: [0, 0, 0, 0, 0] } };
+  }
+  return table.ways;
+}
 
 function rankCode(rank) {
   return { ROYAL_FLUSH: 9, STRAIGHT_FLUSH: 8, FOUR: 7, FULL_HOUSE: 6,
@@ -54,8 +71,9 @@ export function betAreaTotals(table) {
 export function roomSnapshot(table, session) {
   const hand = table.hand;
   const myBets = table.playerBets.get(Number(session.userId)) || [];
-  const ownBets = Object.fromEntries(myBets.map(row => [row.areaId, row.total]));
+  const ownBets = Object.fromEntries(myBets.map(row => [row.areaId, { ...row }]));
   const now = Date.now();
+  const visible = hand ? visibleCards(hand, table.rules) : null;
   return {
     roomType: 50, roomId: table.roomId, playMode: table.rules.playMode,
     state: table.state, inning: table.inning, playerId: Number(session.userId),
@@ -63,15 +81,26 @@ export function roomSnapshot(table, session) {
     countDown: Math.max(0, table.phaseEndsAt - now),
     totalBetsByArea: betAreaTotals(table), betAreaIds: Object.keys(ownBets).map(Number), ownBets,
     hundredParams: { gameName: table.rules.gameName, gameRoomConfigId: table.rules.gameRoomConfigId,
-      maxBet: table.rules.maxBet, betAreaOdds: table.rules.betAreaOdds },
-    areaOdds: table.rules.betAreaOdds, ways: table.ways, boardTypeStats: table.boardTypeStats,
+      maxBet: table.rules.maxBet, betAreaOdds: configuredOdds(table) },
+    areaOdds: table.rules.betAreaOdds, ways: roadSnapshot(table), boardTypeStats: table.boardTypeStats,
+    systemInningScore: table.systemInningScore || 0, systemTodayTotalScore: table.systemTodayTotalScore || 0,
+    winType: 0, waitingNextRound: table.state >= PHASE.SETTLING ? Math.max(0, table.phaseEndsAt - now) : 0,
+    consecutiveWinCounts: {}, maintenance: false, forcedWin: false,
     cardColor: table.cardColor, dealPokers: hand ? visibleCards(hand, table.rules) : {
       bankerCards: [-1, -1], playerCards: [-1, -1], publicCards: [-1, -1, -1, -1, -1] },
+    ...(hand && table.state >= PHASE.DEALING && table.state < PHASE.SHOWDOWN ? {
+      showdownPokers: { banker: visible.bankerCards, player: visible.playerCards, board: visible.publicCards } } : {}),
     ...(hand && table.state >= PHASE.SHOWDOWN ? { showdownPokers: resultCards(hand), showdownTypes: {
       banker: hand.bankerRank.cardTypeId, player: hand.playerRank.cardTypeId,
-      board: hand.boardRank.cardTypeId } } : {}),
+      board: hand.boardRank.cardTypeId }, ...outcome(hand), areaWinningScores: {} } : {}),
     customData: 2,
   };
+}
+
+function outcome(hand) {
+  return { winningAreas: hand.winningAreas.slice(),
+    tieAreas: hand.winner === 'tie' || hand.winner === 'board' ? [1, 2] : [],
+    lostAreas: areaIds.filter(id => !hand.winningAreas.includes(id)) };
 }
 
 function pushRoomState(io, table, extra = {}) {
@@ -81,7 +110,8 @@ function pushRoomState(io, table, extra = {}) {
     cardColor: table.cardColor, ...extra };
   io.broadcast(PUSH.MB_SNC_ROOM_STATE, payload);
   io.broadcast(PUSH.GAME_STATE, { state: table.state, inning: table.inning, roomType: 50,
-    roomId: table.roomId, ways: table.ways, cardColor: table.cardColor });
+    roomId: table.roomId, ways: roadSnapshot(table), cardColor: table.cardColor,
+    systemInningScore: table.systemInningScore || 0, systemTodayTotalScore: table.systemTodayTotalScore || 0 });
 }
 
 export function beginRound(io, table, now = Date.now(), rng = Math.random) {
@@ -169,14 +199,21 @@ export async function settleRound(ctx) {
   const rankTypes = { banker: hand.bankerRank.cardTypeId, player: hand.playerRank.cardTypeId,
     board: hand.boardRank.cardTypeId };
   const cards = resultCards(hand);
-  table.boardTypeStats[rankTypes.player] = (table.boardTypeStats[rankTypes.player] || 0) + 1;
-  table.ways[1] = [{ inning: table.inning, winningAreas: hand.winningAreas.slice(), winner: hand.winner },
-    ...(table.ways[1] || [])].slice(0, 100);
+  const ways = roadSnapshot(table);
+  const type = (hand.winner === 'banker' ? hand.bankerRank : hand.playerRank).cardTypeId;
+  ways[1].ways = [...ways[1].ways, hand.winner === 'player' ? 1 : hand.winner === 'banker' ? -1 : 0].slice(-100);
+  ways[2].ways = [...ways[2].ways, type].slice(-33);
+  table.typeHistory = [...(table.typeHistory || []), Math.min(type, 5)].slice(-100);
+  const stats = [1, 2, 3, 4, 5].map(id => Math.round(100 * table.typeHistory.filter(t => t === id).length / table.typeHistory.length));
+  ways[3].ways = stats;
+  table.boardTypeStats = Object.fromEntries(stats.map((value, i) => [i + 1, value]));
   const settlements = new Map();
+  table.systemInningScore = 0;
   for (const [uid, bets] of table.playerBets) {
     const session = table.playerSessions.get(uid) || io.sessionFor?.(uid);
     if (!session) continue;
     const { net, scores } = resultForBets(table, bets);
+    table.systemInningScore -= net;
     const payout = bets.reduce((sum, bet) => sum + (hand.tieAreas.includes(bet.areaId) ? bet.total
       : hand.winningAreas.includes(bet.areaId) ? bet.total + Math.floor(bet.total
         * (Number(table.rules.betAreaOdds[bet.areaId]) || 0)) : 0), 0);
@@ -193,7 +230,11 @@ export async function settleRound(ctx) {
       showdownPokers: cards, showdownTypes: rankTypes, winningAreas: hand.winningAreas,
       tieAreas: hand.tieAreas,
       lostAreas: areaIds.filter(id => !hand.winningAreas.includes(id)), ...result,
-      boardTypeStats: table.boardTypeStats, customData: 2 });
+      ways, winType: 0, boardTypeStats: table.boardTypeStats, customData: 2 });
+  }
+  table.systemTodayTotalScore = (table.systemTodayTotalScore || 0) + table.systemInningScore;
+  for (const uid of table.playerSessions.keys()) {
+    if (!table.visitors.has(uid)) table.playerSessions.delete(uid);
   }
   table.lastResult = { inning: table.inning, winningAreas: hand.winningAreas.slice(), winner: hand.winner };
   table.state = PHASE.SETTLING;
@@ -216,11 +257,14 @@ export function tick(io, table, now = Date.now(), ctx = {}) {
     table.state = PHASE.SHOWDOWN;
     table.phaseEndsAt = now + (table.config.revealSeconds || 3) * 1000;
     const cards = resultCards(table.hand);
+    io.broadcast(PUSH.SHOWDOWN_POKERS, { roomType: 50, roomId: table.roomId, inning: table.inning,
+      showdownPokers: cards, showdownTypes: { banker: table.hand.bankerRank.cardTypeId,
+        player: table.hand.playerRank.cardTypeId, board: table.hand.boardRank.cardTypeId },
+      ...outcome(table.hand), ways: roadSnapshot(table), winType: 0, points: -1, realScore: 0 });
+    // The panel reads its open-card model immediately on GAME_STATE=4.
     pushRoomState(io, table, { showdownPokers: cards, showdownTypes: {
       banker: table.hand.bankerRank.cardTypeId, player: table.hand.playerRank.cardTypeId,
       board: table.hand.boardRank.cardTypeId } });
-    io.broadcast(PUSH.SHOWDOWN_POKERS, { roomType: 50, roomId: table.roomId, inning: table.inning,
-      showdownPokers: cards, winningAreas: table.hand.winningAreas });
     return;
   }
   if (table.state === PHASE.SHOWDOWN) {

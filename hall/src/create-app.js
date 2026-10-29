@@ -168,21 +168,25 @@ export async function createApp(runtime) {
   }
 
   async function enterRoom(params, req) {
-    const row = rooms.findRoom(runtime.roomStore.list(), params);
-    if (!row) {
+    const selected = rooms.findRoom(runtime.roomStore.list(), params);
+    if (!selected) {
       return [];
     }
+    const openHundredGame = Number(selected.room_type) === 50;
+    const row = openHundredGame ? rooms.hundredHostRoom(runtime.roomStore.list()) : selected;
+    if (!row) throw new Error("No ordinary Holdem room is configured for the hundred-game host");
     if (Number(row.room_type) === 19) assertHoldemPlayable(row);
     const domain = web.publicWsHost(req, runtime.config, runtime.env);
-    const payload = rooms.enterRoomPayload(row, params, {
+    const payload = rooms.enterRoomPayload(row, openHundredGame ? {} : params, {
       ...runtime.config,
       game_server: domain,
-      hundred_server: runtime.env === "dev" ? domain : (runtime.config.hundred_server || domain),
+      hundred_server: web.publicHundredWsHost(req, runtime.config, runtime.env),
     });
+    if (openHundredGame) payload.openHundredGame = true;
     if ([19, 24, 25, 32].includes(Number(row.room_type))) {
       const allocation = await roomPool.requestRoomPool(runtime, params, "allocate", {
         gameRoomConfigId: Number(row.game_room_config_id), roomType: Number(row.room_type),
-        roomIndex: params.roomIndex ?? row.room_index ?? 0,
+        roomIndex: openHundredGame ? row.room_index ?? 0 : params.roomIndex ?? row.room_index ?? 0,
       });
       return { ...payload, roomId: allocation.roomId, roomType: allocation.roomType,
         roomIndex: allocation.roomIndex, gameRoomConfigId: allocation.gameRoomConfigId,

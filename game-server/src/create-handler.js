@@ -49,15 +49,29 @@ export async function createHandler(runtime) {
       const table = session?.inRoom !== false && session
         ? runtime.registry.getTable(session.roomId, session.agentId, session.gameId) : null;
       if (table) payload = seatView.projectSeatMessage(table, session, msgid, payload);
+      if (msgid === PUSH.ROOM_TYPE_RESULT && Number(payload?.roomType) === 19
+        && runtime.configs.some(row => Number(row.state ?? 1) === 1 && Number(row.room_type) === 50)) {
+        payload = { ...payload, openHundredGame: Boolean(session?.openHundredGame),
+          conf: { ...payload.conf, hundredSwitch: true } };
+      }
       ws.send(codec.encodeFrame(msgid, payload));
     }
   }
 
   function tableIo(table) {
+    const singleHundredPushes = new Set([PUSH.GAME_STATE, PUSH.DEAL_CARDS_AND_ODDS,
+      PUSH.SHOWDOWN_POKERS, PUSH.PLAYER_NUM_CHANGE, PUSH.BET_BROADCAST,
+      PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE]);
+    const selected = (session, msgid) => table.kind !== 'hundred' || !singleHundredPushes.has(msgid)
+      || Number(session.hundredRoomId ?? session.roomId) === Number(table.roomId);
     const subscribed = (session) => table.kind === "hundred"
       ? session?.hundredRoomIds?.has(Number(table.roomId))
         || (!session?.hundredRoomIds && Number(session?.roomId) === Number(table.roomId))
       : Number(session?.roomId) === Number(table.roomId);
+    const active = (session) => session && Number(session.agentId || 0) === Number(table.agentId || 0)
+      && subscribed(session) && (table.kind === "hundred"
+        ? session.authenticated !== false && (session.hundredInRoom === true || session.inRoom !== false)
+        : session.inRoom !== false && String(session.gameId || table.gameId) === String(table.gameId));
     return {
       env: runtime.env,
       wallet: runtime.wallet,
@@ -72,18 +86,13 @@ export async function createHandler(runtime) {
         }
       },
       sessionFor(uid) {
-        return [...runtime.registry.sessions.values()].find((session) => session.inRoom !== false
-          && Number(session.userId) === Number(uid)
-          && subscribed(session)
-          && Number(session.agentId || 0) === Number(table.agentId || 0)
-          && String(session.gameId || table.gameId) === String(table.gameId));
+        return [...runtime.registry.sessions.values()].find((session) => active(session)
+          && Number(session.userId) === Number(uid));
       },
       broadcast(msgid, payload) {
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.inRoom !== false && subscribed(session)
-            && Number(session.agentId || 0) === Number(table.agentId || 0)
-            && String(session.gameId || table.gameId) === String(table.gameId)) {
+          if (active(session) && selected(session, msgid)) {
             send(ws, msgid, payload);
           }
         }
@@ -98,18 +107,14 @@ export async function createHandler(runtime) {
         }
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.inRoom !== false && subscribed(session)
-            && Number(session.agentId || 0) === Number(table.agentId || 0)
-            && String(session.gameId || table.gameId) === String(table.gameId) && Number(session.userId) === Number(uid)) {
+          if (active(session) && selected(session, msgid) && Number(session.userId) === Number(uid)) {
             send(ws, msgid, payload);
           }
         }
       },
       forEachPlayer(fn) {
         for (const [ws, session] of runtime.registry.sessions) {
-          if (session?.inRoom !== false && subscribed(session)
-            && Number(session.agentId || 0) === Number(table.agentId || 0)
-            && String(session.gameId || table.gameId) === String(table.gameId)) {
+          if (active(session)) {
             fn({ ...session, ws });
           }
         }
@@ -158,6 +163,25 @@ export async function createHandler(runtime) {
     runtime.registry.setTable(roomId, table, agentId, game.id);
     pool.track(table);
     return table;
+  }
+
+  function hundredTable(session, body = {}) {
+    const game = gameOf(50);
+    const requestedId = Number(body.roomId);
+    if (requestedId) {
+      const existing = runtime.registry.getTable(requestedId, session.agentId, game.id);
+      if (existing && Number(existing.roomType) === 50) return existing;
+    }
+    const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
+      && Number(row.room_type) === 50
+      && (requestedId ? Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0) === requestedId
+        : Number(row.play_mode) === Number(body.playMode || 1)));
+    return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), 50, session.agentId) : null;
+  }
+
+  function leaveHundred(ws, session) {
+    const table = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
+    if (table) gameOf(table.roomType).onMessage(ctxOf(ws, session, table), SEND.EXIT, { roomType: table.roomType });
   }
 
   // hall-to-game internal query uses JSON on the existing socket listener.
@@ -303,6 +327,7 @@ export async function createHandler(runtime) {
         accumulatedWin: 0,
         inRoom: false,
         authenticated: false,
+        openHundredGame: Boolean(body.openHundredGame),
         accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
       });
       try {
@@ -345,6 +370,34 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.authenticated === false) return;
+    // The native Bairen overlay logs in independently, then sends 6105 without
+    // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
+    const hundredRequest = [SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
+      SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ].includes(msgid);
+    if (hundredRequest && (Number(payload?.roomType) === 50
+      || (payload?.roomType == null && session.hundredGameId === gameOf(50)?.id))) {
+      const entering = msgid === SEND.ENTER;
+      const registered = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
+      const table = entering ? hundredTable(session, payload) : registered;
+      if (table) {
+        if (entering) {
+          session.hundredRoomId = table.roomId;
+          session.hundredGameId = table.gameId;
+          session.hundredInRoom = true;
+          session.hundredRoomIds ||= new Set();
+          session.hundredRoomIds.add(Number(table.roomId));
+        }
+        const targetId = msgid === SEND.MB_ROOM_BET_REQ ? Number(payload?.roomId) : table.roomId;
+        if ([SEND.BET, SEND.MB_ROOM_BET_REQ].includes(msgid)
+          && (session.hundredInRoom !== true || !session.hundredRoomIds?.has(Number(targetId)))) return;
+        const target = targetId === Number(table.roomId) ? table
+          : session.hundredRoomIds?.has(targetId)
+            ? runtime.registry.getTable(targetId, session.agentId, table.gameId) : null;
+        if (target) await gameOf(target.roomType).onMessage(ctxOf(ws, session, target, payload || {}), msgid, payload || {});
+        return;
+      }
+      if (entering) return;
+    }
     if (msgid === SEND.MB_UNREG_ROOMS_REQ) {
       // The shared Bairen client sends this even without any subscriptions,
       // and often after 2110 has detached the primary room. No room lookup,
@@ -389,6 +442,7 @@ export async function createHandler(runtime) {
       const body = payload || {};
       const roomId = Number(body.roomId || session.roomId);
       const roomType = Number(body.roomType || 0);
+      session.openHundredGame = Boolean(body.openHundredGame ?? session.openHundredGame);
       session.roomId = roomId;
       const table = ensureTable(roomId, roomType, session.agentId);
       if (!table) {
@@ -485,6 +539,7 @@ export async function createHandler(runtime) {
   function leaveTable(ws, session, table, game) {
     if (session.leaveTask) return session.leaveTask;
     const task = (async () => {
+      if (table.kind !== "hundred") leaveHundred(ws, session);
       await game.afterRound?.(ctxOf(ws, session, table));
       session.inRoom = false;
       const cash = game.onLeave(ctxOf(ws, session, table));
@@ -541,6 +596,7 @@ export async function createHandler(runtime) {
       runtime.registry.drop(ws);
       return;
     }
+    leaveHundred(ws, session);
     const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
     const game = table ? gameOf(table.roomType) : null;
     if (table && game && session.inRoom !== false) {

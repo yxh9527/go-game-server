@@ -31,6 +31,16 @@ export function publicWsHost(req, config, env) {
   return config.game_server || "";
 }
 
+export function publicHundredWsHost(req, config, env) {
+  if (env === "dev" && req) {
+    // Native SocketMgr suppresses RoomSocket2 when both public hosts match.
+    // The existing dev WS proxy accepts both names on the same listener.
+    const domain = publicWsHost(req, config, env);
+    return domain.replace(/^www\./, "hundred.");
+  }
+  return config.hundred_server || config.game_server || "";
+}
+
 function hallTemplate() {
   return fs.readFileSync(path.join(staticRoot, "hall/21/0/index.html"), "utf8");
 }

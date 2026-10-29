@@ -8,11 +8,13 @@ import { createRegistry, findConfig } from "../../game-server/src/registry.js";
 import { encodeFrame, decodeFrame } from "../../game-server/src/codec.js";
 import { SEND, PUSH } from "../../game-server/src/messages.js";
 import { ROOM_LIFETIME_MS } from "../../game-server/src/core/room-lifecycle.js";
+import { seedRooms } from "../../cache/rpc/seed.js";
 
 test("hall allocates live empty reserves through authenticated game-server queries", async (t) => {
   const registry = createRegistry();
   const rows = [{ game_type: 19, room_type: 19, game_room_config_id: 70, room_index: 0,
-    play_mode: 0, small_blind: 10, big_blind: 20, carry_min: 500, state: 1 }];
+    play_mode: 0, small_blind: 10, big_blind: 20, carry_min: 500, state: 1 },
+    ...seedRooms().filter(row => row.room_type === 50)];
   const errors = [];
   let loads = 0;
   let persists = 0;
@@ -56,8 +58,19 @@ test("hall allocates live empty reserves through authenticated game-server queri
   const first = await query(45);
   assert.equal(first.msgCode, 200);
   assert.equal(first.data.roomId, 700000);
-  assert.equal(first.data.hundredDomain, first.data.domain, "ordinary rooms must advertise their shared hundred socket endpoint");
+  assert.equal(first.data.hundredDomain, first.data.domain.replace(/^www\./, "hundred."),
+    "native hundred channel needs a distinct public host on the existing dev proxy");
   assert.equal((await query(45)).data.roomId, first.data.roomId, "reuse available room");
+  for (const row of rows.filter(row => row.room_type === 50)) {
+    const selected = await query(45, 1, 'token-1', { gameType: '1000', roomType: '50',
+      gameRoomConfigId: String(row.game_room_config_id), playMode: String(row.play_mode) });
+    assert.equal(selected.msgCode, 200);
+    assert.equal(selected.data.roomId, first.data.roomId);
+    assert.equal(selected.data.roomType, 19, 'the hundred selection returns its configured ordinary host');
+    assert.equal(selected.data.gameRoomConfigId, 70);
+    assert.equal(selected.data.openHundredGame, true);
+    assert.notEqual(selected.data.domain, selected.data.hundredDomain);
+  }
   const table = registry.getTable(first.data.roomId, 1, "holdem");
   assert.deepEqual(table.members, []);
   assert.deepEqual(table.observers, []);

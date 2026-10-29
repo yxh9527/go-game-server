@@ -76,7 +76,8 @@ test("client dev patch remaps language bundles and keeps console", () => {
   assert.match(CLIENT_DEV_PATCH, /connectTips/);
   assert.match(CLIENT_DEV_PATCH, /hideConnectTips|isLoadingPersist/);
   assert.match(CLIENT_DEV_PATCH, /joinRoom\.isOb = true/);
-  assert.match(CLIENT_DEV_PATCH, /scheduleGameScene/);
+  assert.match(CLIENT_DEV_PATCH, /hookSceneRequests/);
+  assert.doesNotMatch(CLIENT_DEV_PATCH, /scheduleGameScene/);
   assert.match(CLIENT_DEV_PATCH, /scene already active/);
   assert.match(CLIENT_DEV_PATCH, /skip duplicate scene/);
   assert.match(CLIENT_DEV_PATCH, /sceneReady/);

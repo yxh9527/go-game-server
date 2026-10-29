@@ -135,14 +135,25 @@ test('shared loading notification opens the requested Zjh bundle and retires cal
   assert.equal(page.loaded.length, count);
 });
 
-test('Bairen Texas entry loads the Holdem scene when the client omits its scene loading notification', () => {
+test('hundred entry uses the normal host room returned by hall', () => {
   const page = browser();
   page.setLoader((name, _progress, done) => done(null, { name }));
-  page.open(1000001, 50);
+  page.open(700000, 19);
+  page.advance(5000);
+  assert.deepEqual(page.loads, [], 'wait for original Bairen initialization, even on a slow connection');
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
   page.advance(200);
   assert.deepEqual(page.loads, ['gameHoldem']);
   assert.deepEqual(page.runs, ['gameHoldem']);
   assert.ok(page.loaded.some((message) => message.type === 'gameLoaded'));
+});
+
+test('a direct hundred room never forces an incompatible Holdem scene', () => {
+  const page = browser();
+  page.open(1000001, 50);
+  page.advance(1000);
+  assert.deepEqual(page.loads, []);
+  assert.deepEqual(page.runs, []);
 });
 
 test("idle hall never starts an empty delivery or timeout", () => {
@@ -211,7 +222,10 @@ test("original Cocos startup can consume the early cache without duplicate deliv
 
 test("returning to the hall retires pending work and permits another entry", () => {
   const page = browser();
-  page.setHandler(() => page.setScene("gameHoldem"));
+  page.setHandler(() => {
+    page.setScene("gameHoldem");
+    page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
+  });
   page.open(700000, 19);
   page.advance(200);
   const initialLoaded = page.loaded.length;
@@ -233,6 +247,7 @@ test("old asynchronous scene loads cannot run after exit or a subsequent entry",
   let complete;
   page.setLoader((_name, _progress, done) => { complete = done; });
   page.open(700000, 19);
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
   page.advance(200);
   assert.equal(page.loads.length, 1);
   page.setScene("gameHoldem"); // The original client finishes entering first.
@@ -259,6 +274,7 @@ test("a stale SceneManager promise cannot run an old scene after returning", asy
   };
   page.window.__require = () => ({ default: { instance: manager } });
   page.open(700000, 19);
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
   page.advance(200);
   assert.equal(typeof resolveLoad, "function");
   page.setScene("gameHoldem");
