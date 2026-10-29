@@ -135,6 +135,16 @@ test('shared loading notification opens the requested Zjh bundle and retires cal
   assert.equal(page.loaded.length, count);
 });
 
+test('Bairen Texas entry loads the Holdem scene when the client omits its scene loading notification', () => {
+  const page = browser();
+  page.setLoader((name, _progress, done) => done(null, { name }));
+  page.open(1000001, 50);
+  page.advance(200);
+  assert.deepEqual(page.loads, ['gameHoldem']);
+  assert.deepEqual(page.runs, ['gameHoldem']);
+  assert.ok(page.loaded.some((message) => message.type === 'gameLoaded'));
+});
+
 test("idle hall never starts an empty delivery or timeout", () => {
   const page = browser();
   page.advance(60000);

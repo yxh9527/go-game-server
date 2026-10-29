@@ -28,8 +28,11 @@ export const SEND = {
   GGL_STATE: 3702,
   BET: 6101,
   ENTER: 6105,
+  MB_REG_ROOMS_REQ: 6123,
   MB_UNREG_ROOMS_REQ: 6124,
+  MB_ROOM_BET_REQ: 6125,
   GR_GET_ALL_ROOMS_REQ: 6126,
+  EXIT: 6106,
   RETURN_100_RECORD: 6221,
 };
 
@@ -84,7 +87,13 @@ export const PUSH = {
   BET_BROADCAST: 6202,
   GAME_STATE: 6204,
   ENTER_RESPONSE: 6205,
+  DEAL_CARDS_AND_ODDS: 6212,
   MB_UNREG_ROOMS_RES: 6225,
+  MB_ROOM_BET_RES: 6226,
+  MB_REG_ROOMS_RES: 6224,
+  MB_REGED_ROOM_INFOS: 6227,
+  MB_SNC_ROOM_STATE: 6228,
+  MB_ROOM_BET_SETTLE: 6229,
   PLAYER_NUM_CHANGE: 6207,
   SHOWDOWN_POKERS: 6208,
   PLAYER_BALANCE_UPDATE: 6210,
@@ -94,7 +103,7 @@ export const PUSH = {
 
 export function kindOf(roomType) {
   const type = Number(roomType);
-  if (type === 58) {
+  if (type === 50 || type === 51 || type === 52 || type === 58 || type === 60 || type === 62) {
     return "hundred";
   }
   if (type === 61 || type === 63) {

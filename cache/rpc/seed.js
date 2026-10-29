@@ -26,6 +26,12 @@ export function seedRooms() {
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5803, play_mode: 0, room_index: 1, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 1", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5804, play_mode: 0, room_index: 2, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 2", category: "hundred" }),
     room({ game_type: 1002, room_type: 58, game_room_config_id: 5805, play_mode: 0, room_index: 3, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 3", category: "hundred" }),
+    ...[[100, 1, "暗五公牌"], [5002, 2, "明三公牌"], [5003, 3, "明二公牌"],
+      [5004, 4, "明一公牌"], [5005, 5, "全暗"]].map(([id, mode, name], index) => room({
+      game_type: 1000, room_type: 50, game_room_config_id: id, play_mode: mode,
+      room_index: index + 1, hundred_min_bet: 100, hundred_max_bet: 1000000000,
+      name: `百人德州 ${name}`, category: "hundred",
+    })),
     room({ game_type: 1004, room_type: 61, game_room_config_id: 6101, room_index: 26, carry_min: 100000000, name: "麻将胡了", category: "slots" }),
     room({ game_type: 1004, room_type: 63, game_room_config_id: 6301, room_index: 26, carry_min: 100000000, name: "赏金女王", category: "slots" }),
     ...[
@@ -120,6 +126,20 @@ function room(row) {
     payloadObj.key = [roomType, payloadObj.smallBlind, payloadObj.bigBlind, payloadObj.straddle,
       payloadObj.playMode, payloadObj.initialBet, payloadObj.roomClassification, payloadObj.carryMin, payloadObj.aofBet,
       payloadObj.forceShowCard].join('/');
+  }
+  if (roomType === 50) {
+    const modeNames = { 1: "暗五公牌", 2: "明三公牌", 3: "明二公牌", 4: "明一公牌", 5: "全暗" };
+    Object.assign(payloadObj, {
+      roomClassification: 2,
+      maxBet: row.hundred_max_bet,
+      hundredParams: {
+        gameName: `${modeNames[row.play_mode] || "百人德州"}(底注1)`,
+        gameRoomConfigId: row.game_room_config_id,
+        maxBet: row.hundred_max_bet,
+        betAreaOdds: { 1: 1.91, 2: 0.5, 3: 16.44, 4: 1.61, 5: 2.03, 6: 13.22, 7: 4.9 },
+      },
+    });
+    payloadObj.key = [roomType, row.play_mode, row.game_room_config_id].join("/");
   }
   if (roomType === 25) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, straddle: false,

@@ -54,6 +54,10 @@ export async function createHandler(runtime) {
   }
 
   function tableIo(table) {
+    const subscribed = (session) => table.kind === "hundred"
+      ? session?.hundredRoomIds?.has(Number(table.roomId))
+        || (!session?.hundredRoomIds && Number(session?.roomId) === Number(table.roomId))
+      : Number(session?.roomId) === Number(table.roomId);
     return {
       env: runtime.env,
       wallet: runtime.wallet,
@@ -69,14 +73,17 @@ export async function createHandler(runtime) {
       },
       sessionFor(uid) {
         return [...runtime.registry.sessions.values()].find((session) => session.inRoom !== false
-          && Number(session.userId) === Number(uid) && Number(session.roomId) === Number(table.roomId)
+          && Number(session.userId) === Number(uid)
+          && subscribed(session)
           && Number(session.agentId || 0) === Number(table.agentId || 0)
           && String(session.gameId || table.gameId) === String(table.gameId));
       },
       broadcast(msgid, payload) {
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.inRoom !== false && session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId)) {
+          if (session?.inRoom !== false && subscribed(session)
+            && Number(session.agentId || 0) === Number(table.agentId || 0)
+            && String(session.gameId || table.gameId) === String(table.gameId)) {
             send(ws, msgid, payload);
           }
         }
@@ -91,14 +98,18 @@ export async function createHandler(runtime) {
         }
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
-          if (session?.inRoom !== false && session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId) && Number(session.userId) === Number(uid)) {
+          if (session?.inRoom !== false && subscribed(session)
+            && Number(session.agentId || 0) === Number(table.agentId || 0)
+            && String(session.gameId || table.gameId) === String(table.gameId) && Number(session.userId) === Number(uid)) {
             send(ws, msgid, payload);
           }
         }
       },
       forEachPlayer(fn) {
         for (const [ws, session] of runtime.registry.sessions) {
-          if (session?.inRoom !== false && session?.roomId === table.roomId && Number(session.agentId || 0) === Number(table.agentId || 0) && String(session.gameId || table.gameId) === String(table.gameId)) {
+          if (session?.inRoom !== false && subscribed(session)
+            && Number(session.agentId || 0) === Number(table.agentId || 0)
+            && String(session.gameId || table.gameId) === String(table.gameId)) {
             fn({ ...session, ws });
           }
         }
@@ -449,8 +460,14 @@ export async function createHandler(runtime) {
       return;
     }
     const request = seatView.restoreSeatRequest(table, session, msgid, payload || {});
-    const handled = await game.onMessage(ctxOf(ws, session, table), msgid, request);
-    await game.afterRound?.(ctxOf(ws, session, table));
+    const messageTable = game.kind === "hundred" && msgid === SEND.MB_ROOM_BET_REQ && Number(request?.roomId)
+      ? runtime.registry.getTable(Number(request.roomId), session.agentId, session.gameId) || table
+      : table;
+    const messageGame = gameOf(messageTable.roomType) || game;
+    const messageContext = messageTable === table ? ctxOf(ws, session, table, request)
+      : { ...ctxOf(ws, session, messageTable, request), table: messageTable };
+    const handled = await messageGame.onMessage(messageContext, msgid, request);
+    await messageGame.afterRound?.(messageContext);
     if (table.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
       await expireRoom(table);
     }
