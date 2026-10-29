@@ -21,6 +21,7 @@ import { PROTOCOL } from '../../game-server/src/games/mahjong/messages.js';
 // Separate servers and wallets. Never alter resident services or live hands.
 const roomId = Number(process.argv[2] || 2604), type = Math.floor(roomId / 100), uid = 88000000 + roomId;
 const handsToPlay = Number(process.argv[3] || 1);
+const requireSelfHu = process.argv.includes('--require-self-hu');
 const failures = [], log = { info(){}, error(...a){ failures.push(a.map(String).join(' ')); } };
 const rpc = await initRpc({ env: 'dev' }, log), registry = createRegistry();
 const runtime = { env:'dev', config:{}, hotVersion:'mahjong-browser', rpc, gateway:rpc.gateway,
@@ -86,7 +87,7 @@ try{
   const seat=await evaluate(`(()=>{const all=cc.director.getScene().getComponentsInChildren(cc.Component),c=all.find(c=>typeof c.clickSeatDown==='function');if(c){const nodes=[],walk=n=>{if(Number.isInteger(n.seatIndex)&&n.activeInHierarchy&&n.getComponent(cc.Button)?.interactable)nodes.push(n);n.children.forEach(walk);};walk(c.node);if(nodes.length){c.clickSeatDown({target:nodes[0]});return 'clickSeatDown';}}const p=all.find(c=>typeof c.onPlayerSitDown==='function');if(p){const n=[0,1,2,3].find(n=>p.viewModel.getLocalIndexBySeatIndex(n)===${emptyPos});p.onPlayerSitDown(null,String(n));return 'onPlayerSitDown';}const hz=all.find(c=>cc.js.getClassName(c)==='hzxlSeatPanel');if(hz){const n=[0,1,2,3].find(n=>hz.viewModel.seatNameToServerPos(n)===${emptyPos});hz.onClickSeat({target:hz.container.getSeatNode(n).getChildByName('icon')});return 'onClickSeat';}return null;})()`);console.log('SEAT',JSON.stringify(seat));
   assert.equal(typeof seat,'string','native seat button handler');await delay(700);
   const carry=await evaluate(`(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&c._curdata&&typeof c.onDaiRuClick==='function');if(!c)return false;c._carryReqCount=100;c.onDaiRuClick();return true;})()`);assert.ok(carry,'native carry dialog');
-  let settled=false,lastAction=0,reconnected=false,nativeDiscards=0;const started=Date.now();
+  let settled=false,lastAction=0,reconnected=false,nativeDiscards=0,nativeSelfHus=0,postHuAutoDiscards=0,pendingAutoDiscard;const started=Date.now();
   while(Date.now()-started<240000){
     const t=[...registry.tables.values()].find(t=>t.cfg.game_room_config_id===roomId),h=t?.hand,p=h?.players.find(p=>p.uid===uid);
     if(t&&!t.cfg.robot_behavior)t.cfg.robot_behavior={checkMinMs:1000,checkMaxMs:1000,joinProbability:1,leaveProbability:0,carryMinMs:1000,carryMaxMs:1000};
@@ -102,6 +103,10 @@ try{
         const opts=engine.options(t,p).filter(o=>type!==30||nativeDiscards>=2||o.type!==8),op=robot.chooseAction({cards:p.handCards.slice(),options:h.stage==='turn'?[...opts,{type:2}]:opts,
           family:h.rules.family,queType:p.queType,ting:p.ting,drawn:p.drawn});
         if([9,10].includes(op.type)&&op.card==null)op.card=op.cards?.[0];action={id:PROTOCOL[h.rules.family].action,body:op};
+      }
+      if(type===30&&action?.body.type===2&&p.huRecord.length){
+        if(p.drawn!=null)pendingAutoDiscard ||= {p,before:p.discardCount,card:p.drawn,deadline:h.deadline};
+        action=null; // The browser must never send a discard for a locked hand.
       }
       if(action){
         // The native blood-flow client locks manual hand input after a hu.
@@ -123,15 +128,41 @@ try{
           }
           assert.equal(p.discardCount,discards+1,'native hand click sends an accepted discard');
           nativeDiscards++;
+        }else if(type===30&&action.id===PROTOCOL.hzxl.action&&action.body.type===8&&h.stage==='turn'){
+          let button;
+          for(let attempt=0;attempt<20;attempt++){
+            button=await evaluate(`(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&c.oper_2&&typeof c.onClickOper2Btn==='function'),n=c?.oper_2.getChildByName('btn_hu'),b=n?.getComponent(cc.Button),op=b?.clickEvents[0]?.customEventData;return {visible:!!(n?.activeInHierarchy&&b?.interactable&&c.viewModel.isSelfCanOperate),op:op?JSON.parse(op):null,multiplier:n?.getChildByName('num')?.getComponent(cc.Label)?.string};})()`);
+            if(button.visible&&button.op?.card===action.body.card)break;
+            await delay(100);
+          }
+          console.log('NATIVE_SELF_HU',JSON.stringify(button));
+          assert.ok(button.visible,'native self-draw hu button is visible and enabled');
+          assert.equal(button.op.type,8);assert.equal(button.op.card,action.body.card);
+          assert.ok(Number.isSafeInteger(button.op.num)&&button.op.num>0);
+          assert.ok(!/undefined|NaN/.test(button.multiplier));
+          const wins=p.huRecord.length;
+          await evaluate(`(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&c.oper_2&&typeof c.onClickOper2Btn==='function'),n=c.oper_2.getChildByName('btn_hu');c.onClickOper2Btn({target:n},n.getComponent(cc.Button).clickEvents[0].customEventData);return true;})()`);
+          await delay(250);
+          assert.equal(p.huRecord.length,wins+1,'native hu button submits an accepted self-draw');
+          assert.equal(p.huRecord.at(-1).ziMo,true);nativeSelfHus++;
         }else await evaluate(`__require('SocketMgr').default.instance.send(${action.id},${JSON.stringify(action.body)});true`);
         lastAction=Date.now();
       }
+    }
+    if(pendingAutoDiscard&&pendingAutoDiscard.p.discardCount>pendingAutoDiscard.before){
+      const {p,card,deadline}=pendingAutoDiscard;
+      assert.equal(p.playCards.at(-1),card,'server discards the new tile while native hand input is locked');
+      assert.ok(Date.now()<deadline,'post-hu draw-discard happens before the full operation timeout');
+      postHuAutoDiscards++;console.log('POST_HU_AUTO_DISCARD',JSON.stringify({card,remainingMs:deadline-Date.now()}));
+      pendingAutoDiscard=null;
     }
     if(t?.roomFeatures?.settledInning>=handsToPlay){settled=true;clearInterval(tick);break;}
     await delay(300);
   }
   assert.ok(settled,'native round settles');await delay(6000);
   if(type===30)assert.ok(nativeDiscards>=2,'blood-flow hand clicks work before reconnect');
+  if(requireSelfHu)assert.ok(nativeSelfHus>0,'a native self-draw hu button was clicked during this run');
+  if(requireSelfHu)assert.ok(postHuAutoDiscards>0,'server resumes draw-discard after a native self-draw without a browser discard request');
   const visual=await evaluate(`(()=>{const all=cc.director.getScene().getComponentsInChildren(cc.Component);return {scene:cc.director.getScene().name,labels:all.filter(c=>c instanceof cc.Label&&c.node.activeInHierarchy).map(c=>c.string)};})()`);console.log('VISUAL',JSON.stringify(visual));
   assert.deepEqual(visual.labels.filter(s=>/NaN|undefined/.test(s)),[]);
   await evaluate(`(async()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>typeof c.onGameHistoryClick==='function');await c.onGameHistoryClick();return true;})()`);await delay(3000);

@@ -141,6 +141,159 @@ test('blood-flow updates the concealed hand before enabling input for the first 
   }
 });
 
+function bloodFlowDrawFixture(id=3002, cards=[18,19,20,21,22,23,24,25,26,1,1,3,4], tail=[], draw=5, queType=3) {
+  const hands=[[9,9,10,10,11,11,12,12,13,13,14,14,15,16],cards];
+  const row=seedRooms().find(r=>r.game_room_config_id===id),remaining=deckFor(roomRules(row));
+  for(const c of hands.flat().concat(draw,tail)){
+    const index=remaining.indexOf(c);assert.ok(index>=0);remaining.splice(index,1);
+  }
+  while(hands.length<roomRules(row).maxPeople)hands.push(remaining.splice(0,13));
+  const f=fixture(id,hands,[draw,...tail]),h=forceTurn(f),p=h.players[1];
+  p.queType=queType;p.bot=false;p.member.bot=false;
+  assert.ok(engine.action(f.io,f.table,1,{type:OP.DISCARD,card:9},h.time+1));
+  assert.equal(h.actorUid,p.uid);assert.equal(h.stage,'turn');assert.equal(p.drawn,draw);
+  return {...f,p};
+}
+
+test('blood-flow six-tong self-draw sends a private native hu button with a numeric multiplier',()=>{
+  for(const id of [3001,3002]){
+    const f=bloodFlowDrawFixture(id),h=f.table.hand,p=f.p;
+    const hint=f.messages.findLast(m=>m.id===3868&&m.uid===p.uid);
+    assert.ok(hint,'3868 is required to display the original client operation panel');
+    const hu=hint.data.operatorList.find(o=>o.type===OP.HU);
+    assert.ok(hu);assert.equal(hu.card,5);assert.equal(hu.num,64,'one straight x concealed hand x self-draw');
+    assert.ok(hint.data.operatorList.some(o=>o.type===OP.PASS));
+    assert.ok(f.messages.filter(m=>m.id===3868&&m.uid!==p.uid).every(m=>!m.data.operatorList.some(o=>o.type===OP.HU)));
+    const snap=engine.snapshot(f.table,{userId:p.uid},h.time+1);
+    assert.deepEqual(snap.memberDeskInfos.find(m=>m.uid===p.uid).operatorList,hint.data.operatorList);
+    const before=p.handCards.slice();engine.tick(f.io,f.table,h.deadline-1);
+    assert.deepEqual(p.handCards,before,'a human may choose hu throughout the operation clock');
+    assert.equal(p.huRecord.length,0);
+    assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:5},h.deadline-1));
+    assert.equal(p.huRecord.length,1);assert.equal(p.huRecord[0].card,5);assert.equal(p.huRecord[0].ziMo,true);
+    assert.equal(p.delta,(h.rules.maxPeople-1)*h.rules.diFen*64);assert.equal(p.discardCount,0);
+    assert.deepEqual(f.messages.findLast(m=>m.id===3868&&m.uid===p.uid).data.operatorList,[]);
+  }
+});
+
+test('blood-flow passing a self-draw hides its buttons without discarding or extending the clock',()=>{
+  const f=bloodFlowDrawFixture(),h=f.table.hand,p=f.p,before=p.handCards.slice(),deadline=h.deadline;
+  assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.PASS},h.time+1));
+  assert.equal(h.deadline,deadline);assert.deepEqual(p.handCards,before);assert.equal(p.discardCount,0);
+  assert.deepEqual(f.messages.findLast(m=>m.id===3868&&m.uid===p.uid).data.operatorList,[]);
+  assert.ok(!engine.options(f.table,p).some(o=>o.type===OP.HU));
+  assert.equal(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:5},h.time+2),false);
+  assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.DISCARD,card:5},h.time+3));
+  assert.equal(p.discardCount,1);
+});
+
+test('blood-flow ordinary draws cannot display or accept a false self-draw hu',()=>{
+  const f=bloodFlowDrawFixture(3002,[0,0,0,2,2,2,4,4,4,6,6,6,8]),h=f.table.hand,p=f.p;
+  const hint=f.messages.findLast(m=>m.id===3868&&m.uid===p.uid);
+  assert.ok(hint);assert.ok(!hint.data.operatorList.some(o=>o.type===OP.HU));
+  assert.equal(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:5},h.time+1),false);
+  assert.equal(p.huRecord.length,0);assert.equal(p.delta,0);
+});
+
+test('blood-flow concealed-kong buttons use the same private operation hint as self-draw hu',()=>{
+  const f=bloodFlowDrawFixture(3002,[5,5,5,0,1,2,18,19,20,23,24,25,26]);
+  const hint=f.messages.findLast(m=>m.id===3868&&m.uid===f.p.uid);
+  assert.ok(hint.data.operatorList.some(o=>o.type===OP.AN_GANG&&o.card===5));
+  assert.ok(hint.data.operatorList.some(o=>o.type===OP.PASS));
+});
+
+function bloodFlowAfterHu(draw,cards) {
+  const f=bloodFlowDrawFixture(3002,cards,[9,draw]),h=f.table.hand,p=f.p;
+  for(const other of h.players){other.bot=false;other.member.bot=false;}
+  assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:5},h.time+1));
+  const other=h.players.find(other=>other.uid===h.actorUid);
+  assert.equal(other.drawn,9);
+  assert.ok(engine.action(f.io,f.table,other.uid,{type:OP.DISCARD,card:9},h.time+1));
+  assert.equal(h.stage,'turn');assert.equal(h.actorUid,p.uid);assert.equal(p.drawn,draw);
+  assert.equal(p.huRecord.length,1);assert.equal(p.bot,false);assert.ok(!p.member.tuoGuanState);
+  return f;
+}
+
+test('blood-flow human automatically discards the drawn tile after hu without waiting for timeout',()=>{
+  const f=bloodFlowAfterHu(6),h=f.table.hand,p=f.p,deadline=h.deadline;
+  const waiting=p.handCards.slice();waiting.splice(waiting.indexOf(6),1);
+  assert.deepEqual(engine.options(f.table,p),[]);
+  const before=p.discardCount;
+  engine.tick(f.io,f.table,p.actionAt-1);assert.equal(p.discardCount,before);
+  const at=p.actionAt;assert.ok(at<deadline);
+  engine.tick(f.io,f.table,at);
+  assert.equal(p.discardCount,before+1);assert.equal(p.playCards.at(-1),6);
+  assert.deepEqual(p.handCards,waiting,'concealed waiting tiles stay intact');
+  const discard=f.messages.findLast(m=>m.id===3853&&m.uid===p.uid&&m.data.type===OP.DISCARD);
+  assert.equal(discard.data.card,6);assert.equal(discard.data.cardLen,13);
+  const snap=engine.snapshot(f.table,{userId:p.uid},at);
+  assert.equal(snap.memberDeskInfos.find(m=>m.uid===p.uid).huRecord.length,1);
+  assert.equal(p.member.tuoGuanState,undefined,'automatic draw-discard does not enable account trusteeship');
+});
+
+test('blood-flow repeated human hu stays selectable; passing resumes automatic draw-discard',()=>{
+  for(const pass of [false,true]){
+    const f=bloodFlowAfterHu(5),h=f.table.hand,p=f.p,deadline=h.deadline;
+    assert.ok(engine.options(f.table,p).some(o=>o.type===OP.HU));
+    engine.tick(f.io,f.table,p.actionAt);
+    assert.equal(p.huRecord.length,1);assert.equal(p.discardCount,0);
+    if(pass){
+      assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.PASS},h.deadline-500));
+      assert.equal(h.deadline,deadline);assert.deepEqual(engine.options(f.table,p),[]);
+      engine.tick(f.io,f.table,deadline-400);
+      assert.equal(p.discardCount,1);assert.equal(p.playCards.at(-1),5);
+      assert.equal(p.huRecord.length,1);
+    }else{
+      engine.tick(f.io,f.table,deadline-1);assert.equal(p.huRecord.length,1);
+      assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:5},deadline-1));
+      assert.equal(p.huRecord.length,2);assert.equal(p.discardCount,0);
+    }
+  }
+});
+
+test('blood-flow passing kong clears that choice and an expired post-hu turn discards the draw',()=>{
+  for(const pass of [false,true]){
+    const f=bloodFlowAfterHu(1,[1,1,1,18,19,20,21,22,23,24,25,26,27]),h=f.table.hand,p=f.p;
+    assert.ok(engine.options(f.table,p).some(o=>o.type===OP.AN_GANG&&o.card===1));
+    engine.tick(f.io,f.table,p.actionAt);assert.equal(p.discardCount,0);
+    const deadline=h.deadline;
+    if(pass){assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.PASS},deadline-500));assert.deepEqual(engine.options(f.table,p),[]);}
+    engine.tick(f.io,f.table,pass?deadline-400:deadline);
+    assert.equal(p.discardCount,1);assert.equal(p.playCards.at(-1),1);assert.equal(p.groupCards.length,0);
+  }
+});
+
+test('captured 09:29 red-joker hu is valid and later automatic discards preserve its waiting hand',()=>{
+  // Original four-player log: que=tong, 7/9-tiao, 111/23/666/78-wan,
+  // one red joker, then draw another red joker. Use the same physical hand
+  // and following human draws in a two-player fixture for direct turn control.
+  const waiting=[15,17,18,18,18,19,20,23,23,23,24,25,27];
+  const f=bloodFlowDrawFixture(3002,waiting,[9,6,10,21],27,2),h=f.table.hand,p=f.p;
+  for(const other of h.players){other.bot=false;other.member.bot=false;}
+  const hu=engine.options(f.table,p).find(o=>o.type===OP.HU);
+  assert.deepEqual(hu,{type:OP.HU,card:27,num:8,huType:10});
+  assert.ok(engine.action(f.io,f.table,p.uid,{type:OP.HU,card:27},h.time+1));
+  assert.deepEqual(p.handCards,waiting);
+  const passOther=()=>{
+    const other=h.players.find(other=>other.uid===h.actorUid);
+    assert.notEqual(other.uid,p.uid);
+    assert.ok(engine.action(f.io,f.table,other.uid,{type:OP.DISCARD,card:other.drawn},h.time+1));
+    assert.equal(h.actorUid,p.uid);assert.equal(h.stage,'turn');
+  };
+  passOther();assert.equal(p.drawn,6);assert.deepEqual(engine.options(f.table,p),[]);
+  const at=p.actionAt;assert.ok(at<h.deadline);
+  engine.tick(f.io,f.table,at);
+  assert.equal(p.playCards.at(-1),6);assert.deepEqual(p.handCards,waiting);
+  passOther();assert.equal(p.drawn,21);
+  assert.ok(engine.options(f.table,p).some(o=>o.type===OP.HU&&o.card===21));
+  engine.tick(f.io,f.table,p.actionAt);
+  assert.equal(p.discardCount,1,'later valid four-wan hu remains a human choice');
+  engine.tick(f.io,f.table,h.deadline);
+  assert.equal(p.playCards.at(-1),21,'timeout discards four-wan, not the original nine-tiao');
+  assert.deepEqual(p.handCards,waiting);
+  assert.equal(p.huRecord.length,1);
+});
+
 test('response windows wait for all players, prioritize hu and reject unrelated replies',()=>{
   const f=fixture(2804),h=forceTurn(f),[source,a,b]=h.players;
   h.stage='response';h.lastOut={uid:source.uid,card:1};source.playCards=[1];

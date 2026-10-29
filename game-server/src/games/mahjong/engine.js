@@ -245,8 +245,11 @@ export function options(table, p) {
   if (h.stage === 'first') return h.responses[p.uid] ? [] : h.offers[p.uid] || [];
   if (['sea', 'gang'].includes(h.stage)) return h.actorUid === p.uid ? h.offers[p.uid] || [] : [];
   if (h.stage !== 'turn' || h.actorUid !== p.uid) return [];
+  if (r.family === 'hzxl' && p.passedTurnActions) return [];
   const list = [];
-  if (!p.passedHu && evaluate(p.handCards, p.groupCards, r, context(table, p))) list.push({ type: OP.HU, card: p.drawn ?? p.handCards.at(-1) });
+  const score = !p.passedHu && evaluate(p.handCards, p.groupCards, r, context(table, p));
+  if (score) list.push({ type: OP.HU, card: p.drawn ?? p.handCards.at(-1),
+    ...(r.family === 'hzxl' ? { num: score.fan, huType: score.base.huType } : {}) });
   const c = tiles.counts(p.handCards), canKong = left(h) >= (r.family === 'csmj' ? 4 : 1);
   if ((canKong || r.family === 'csmj' && left(h)) && (!p.ting || r.family === 'csmj')) for (let card = 0; card < (r.family === 'jsmj' ? 30 : 27); card++) {
     if (tiles.suit(card) === p.queType) continue;
@@ -265,10 +268,16 @@ export function options(table, p) {
   }
   // DISCARD is an internal choice. Original clients infer its legality from
   // the current turn; only actual buttons are serialized in operatorList.
+  if (r.family === 'hzxl' && list.length) list.push({ type: OP.PASS });
   return list;
+}
+function pushOperationHint(io, table, p) {
+  if (rule(table).family !== 'hzxl') return;
+  privateSend(io, p.uid, 3868, { uid: p.uid, card: p.drawn ?? -1, operatorList: options(table, p) });
 }
 function startTurn(io, table, p, now, draw = true) {
   const h = table.hand, r = rule(table);
+  p.passedTurnActions = false;
   h.actorUid = p.uid; h.offers = {}; h.responses = {}; h.pendingKong = null;
   setClock(h, 'turn', now, r.opTime * 1000);
   if (draw && r.family === 'csmj' && left(h) === 1) { offerSea(io, table, p, now); return; }
@@ -289,6 +298,9 @@ function startTurn(io, table, p, now, draw = true) {
   // 3853 has rendered the draw, including the banker's first discard.
   if (r.family === 'hzxl') io.broadcast(proto(table).turn,
     { opUids: [p.uid], opTime: r.opTime * 1000, cursorUid: p.uid });
+  // The blood-flow operation panel listens to 3868, independently of the
+  // operatorList carried by the draw animation in 3853.
+  pushOperationHint(io, table, p);
   if (r.family === 'csmj') pushTingState(io, table, p);
 }
 function pushTingState(io, table, p) {
@@ -361,7 +373,8 @@ function responseOffers(table, source, card, robKong = false) {
     if (p === source) continue;
     const list = [], score = evaluate([...p.handCards, card], p.groupCards, r, context(table, p,
       { selfDraw: false, heaven: false, earth: false, afterKong: false, robKong, kongDiscard: source.afterKong }));
-    if (r.family !== 'jsmj' && !p.passedHu && score && (!robKong || r.family === 'csmj') && (r.family !== 'hzxl' || score.fan >= 128)) list.push({ type: OP.HU, card });
+    if (r.family !== 'jsmj' && !p.passedHu && score && (!robKong || r.family === 'csmj') && (r.family !== 'hzxl' || score.fan >= 128)) list.push({ type: OP.HU, card,
+      ...(r.family === 'hzxl' ? { num: score.fan, huType: score.base.huType } : {}) });
     if (!robKong && !p.ting && !(r.family === 'csmj' && h.seaUid && !left(h)) && !(r.family === 'hzxl' && (card === 27 || tiles.suit(card) === p.queType))) {
       const n = p.handCards.filter(c => c === card).length;
       if (n >= 2) list.push({ type: OP.PENG, card });
@@ -399,6 +412,7 @@ function openResponse(io, table, source, card, now, robKong = false, offers) {
 }
 function closeOp(io, table, p, type, auto = false) {
   if (rule(table).family === 'csmj') privateSend(io, p.uid, 4213, { uid: p.uid, operationType: type, timeoutAuto: auto });
+  if (rule(table).family === 'hzxl') privateSend(io, p.uid, 3868, { uid: p.uid, operatorList: [] });
 }
 function finishResponses(io, table, now) {
   const h = table.hand;
@@ -432,11 +446,12 @@ function finishResponses(io, table, now) {
   const cards = [...use, op.card].sort((a, b) => a - b);
   p.groupCards.push({ card: op.card, cards, indices, type: op.type, num: 3, playId: source.uid, posUid: source.uid,
     posDesc: (source.pos - p.pos + h.rules.maxPeople) % h.rules.maxPeople });
-  h.actorUid = p.uid; p.drawn = null;
+  h.actorUid = p.uid; p.drawn = null; p.passedTurnActions = false;
   setClock(h, 'turn', now, h.rules.opTime * 1000); h.offers = {}; h.responses = {};
   event(io, table, p, op.type, { card: op.card, outCardUid: source.uid, chiUseCards: use });
   io.broadcast(proto(table).turn, h.rules.family === 'hzxl' ? { opUids: [p.uid], cursorUid: p.uid, opTime: h.rules.opTime * 1000 }
     : { uid: p.uid, pos: p.pos, opTime: h.rules.opTime, hasPengGang: false });
+  pushOperationHint(io, table, p);
 }
 function performKong(io, table, p, type, card, now, source = null) {
   const h = table.hand, supplement = type === OP.BU;
@@ -527,6 +542,7 @@ export function action(io, table, uid, body = {}, now = Date.now()) {
   if (type !== OP.DISCARD && type !== OP.PASS && !offered.some(o => o.type === type && (o.card == null || o.card === card))) return false;
   if (type === OP.PASS) {
     if (offered.some(o => o.type === OP.HU)) p.passedHu = true;
+    if (r.family === 'hzxl') p.passedTurnActions = true;
     closeOp(io, table, p, type); return true;
   }
   if (type === OP.HU) { closeOp(io, table, p, type); win(io, table, [p], null, now); return true; }
@@ -689,7 +705,13 @@ export function tick(io, table, now = Date.now()) {
   for (const p of h.players) {
     if (table.hand !== h) return;
     const due = now >= h.deadline, auto = isAuto(p) && now >= p.actionAt;
-    if (!due && !auto) continue;
+    // The original blood-flow client locks hand input after the first hu.
+    // Keep optional buttons available, then draw-discard without waiting for
+    // the human's full timeout or using a bot to rearrange the waiting hand.
+    const lockedHand = h.rules.family === 'hzxl' && p.huRecord.length > 0;
+    const autoDiscard = lockedHand && h.stage === 'turn' && h.actorUid === p.uid
+      && now >= p.actionAt && options(table, p).length === 0;
+    if (!due && !auto && !autoDiscard) continue;
     const at = Math.min(now, h.deadline - 1);
     if (h.stage === 'exchange' && !p.exchange) exchange(io, table, p.uid, robot.chooseExchange(p.handCards), at);
     else if (h.stage === 'que' && !p.queType) chooseQue(io, table, p.uid, robot.chooseQue(p.handCards), at);
@@ -701,7 +723,9 @@ export function tick(io, table, now = Date.now()) {
       const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family }) : { type: OP.PASS };
       action(io, table, p.uid, { ...chosen, isAuto: true }, at);
     } else if (h.stage === 'turn' && h.actorUid === p.uid) {
-      const chosen = robot.chooseAction({ cards: p.handCards.slice(), options: due ? [] : [...options(table, p), { type: OP.DISCARD }],
+      const chosen = lockedHand && (due || autoDiscard) && p.handCards.includes(p.drawn)
+        ? { type: OP.DISCARD, card: p.drawn }
+        : robot.chooseAction({ cards: p.handCards.slice(), options: due ? [] : [...options(table, p), { type: OP.DISCARD }],
         family: h.rules.family, queType: p.queType, ting: p.ting, drawn: p.drawn,
         publicCards: h.players.flatMap(p => p.playCards.concat(p.groupCards.flatMap(g => g.type === 4 ? [] : g.cards))) });
       // Declaration buttons in Jsmj require the actual discard, not the
