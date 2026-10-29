@@ -1,7 +1,9 @@
-import { HundredGame } from "../../core/HundredGame.js";
-import { PUSH } from "../../messages.js";
-import config from "./config.js";
-import * as engine from "./engine.js";
+import { rel } from '../../rel.js';
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { HundredGame } = await rel(import.meta.url, '../../core/HundredGame.js', v);
+const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
+const { default: config } = await rel(import.meta.url, './config.js', v);
+const engine = await rel(import.meta.url, './engine.js', v);
 
 export class BaccaratGame extends HundredGame {
   constructor() {
@@ -29,6 +31,12 @@ export class BaccaratGame extends HundredGame {
 
   createAreas() {
     return engine.emptyAreas(this.config.odds);
+  }
+
+  betOptions(table) {
+    const options = super.betOptions(table);
+    // Only areas with an implemented winning condition are open here.
+    return { ...options, areas: options.areas.filter(area => [1, 2, 3, 4, 5, 9].includes(area.areaId)) };
   }
 
   buildConf(table) {

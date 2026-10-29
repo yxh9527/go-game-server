@@ -1,15 +1,26 @@
 import { rel } from '../../rel.js';
+import { env } from '../../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { credit, debit } = await rel(import.meta.url, '../../wallet/index.js', v);
 const { makeDeck, shuffle, evaluate7, compareRank } = await rel(import.meta.url, '../holdem/cards.js', v);
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
+const { hundredWalletContext } = await rel(import.meta.url, '../../core/robot.js', v);
+const history = env.isDev ? await rel(import.meta.url, '../../../../cache/game-server/hundred-holdem-history.js', v) : null;
+
+export function historyList(table, uid) {
+  return history?.list(table, uid) || { gameRoomId: table.roomId, list: [] };
+}
+
+export function historyDetail(table, uid, inning) {
+  return history?.detail(table, uid, inning) || null;
+}
 
 export const PHASE = Object.freeze({ IDLE: 0, DEALING: 1, BETTING: 2, SHOWDOWN: 4, SETTLING: 5, STATS: 6, ENDED: 7 });
 const areaIds = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
 const emptyTotals = () => Object.fromEntries(areaIds.map(id => [id, 0]));
 const safeMoney = value => Number.isSafeInteger(value) && value > 0;
 
-// Config odds are objects; per-hand areaOdds are plain numbers in the client.
+// Snapshots and multi-bet cards use objects; the main-table 6212 uses numbers.
 export function configuredOdds(table) {
   return Object.fromEntries(areaIds.map(id => [id, { id, odds: table.rules.betAreaOdds[id] }]));
 }
@@ -105,8 +116,10 @@ function outcome(hand) {
 
 function pushRoomState(io, table, extra = {}) {
   const payload = { roomType: 50, roomId: table.roomId, inning: table.inning,
+    // The original multi-bet model drops updates without its context tag.
+    customData: 2,
     state: table.state, countDown: Math.max(0, table.phaseEndsAt - Date.now()),
-    areaOdds: table.rules.betAreaOdds, totalBetsByArea: betAreaTotals(table),
+    areaOdds: configuredOdds(table), totalBetsByArea: betAreaTotals(table),
     cardColor: table.cardColor, ...extra };
   io.broadcast(PUSH.MB_SNC_ROOM_STATE, payload);
   io.broadcast(PUSH.GAME_STATE, { state: table.state, inning: table.inning, roomType: 50,
@@ -132,7 +145,7 @@ export function acceptBet(ctx, body, responseId = 6201) {
   const { table, session, io } = ctx;
   const current = table.playerBets.get(Number(session.userId)) || [];
   const result = (code) => {
-    const payload = { points: session.wallet, roomType: 50, code, roomId: table.roomId,
+    const payload = { points: session.wallet, roomType: 50, code, roomId: table.roomId, customData: 2,
       myBets: current.map(row => ({ ...row })), myTotalBets: current.map(row => ({ ...row })),
       betAreaIds: current.map(row => row.areaId) };
     io.sendUser?.(session.userId, responseId, payload);
@@ -171,7 +184,7 @@ export function acceptBet(ctx, body, responseId = 6201) {
   io.broadcast(PUSH.BET_BROADCAST, { roomType: 50, roomId: table.roomId,
     allPlayerBets: areaIds.map(areaId => ({ areaId, total: table.totalBetsByArea[areaId] })) });
   const payload = { points: session.wallet, roomType: 50, code: 0, myBets: own,
-    myTotalBets: own, betAreaIds: own.map(row => row.areaId), roomId: table.roomId };
+    myTotalBets: own, betAreaIds: own.map(row => row.areaId), roomId: table.roomId, customData: 2 };
   io.sendUser?.(session.userId, responseId, payload);
   return true;
 }
@@ -217,13 +230,17 @@ export async function settleRound(ctx) {
     const payout = bets.reduce((sum, bet) => sum + (hand.tieAreas.includes(bet.areaId) ? bet.total
       : hand.winningAreas.includes(bet.areaId) ? bet.total + Math.floor(bet.total
         * (Number(table.rules.betAreaOdds[bet.areaId]) || 0)) : 0), 0);
-    if (payout > 0) await credit(session, payout, ctx);
+    if (payout > 0) await credit(session, payout, hundredWalletContext(ctx, session));
     settlements.set(Number(uid), { areaWinningScores: scores, realScore: net, points: session.wallet });
     io.sendUser?.(uid, PUSH.PLAYER_BALANCE_UPDATE, { points: session.wallet });
   }
+  table.hundredSettledInning = table.inning;
   const viewers = new Map();
   io.forEachPlayer?.(session => viewers.set(Number(session.userId), session));
   for (const [uid, session] of table.playerSessions) viewers.set(Number(uid), session);
+  history?.record(table, { showdownPokers: cards, showdownTypes: rankTypes,
+    winAreaIds: hand.winningAreas.slice(), tieAreaIds: hand.tieAreas.slice(),
+    lostAreaIds: areaIds.filter(id => !hand.winningAreas.includes(id)) }, viewers, settlements);
   for (const [uid, session] of viewers) {
     const result = settlements.get(uid) || { areaWinningScores: {}, realScore: 0, points: session.wallet };
     io.sendUser?.(uid, PUSH.MB_ROOM_BET_SETTLE, { roomType: 50, roomId: table.roomId, inning: table.inning,
@@ -249,7 +266,9 @@ export function tick(io, table, now = Date.now(), ctx = {}) {
   if (now < table.phaseEndsAt) return;
   if (table.state === PHASE.DEALING) {
     table.state = PHASE.BETTING;
-    table.phaseEndsAt = now + (table.config.betSeconds || 15) * 1000;
+    // Incremental BETTING starts the original card's fixed 20-second clock.
+    // Read the current hot module config; resident rooms retain older objects.
+    table.phaseEndsAt = now + (ctx.gameConfig?.betSeconds || table.config.betSeconds || 20) * 1000;
     pushRoomState(io, table, { dealPokers: visibleCards(table.hand, table.rules) });
     return;
   }

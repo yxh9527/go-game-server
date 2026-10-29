@@ -149,6 +149,181 @@ test('mode snapshots mask unrevealed cards and use protocol room fields', () => 
   }
 });
 
+test('five modes send object odds to multi-bet cards and numeric odds to the main table', async () => {
+  for (const mode of [1, 2, 3, 4, 5]) {
+    const f = fixture(mode);
+    engine.beginRound(f.io, f.table, Date.now() - 1000);
+    engine.tick(f.io, f.table, Date.now(), f.ctx);
+    await engine.settleRound(f.ctx);
+    const deal = f.messages.find(m => m.id === PUSH.DEAL_CARDS_AND_ODDS).data;
+    const states = f.messages.filter(m => m.id === PUSH.MB_SNC_ROOM_STATE);
+    assert.ok(states.some(m => m.data.state === engine.PHASE.BETTING));
+    for (const { data } of states) {
+      for (const id of [1, 2, 3, 4, 5, 6, 7]) {
+        assert.deepEqual(data.areaOdds[id], { id, odds: f.table.rules.betAreaOdds[id] });
+        assert.ok(Number.isFinite(Number(data.areaOdds[id].odds)), 'native card reads odds as a number');
+        assert.equal(deal.areaOdds[id], data.areaOdds[id].odds, 'both protocols share the same configured odds');
+      }
+    }
+    assert.deepEqual(engine.roomSnapshot(f.table, f.session).hundredParams.betAreaOdds,
+      states.at(-1).data.areaOdds, 'reconnect restores the same card odds');
+    assert.equal(typeof f.table.rules.betAreaOdds[1], 'number', 'wire conversion does not mutate settlement rules');
+  }
+});
+
+for (const mode of [1, 2, 3, 4, 5]) {
+  test('mode ' + mode + ' keeps native multi-bet clocks synchronized across phases and reconnect', async t => {
+    let now = 100000;
+    t.mock.method(Date, 'now', () => now);
+    const f = fixture(mode);
+    engine.beginRound(f.io, f.table, now);
+    now += 1000;
+    engine.tick(f.io, f.table, now, f.ctx);
+    const betting = f.messages.filter(m => m.id === PUSH.MB_SNC_ROOM_STATE).at(-1).data;
+    assert.equal(betting.state, engine.PHASE.BETTING);
+    assert.equal(betting.countDown, 20000, 'original incremental card clock is 20 seconds');
+    assert.equal(betting.customData, 2, 'original model accepts only its matching context');
+    now += 7000;
+    assert.equal(engine.roomSnapshot(f.table, f.session).countDown, 13000, 'reconnect uses remaining milliseconds');
+    now += 13000;
+    engine.tick(f.io, f.table, now, f.ctx);
+    await engine.settleRound(f.ctx);
+    for (const message of f.messages.filter(m => m.id === PUSH.MB_SNC_ROOM_STATE)) {
+      assert.equal(message.data.customData, 2);
+      assert.equal(message.data.roomId, f.table.roomId);
+      assert.ok(Number.isFinite(message.data.countDown) && message.data.countDown >= 0);
+    }
+  });
+}
+
+test('hot module aligns the next betting clock without resetting a resident hand or pending bets', t => {
+  const now = 100000;
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  f.table.config = { ...f.table.config, betSeconds: 15 };
+  engine.beginRound(f.io, f.table, now - 1000);
+  const hand = f.table.hand;
+  f.table.playerBets.set(f.session.userId, [{ areaId: 1, total: 100 }]);
+  f.game.tick(f.ctx);
+  assert.equal(f.table.hand, hand);
+  assert.equal(f.table.playerBets.get(f.session.userId)[0].total, 100);
+  assert.equal(f.table.phaseEndsAt - now, 20000);
+});
+
+test('multi-bet success and failure receipts carry the original client context', () => {
+  const f = fixture();
+  engine.beginRound(f.io, f.table);
+  f.table.state = engine.PHASE.BETTING;
+  assert.equal(engine.acceptBet(f.ctx, { roomType: 50, params: [{ areaId: 1, total: 100 }] }, PUSH.MB_ROOM_BET_RES), true);
+  assert.equal(engine.acceptBet(f.ctx, { roomType: 50, params: [{ areaId: 1, total: -1 }] }, PUSH.MB_ROOM_BET_RES), false);
+  const receipts = f.messages.filter(m => m.id === PUSH.MB_ROOM_BET_RES);
+  assert.deepEqual(receipts.map(m => m.data.customData), [2, 2]);
+  assert.deepEqual(receipts.map(m => m.data.code), [0, 1]);
+});
+
+for (const mode of [1, 2, 3, 4, 5]) {
+  test('mode ' + mode + ' records settled cards and private area results for native history', async () => {
+    const f = fixture(mode);
+    f.table.playerSessions.set(11, f.session);
+    engine.beginRound(f.io, f.table);
+    f.table.state = engine.PHASE.BETTING;
+    assert.deepEqual(engine.historyList(f.table, 11).list, [], 'live hands are not reviewable');
+    assert.equal(engine.acceptBet(f.ctx, { roomType: 50, params: [{ areaId: 1, total: 100 }, { areaId: 4, total: 200 }] }), true);
+    const other = { userId: 12, wallet: 10000 };
+    f.table.playerSessions.set(12, other);
+    engine.acceptBet({ ...f.ctx, session: other }, { roomType: 50, params: [{ areaId: 2, total: 300 }] });
+    await engine.settleRound(f.ctx);
+    assert.deepEqual(engine.historyList(f.table, 11), { gameRoomId: f.table.roomId, list: [1] });
+    const detail = engine.historyDetail(f.table, 11, 1);
+    assert.deepEqual(Object.keys(detail.betDetailTableMap), ['1', '4']);
+    assert.equal(detail.betDetailTableMap[1].betScore, 100);
+    assert.equal(detail.betDetailTableMap[4].betScore, 200);
+    assert.equal(detail.betDetailTableMap[1].odds, f.table.rules.betAreaOdds[1]);
+    const result = f.messages.find(m => m.id === PUSH.MB_ROOM_BET_SETTLE && m.userId === 11).data;
+    assert.equal(Object.values(detail.betDetailTableMap).reduce((n, r) => n + r.realScore, 0), result.realScore);
+    assert.deepEqual(detail.showdownPokers, result.showdownPokers);
+    assert.deepEqual(detail.showdownTypes, result.showdownTypes);
+    assert.deepEqual(detail.winAreaIds, result.winningAreas);
+    assert.deepEqual(detail.tieAreaIds, result.tieAreas);
+    assert.deepEqual(detail.lostAreaIds, result.lostAreas);
+    assert.equal(detail.showdownPokers.board.length, 5);
+    assert.equal(detail.showdownPokers.banker.length, 2);
+    assert.equal(detail.showdownPokers.player.length, 2);
+    assert.ok(Object.values(detail.showdownPokers).flat().every(card => Number.isInteger(card) && card >= 0 && card < 52));
+    assert.deepEqual(Object.keys(engine.historyDetail(f.table, 12, 1).betDetailTableMap), ['2']);
+    assert.deepEqual(engine.historyList(f.table, 99).list, []);
+    assert.equal(engine.historyDetail(f.table, 99, 1), null);
+    assert.equal(await engine.settleRound(f.ctx), false);
+    assert.deepEqual(engine.historyList(f.table, 11).list, [1], 'duplicate settlement cannot duplicate history');
+    detail.showdownPokers.board[0] = -1;
+    detail.betDetailTableMap[1].realScore = 99999;
+    f.table.inning += 1;
+    engine.beginRound(f.io, f.table);
+    assert.deepEqual(engine.historyDetail(f.table, 11, 1).showdownPokers, result.showdownPokers);
+  });
+}
+
+test('spectator history shows cards without inventing bets, survives hot reload and expires after eight hours', async t => {
+  let now = 100000;
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  engine.beginRound(f.io, f.table, now);
+  await engine.settleRound(f.ctx);
+  assert.deepEqual(engine.historyDetail(f.table, 11, 1).betDetailTableMap, {});
+  const hot = await import('../../../../game-server/src/games/hundred-holdem/engine.js?v=history-survives-reload');
+  assert.deepEqual(hot.historyList(f.table, 11).list, [1]);
+  assert.ok(hot.historyDetail(f.table, 11, 1));
+  for (const inning of [0, -1, NaN, Infinity, 1.5, 2]) assert.equal(hot.historyDetail(f.table, 11, inning), null);
+  now += 8 * 3600000;
+  assert.deepEqual(hot.historyList(f.table, 11).list, []);
+  assert.equal(f.table.hundredHistory.length, 0);
+});
+
+test('native hundred history requests stay on the hundred channel and isolate agent, room and user', async () => {
+  const { handler, registry, socket } = await nativeEntryFixture();
+  const main = socket(), hundred = socket();
+  const login = { userId: 71, userToken: 'dev', roomId: 700000, openHundredGame: true };
+  await main.send(SEND.ROOM_LOGIN, login);
+  await main.send(SEND.SEND_JOIN_ROOM, { roomId: 700000, roomType: 19, isOb: true });
+  await hundred.send(SEND.ROOM_LOGIN, login);
+  await hundred.send(SEND.ENTER, { roomType: 50, playMode: 1 });
+  const session = registry.session(hundred.ws);
+  const table = registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
+  const io = { broadcast() {}, sendUser() {}, forEachPlayer: fn => fn(session) };
+  engine.beginRound(io, table);
+  await engine.settleRound({ table, io });
+  const requestList = () => hundred.send(SEND.REQUEST_100_RECORD, { roomType: 50, roomId: table.roomId });
+  await requestList();
+  assert.deepEqual(hundred.frames.at(-1).payload, { gameRoomId: table.roomId, list: [1] });
+  await hundred.send(SEND.REQUEST_ONE_RECORD, { gameRoomId: table.roomId, currInning: 1 });
+  assert.equal(hundred.frames.at(-1).msgid, 6222);
+  assert.equal(hundred.frames.at(-1).payload.currInning, 1);
+  assert.equal(main.frames.some(f => [6221, 6222].includes(f.msgid)), false);
+  await hundred.send(SEND.REQUEST_ONE_RECORD, { gameRoomId: table.roomId + 1, currInning: 1 });
+  assert.deepEqual(hundred.frames.at(-1).payload.list, []);
+  await hundred.send(SEND.REQUEST_ONE_RECORD, { gameRoomId: table.roomId, currInning: -1 });
+  assert.equal(hundred.frames.at(-1).msgid, 6221, 'invalid detail refreshes the safe list');
+  assert.equal(registry.session(main.ws).roomId, 700000);
+  await hundred.send(SEND.EXIT, { roomType: 50 });
+  await requestList();
+  assert.deepEqual(hundred.frames.at(-1).payload.list, []);
+});
+
+test('history keeps only the latest one hundred completed rounds in ascending client page order', async () => {
+  const { record, list, detail } = await import('../../../../cache/game-server/hundred-holdem-history.js');
+  const f = fixture();
+  const viewers = new Map([[11, f.session]]);
+  for (let inning = 1; inning <= 105; inning += 1) {
+    f.table.inning = inning;
+    record(f.table, { showdownPokers: {}, showdownTypes: {}, winAreaIds: [], lostAreaIds: [], tieAreaIds: [] }, viewers, new Map());
+  }
+  assert.equal(f.table.hundredHistory.length, 100);
+  const innings = list(f.table, 11).list;
+  assert.equal(innings[0], 6);
+  assert.equal(innings.at(-1), 105);
+  assert.equal(detail(f.table, 11, 5), null);
+});
+
 test('room join registers an observer; enter request returns one snapshot without double-counting', () => {
   const f = fixture();
   f.game.onJoin(f.ctx);
@@ -251,7 +426,7 @@ test('room state follows the original 0, 1, 2, 4, 5, 6, 7 round sequence', () =>
   assert.equal(table.state, 1);
   engine.tick(io, table, 2000);
   assert.equal(table.state, 2);
-  engine.tick(io, table, 17000);
+  engine.tick(io, table, table.phaseEndsAt);
   assert.equal(table.state, 4);
   const showdown = messages.findIndex(m => m.id === PUSH.SHOWDOWN_POKERS);
   assert.ok(showdown >= 0);

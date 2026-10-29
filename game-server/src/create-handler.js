@@ -373,7 +373,7 @@ export async function createHandler(runtime) {
     // The native Bairen overlay logs in independently, then sends 6105 without
     // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
     const hundredRequest = [SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
-      SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ].includes(msgid);
+      SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
     if (hundredRequest && (Number(payload?.roomType) === 50
       || (payload?.roomType == null && session.hundredGameId === gameOf(50)?.id))) {
       const entering = msgid === SEND.ENTER;
@@ -387,7 +387,13 @@ export async function createHandler(runtime) {
           session.hundredRoomIds ||= new Set();
           session.hundredRoomIds.add(Number(table.roomId));
         }
-        const targetId = msgid === SEND.MB_ROOM_BET_REQ ? Number(payload?.roomId) : table.roomId;
+        const historyRequest = [SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
+        const targetId = historyRequest ? Number(payload?.roomId ?? payload?.gameRoomId ?? table.roomId)
+          : msgid === SEND.MB_ROOM_BET_REQ ? Number(payload?.roomId) : table.roomId;
+        if (historyRequest && (session.hundredInRoom !== true || !session.hundredRoomIds?.has(targetId))) {
+          send(ws, PUSH.RETURN_100_RECORD, { gameRoomId: targetId || table.roomId, list: [] });
+          return;
+        }
         if ([SEND.BET, SEND.MB_ROOM_BET_REQ].includes(msgid)
           && (session.hundredInRoom !== true || !session.hundredRoomIds?.has(Number(targetId)))) return;
         const target = targetId === Number(table.roomId) ? table

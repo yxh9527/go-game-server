@@ -1,8 +1,11 @@
-import { PUSH } from "../../messages.js";
-import { credit, debit } from "../../wallet/index.js";
-import { makeDeck, shuffle } from "../holdem/cards.js";
-import { baccaratTotal, drawBaccarat } from "./rules.js";
-import gameConfig from "./config.js";
+import { rel } from '../../rel.js';
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
+const { credit, debit } = await rel(import.meta.url, '../../wallet/index.js', v);
+const { makeDeck, shuffle } = await rel(import.meta.url, '../holdem/cards.js', v);
+const { baccaratTotal, drawBaccarat } = await rel(import.meta.url, './rules.js', v);
+const { default: gameConfig } = await rel(import.meta.url, './config.js', v);
+const { hundredWalletContext } = await rel(import.meta.url, '../../core/robot.js', v);
 
 function oddsMap(table) {
   return table.config?.odds || gameConfig.odds;
@@ -209,6 +212,8 @@ export function applyCycle(io, table, cycle) {
       remainCardsNum: table.remainCardsNum,
       cutIndex: table.cutIndex,
     });
+  } else if (cycle === 5) {
+    table.state = 5;
   } else if (cycle === 6) {
     table.state = 6;
     settleBets(io, table);
@@ -240,17 +245,25 @@ export function tickBaccarat(io, table) {
 
 function settleBets(io, table) {
   const result = table.lastResult;
-  if (!result) {
+  if (!result || result.settled) {
     return;
   }
-  io.forEachPlayer((session) => {
+  result.settled = true;
+  const participants = new Map(table.playerSessions || []);
+  const peers = new Map();
+  io.forEachPlayer(session => {
+    const uid = Number(session.userId);
+    peers.set(uid, session.ws);
+    if (!participants.has(uid)) participants.set(uid, session);
+  });
+  for (const [uid, session] of participants) {
     const mine = table.playerBets.get(session.userId) || [];
     let realScore = 0;
     const areaWinningScores = {};
     for (const bet of mine) {
       if (result.areas.includes(bet.areaId)) {
         const win = Math.floor(bet.total * (oddsMap(table)[bet.areaId] || 1));
-        credit(session, bet.total + win, io);
+        credit(session, bet.total + win, hundredWalletContext(io, session));
         realScore += win;
         areaWinningScores[String(bet.areaId)] = win;
       } else {
@@ -258,8 +271,13 @@ function settleBets(io, table) {
         areaWinningScores[String(bet.areaId)] = -bet.total;
       }
     }
-    io.send(session.ws, PUSH.PLAYER_BALANCE_UPDATE, { points: session.wallet });
-    io.send(session.ws, PUSH.SHOWDOWN_POKERS, {
+    const send = (id, payload) => {
+      if (session.bot) return;
+      if (io.sendUser) io.sendUser(uid, id, payload);
+      else if (peers.has(uid)) io.send(peers.get(uid), id, payload);
+    };
+    send(PUSH.PLAYER_BALANCE_UPDATE, { points: session.wallet });
+    send(PUSH.SHOWDOWN_POKERS, {
       roomType: table.roomType,
       roomId: table.roomId,
       showdownPokers: { other: result.player, banker: result.banker },
@@ -271,5 +289,7 @@ function settleBets(io, table) {
       remainCardsNum: table.remainCardsNum,
       cutIndex: table.cutIndex,
     });
-  });
+    if (table.visitors && !table.visitors.has(uid)) table.playerSessions?.delete(uid);
+  }
+  table.hundredSettledInning = table.inning;
 }

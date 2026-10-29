@@ -15,7 +15,7 @@ export default {
   defaultConfigId: 100,
   minBet: 100,
   maxBet: 1000000000,
-  betSeconds: 15,
+  betSeconds: 20,
   revealSeconds: 3,
   nextRoundSeconds: 5,
   modes: MODES,

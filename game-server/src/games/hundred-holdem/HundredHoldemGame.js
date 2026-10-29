@@ -47,6 +47,10 @@ export class HundredHoldemGame extends HundredGame {
 
   enterSnapshot(table, session) { return engine.roomSnapshot(table, session); }
 
+  placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
+    return engine.acceptBet(ctx, body, responseId);
+  }
+
   onJoin(ctx) {
     super.onJoin(ctx);
     if (ctx.session) {
@@ -100,6 +104,16 @@ export class HundredHoldemGame extends HundredGame {
 
   onMessage(ctx, id, body = {}) {
     const { runtime, table, session } = ctx;
+    if (id === SEND.REQUEST_100_RECORD || id === SEND.REQUEST_ONE_RECORD) {
+      if (id === SEND.REQUEST_ONE_RECORD) {
+        const detail = engine.historyDetail(table, session.userId, Number(body.currInning));
+        if (detail) { ctx.send(PUSH.RETURN_ONE_RECORD, detail); return true; }
+      }
+      // Missing/expired details refresh the authorized list instead of sending
+      // a partial card object that the original renderer cannot consume.
+      ctx.send(PUSH.RETURN_100_RECORD, engine.historyList(table, session.userId));
+      return true;
+    }
     if (id === SEND.ENTER) {
       const uid = Number(session.userId);
       const added = this.addViewer(table, session);
@@ -131,7 +145,7 @@ export class HundredHoldemGame extends HundredGame {
     }
     if (id === SEND.BET || id === SEND.MB_ROOM_BET_REQ) {
       const responseId = id === SEND.MB_ROOM_BET_REQ ? PUSH.MB_ROOM_BET_RES : PUSH.BET_RESPONSE;
-      engine.acceptBet(ctx, body, responseId);
+      this.placeBet(ctx, body, responseId);
       return true;
     }
     if (id === SEND.EXIT) {
@@ -152,7 +166,8 @@ export class HundredHoldemGame extends HundredGame {
 
   tick(ctx) {
     const table = ctx.table;
-    engine.tick(ctx.io, table, Date.now(), ctx);
+    engine.tick(ctx.io, table, Date.now(), { ...ctx, gameConfig: this.config });
+    this.tickRobots(ctx);
   }
 
   pushState(ctx) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SeatGame } from "../../../game-server/src/core/SeatGame.js?v=0";
-import { HundredGame } from "../../../game-server/src/core/HundredGame.js";
+import { HundredGame } from "../../../game-server/src/core/HundredGame.js?v=0";
 import { SlotsGame } from "../../../game-server/src/core/SlotsGame.js";
 import holdem from "../../../game-server/src/games/holdem/index.js";
 import baccarat from "../../../game-server/src/games/baccarat/index.js";
@@ -35,5 +35,18 @@ test("seat games hot load the matching base class version", async () => {
         assert.equal(Game.prototype[name], Base.prototype[name], name + " must use the shared implementation");
       }
     }
+  }
+});
+
+test('hundred games hot load the matching shared robot base version', async () => {
+  for (const version of ['hundred-base-1', 'hundred-base-2']) {
+    const { HundredGame: Base } = await import('../../../game-server/src/core/HundredGame.js?v=' + version);
+    const { BaccaratGame } = await import('../../../game-server/src/games/baccarat/BaccaratGame.js?v=' + version);
+    const { HundredHoldemGame } = await import('../../../game-server/src/games/hundred-holdem/HundredHoldemGame.js?v=' + version);
+    for (const Game of [BaccaratGame, HundredHoldemGame]) {
+      assert.ok(new Game() instanceof Base);
+      assert.equal(Game.prototype.tickRobots, Base.prototype.tickRobots, 'reuse common hundred robot traffic');
+    }
+    assert.equal(BaccaratGame.prototype.tick, Base.prototype.tick, 'cycle games inherit the shared scheduler');
   }
 });

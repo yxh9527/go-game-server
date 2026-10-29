@@ -1,6 +1,9 @@
-import { SEND, PUSH } from "../messages.js";
-import { debit } from "../wallet/index.js";
-import { GameBase } from "./GameBase.js";
+import { rel } from '../rel.js';
+const version = new URL(import.meta.url).searchParams.get('v') || '0';
+const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', version);
+const { debit } = await rel(import.meta.url, '../wallet/index.js', version);
+const { GameBase } = await rel(import.meta.url, './GameBase.js', version);
+const robots = await rel(import.meta.url, './robot.js', version);
 
 export class HundredGame extends GameBase {
   createTable(roomId, roomType, roomRow) {
@@ -11,6 +14,7 @@ export class HundredGame extends GameBase {
       state: this.betState(),
       roomIndex: Number(roomRow?.room_index || 1),
       playerBets: new Map(),
+      playerSessions: new Map(), visitors: new Set(),
       totalBetsByArea: this.createAreas(),
       tick: 0,
       ...this.extraTableFields(roomRow),
@@ -29,8 +33,24 @@ export class HundredGame extends GameBase {
     return 2;
   }
 
-  enter(table, _session) {
-    table.people += 1;
+  enter(table, session) {
+    table.visitors ||= new Set();
+    table.playerSessions ||= new Map();
+    const uid = Number(session.userId);
+    if (!table.visitors.has(uid)) { table.visitors.add(uid); table.people += 1; }
+    table.playerSessions.set(uid, session);
+  }
+
+  betOptions(table) {
+    return { minBet: Number(table.cfg?.hundred_min_bet ?? table.rules?.minBet ?? this.config.minBet ?? 100),
+      maxBet: Number(table.cfg?.hundred_max_bet ?? table.rules?.maxBet ?? this.config.defaultMaxBet ?? 100000000),
+      areas: Array.isArray(table.totalBetsByArea)
+        ? table.totalBetsByArea.map(row => ({ areaId: row.areaId, odds: this.config.odds?.[row.areaId] || 1 }))
+        : Object.keys(table.totalBetsByArea || {}).map(id => ({ areaId: Number(id), odds: table.rules?.betAreaOdds?.[id] || 1 })) };
+  }
+
+  tickRobots(ctx, now = Date.now(), rng = Math.random) {
+    robots.tickHundredRoom(this, ctx, now, rng);
   }
 
   enterSnapshot(table, session) {
@@ -77,13 +97,20 @@ export class HundredGame extends GameBase {
       return false;
     }
     const params = Array.isArray(body?.params) ? body.params : [];
+    const options = this.betOptions(table);
+    const normalized = params.map(item => ({ areaId: Number(item?.areaId), total: Number(item?.total) }));
+    const total = normalized.reduce((sum, item) => sum + item.total, 0);
+    if (!normalized.length || normalized.some(item => !options.areas.some(area => area.areaId === item.areaId)
+      || !Number.isSafeInteger(item.total) || item.total < options.minBet || item.total > options.maxBet)
+      || !Number.isSafeInteger(total) || !debit(session, total, ctx).ok) {
+      send(PUSH.BET_RESPONSE, { points: session.wallet, roomType: table.roomType, code: 1,
+        myBets: table.playerBets.get(session.userId) || [], roomId: table.roomId });
+      return false;
+    }
     const mine = table.playerBets.get(session.userId) || [];
-    for (const item of params) {
+    for (const item of normalized) {
       const areaId = Number(item.areaId);
       const total = Number(item.total || 0);
-      if (total <= 0 || !debit(session, total, ctx).ok) {
-        continue;
-      }
       const area = (table.totalBetsByArea || []).find((row) => row.areaId === areaId);
       if (area) {
         area.total += total;
@@ -96,7 +123,10 @@ export class HundredGame extends GameBase {
       }
     }
     table.playerBets.set(session.userId, mine);
-    send(PUSH.BET_BROADCAST, {
+    table.playerSessions ||= new Map();
+    table.playerSessions.set(Number(session.userId), session);
+    const broadcast = ctx.io?.broadcast ? ctx.io.broadcast.bind(ctx.io) : send;
+    broadcast(PUSH.BET_BROADCAST, {
       roomId: table.roomId,
       roomType: table.roomType,
       allPlayerBets: table.totalBetsByArea,
@@ -136,6 +166,7 @@ export class HundredGame extends GameBase {
     table.tick = (table.tick || 0) + 1;
     const cycle = table.tick % (this.config.tickCycle || 8);
     this.onCycle(ctx, cycle);
+    this.tickRobots(ctx);
     this.pushState(ctx);
   }
 
@@ -151,7 +182,11 @@ export class HundredGame extends GameBase {
   }
 
   onLeave(ctx) {
-    ctx.table.people = Math.max(0, (ctx.table.people || 1) - 1);
+    const uid = Number(ctx.session.userId);
+    if (!ctx.table.visitors || ctx.table.visitors.delete(uid)) {
+      ctx.table.people = Math.max(0, (ctx.table.people || 1) - 1);
+    }
+    if (!robots.hasPendingHundredBet(ctx.table, uid)) ctx.table.playerSessions?.delete(uid);
     return 0;
   }
 }
