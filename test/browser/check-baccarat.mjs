@@ -107,6 +107,14 @@ try {
       await until(()=>frames.slice(beforePrivilege).some(f=>f.msgid===6234&&f.payload.activeBetTime===10&&f.payload.activePeekTime===5),110000,'owner settings next hand');
       console.log('PASS_OWNER_PRIVILEGE',mode);
     }
+    if (process.env.SMART_BET_ONLY) {
+      const { checkSmartBet } = await import('./check-smart-bet.mjs');
+      await checkSmartBet({ ev, until, delay, roomType });
+      assert.equal(errors.length, startErrors, JSON.stringify(errors.slice(startErrors).map(e => e.exception?.description || e.text)));
+      await ev('(' + main + ').viewModel.commandLeaveGame();true');
+      await until(async () => await ev('cc.director.getScene().name') === 'webHallOb', 12000, 'return to hall after smart panel');
+      continue;
+    }
     if (process.env[envPrefix + '_ENTRY_ONLY']) { assert.equal(errors.length, startErrors, JSON.stringify(errors.slice(startErrors))); console.log('PASS_ENTRY', mode); continue; }
     await until(async () => {
       const state = own().findLast(f => f.direction === 'receive' && [6204, 6205].includes(f.msgid) && f.payload.roomId === firstIds[mode]);
