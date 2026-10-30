@@ -11,9 +11,14 @@ export default {
   defaultConfigId: 5803,
   defaultMaxBet: 100000000,
   tickCycle: 8,
+  timedPhases: [
+    { state: 2, cycle: 0, seconds: 25 }, { state: 3, cycle: 3, seconds: 1 },
+    { state: 4, cycle: 4, seconds: 6 }, { state: 6, cycle: 6, seconds: 3 },
+    { state: 7, cycle: 7, seconds: 1 }, { state: 0, cycle: 8, seconds: 1 },
+  ],
   odds: {
-    1: 0.95,
-    2: 1,
+    1: 1,
+    2: 0.95,
     3: 8,
     4: 11,
     5: 11,

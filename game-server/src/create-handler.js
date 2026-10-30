@@ -19,6 +19,8 @@ export async function createHandler(runtime) {
   const poolModule = await rel(import.meta.url, "./core/room-pool.js", v);
   const features = await rel(import.meta.url, "./core/room-features.js", v);
   const seatView = await rel(import.meta.url, "./core/seat-view.js", v);
+  const subscriptionsModule = await rel(import.meta.url, "./core/hundred-subscriptions.js", v);
+  const subscriptions = subscriptionsModule.createHundredSubscriptions(runtime, gameOf, tableIo);
   const localHttp = runtime.env === "dev"
     ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
     : null;
@@ -64,7 +66,8 @@ export async function createHandler(runtime) {
       PUSH.SHOWDOWN_POKERS, PUSH.PLAYER_NUM_CHANGE, PUSH.BET_BROADCAST,
       PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE, PUSH.SHUFFLING_POKERS]);
     const selected = (session, msgid) => table.kind !== 'hundred' || !singleHundredPushes.has(msgid)
-      || Number(session.hundredRoomId ?? session.roomId) === Number(table.roomId);
+      || (Number(session.hundredRoomId ?? session.roomId) === Number(table.roomId)
+        && String(session.hundredGameId ?? session.gameId) === String(table.gameId));
     const subscribed = (session) => table.kind === "hundred"
       ? session?.hundredRoomIds?.has(Number(table.roomId))
         || (!session?.hundredRoomIds && Number(session?.roomId) === Number(table.roomId))
@@ -73,6 +76,13 @@ export async function createHandler(runtime) {
       && subscribed(session) && (table.kind === "hundred"
         ? session.authenticated !== false && (session.hundredInRoom === true || session.inRoom !== false)
         : session.inRoom !== false && String(session.gameId || table.gameId) === String(table.gameId));
+    function deliver(ws, session, msgid, payload) {
+      if ([PUSH.MB_SNC_ROOM_STATE, PUSH.MB_ROOM_BET_SETTLE].includes(msgid)) {
+        const contexts = subscriptionsModule.hundredContexts(session, table);
+        if (selected(session, PUSH.GAME_STATE) && !contexts.includes(2)) contexts.push(2);
+        for (const customData of contexts) send(ws, msgid, { ...payload, customData });
+      } else send(ws, msgid, payload);
+    }
     return {
       env: runtime.env,
       wallet: runtime.wallet,
@@ -94,7 +104,7 @@ export async function createHandler(runtime) {
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
           if (active(session) && selected(session, msgid)) {
-            send(ws, msgid, payload);
+            deliver(ws, session, msgid, payload);
           }
         }
       },
@@ -109,7 +119,10 @@ export async function createHandler(runtime) {
         for (const ws of runtime.registry.sessions.keys()) {
           const session = runtime.registry.session(ws);
           if (active(session) && selected(session, msgid) && Number(session.userId) === Number(uid)) {
-            send(ws, msgid, payload);
+            deliver(ws, session, msgid, payload);
+            if (msgid === PUSH.MB_ROOM_BET_SETTLE && !selected(session, PUSH.GAME_STATE)) {
+              sendWalletPoint(ws, session);
+            }
           }
         }
       },
@@ -137,6 +150,11 @@ export async function createHandler(runtime) {
 
   function pushPoint(ws, session) {
     send(ws, PUSH.GAME_POINT_UPDATE, { uid: session.userId, point: session.wallet });
+  }
+
+  function sendWalletPoint(ws, session) {
+    // common_model assigns this payload directly; native hundred views also accept a number.
+    send(ws, PUSH.GAME_POINT_UPDATE, Number(session.wallet));
   }
 
   async function persist(session) {
@@ -169,7 +187,7 @@ export async function createHandler(runtime) {
   function hundredTable(session, body = {}) {
     const roomType = Number(body.roomType || 50);
     const game = gameOf(roomType);
-    if (![50, 51, 52, 60, 62].includes(roomType) || !game) return null;
+    if (!game || game.kind !== 'hundred') return null;
     const requestedId = Number(body.roomId);
     if (requestedId) {
       const existing = runtime.registry.getTable(requestedId, session.agentId, game.id);
@@ -178,14 +196,16 @@ export async function createHandler(runtime) {
     const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
       && Number(row.room_type) === roomType
       && (requestedId ? Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0) === requestedId
-        : Number(row.play_mode) === Number(body.playMode ?? (roomType === 60 ? 0 : 1))
+        : Number(row.play_mode) === Number(body.playMode ?? ([58, 60].includes(roomType) ? 0 : 1))
           || (roomType === 62 && [0, 1].includes(Number(row.play_mode)) && [0, 1].includes(Number(body.playMode ?? 1)))));
     return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), roomType, session.agentId) : null;
   }
 
   function leaveHundred(ws, session) {
     const table = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
+    subscriptions.leave(session);
     if (table) gameOf(table.roomType).onMessage(ctxOf(ws, session, table), SEND.EXIT, { roomType: table.roomType });
+    if (table && session.gameId === table.gameId) session.inRoom = false;
   }
 
   // hall-to-game internal query uses JSON on the existing socket listener.
@@ -374,12 +394,45 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.authenticated === false) return;
+    // Inline shortcuts intentionally subscribe to OTHER games (60 -> 58, 62 -> 50).
+    // Discovery and registration must follow the request, without changing the selected table.
+    if (msgid === SEND.GR_GET_ALL_ROOMS_REQ && gameOf(payload?.roomType)?.kind === 'hundred') {
+      const tables = subscriptions.rooms(session, payload);
+      send(ws, PUSH.GR_GET_ALL_ROOMS_RES, tables.map(t => gameOf(t.roomType).siblingRoomPayload(t)));
+      return;
+    }
+    if (msgid === SEND.MB_REG_ROOMS_REQ) {
+      const body = payload || {};
+      const tables = subscriptions.register(session, body), customData = Number(body.customData) || 0;
+      send(ws, PUSH.MB_REG_ROOMS_RES, { mulRoomTypeList: tables.map(t => ({ roomType: t.roomType, roomId: t.roomId })), customData });
+      send(ws, PUSH.MB_REGED_ROOM_INFOS, { roomInfos: tables.map(t => gameOf(t.roomType).enterSnapshot(t, session)), customData });
+      return;
+    }
+    if (msgid === SEND.MB_UNREG_ROOMS_REQ) {
+      const body = payload || {};
+      subscriptions.unregister(session, body);
+      send(ws, PUSH.MB_UNREG_ROOMS_RES, Object.keys(body).length
+        ? { mulRoomTypeList: body.mulRoomTypeList || [], customData: Number(body.customData) || 0 } : {});
+      return;
+    }
+    if (msgid === SEND.MB_ROOM_BET_REQ) {
+      const body = payload || {}, table = subscriptions.target(session, body.roomId, body.roomType);
+      if (!table) {
+        send(ws, PUSH.MB_ROOM_BET_RES, { roomId: Number(body.roomId) || 0, roomType: Number(body.roomType) || 0,
+          customData: Number(body.customData ?? 2), points: session.wallet, code: 95041 });
+      } else {
+        const request = { ...body, customData: body.customData ?? subscriptions.context(session, table) };
+        await gameOf(table.roomType).placeBet(ctxOf(ws, session, table, request), request, PUSH.MB_ROOM_BET_RES);
+        sendWalletPoint(ws, session);
+      }
+      return;
+    }
     // The native Bairen overlay logs in independently, then sends 6105 without
     // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
     const hundredRequest = [SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
       SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.GR_GET_ALL_ROOMS_REQ,
       SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
-    if (hundredRequest && ([50, 51, 52, 60, 62].includes(Number(payload?.roomType))
+    if (hundredRequest && (gameOf(payload?.roomType)?.kind === 'hundred'
       || (payload?.roomType == null && ['hundred-holdem', 'hundred-zjh', 'hundred-niuniu', 'hundred-blackjack', 'hundred-mahjong'].includes(session.hundredGameId)))) {
       const entering = msgid === SEND.ENTER;
       const registered = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
@@ -390,12 +443,9 @@ export async function createHandler(runtime) {
           if (session.hundredInRoom && (session.hundredRoomId !== table.roomId || session.hundredGameId !== table.gameId)) {
             leaveHundred(ws, session);
           }
-          session.hundredRoomId = table.roomId;
-          session.hundredGameId = table.gameId;
-          session.hundredInRoom = true;
-          session.hundredRoomIds ||= new Set();
-          session.hundredRoomIds.add(Number(table.roomId));
+          subscriptions.select(session, table);
         }
+        if (msgid === SEND.EXIT) { leaveHundred(ws, session); return; }
         const historyRequest = [SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
         const targetId = historyRequest ? Number(payload?.roomId ?? payload?.gameRoomId ?? table.roomId)
           : msgid === SEND.MB_ROOM_BET_REQ ? Number(payload?.roomId) : table.roomId;
@@ -412,14 +462,6 @@ export async function createHandler(runtime) {
         return;
       }
       if (entering) return;
-    }
-    if (msgid === SEND.MB_UNREG_ROOMS_REQ) {
-      // The shared Bairen client sends this even without any subscriptions,
-      // and often after 2110 has detached the primary room. No room lookup,
-      // join, wallet operation or main-table leave belongs to this cleanup.
-      // There are currently no multi-room subscriptions in this handler.
-      send(ws, PUSH.MB_UNREG_ROOMS_RES, {});
-      return;
     }
     if (msgid === SEND.SEND_BLOCKCHAIN_VERIFY || msgid === SEND.SEND_BLOCKCHAIN_INFO) {
       const roomId = Number(payload?.gameRoomId || session.roomId);
@@ -589,7 +631,8 @@ export async function createHandler(runtime) {
         continue;
       }
       if (game) {
-        game.tick(context);
+        const ticking = game.tick(context);
+        if (ticking?.then) closing.push(ticking.catch(error => runtime.log.error('game tick failed', error.message)));
         const settled = game.afterRound?.(context);
         if (settled) {
           closing.push(settled);

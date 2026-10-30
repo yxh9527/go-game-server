@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { decodeFrame } from '../../game-server/src/codec.js';
+import { checkCrossGameShortcuts } from './check-cross-game-shortcuts.mjs';
+const shortcutOnly = process.env.ONLY_CROSS_SHORTCUTS === '1';
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gogame-hundred-blackjack-'));
 const browser = spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', [
@@ -85,6 +87,8 @@ try {
   await until(() => frames.some(f => f.direction === 'receive' && f.msgid === 6205 && f.payload.roomType === 60), 10000, 'ENTER 60');
   const enter = frames.find(f => f.direction === 'receive' && f.msgid === 6205 && f.payload.roomType === 60).payload;
   const rid = enter.roomId;
+  await checkCrossGameShortcuts({ ev, frames, until, delay, roomType:58, screenshot:async phase=>{const shot=await send('Page.captureScreenshot');fs.writeFileSync(path.join(os.tmpdir(),'gogame-blackjack-shortcut-'+phase+'.png'),Buffer.from(shot.result.data,'base64'));} });
+  if (!shortcutOnly) {
   assert.equal(enter.playMode, 0); assert.equal(enter.totalCardsNum, 312);
   console.log('SUBSCRIPTIONS', JSON.stringify(frames.filter(f => [6123, 6224, 6227, 6230].includes(f.msgid))));
   if (frames.some(f => f.msgid === 6123 && (f.payload.roomType === 60 || f.payload.mulRoomTypeList?.some(r => r.roomType === 60))))
@@ -138,6 +142,8 @@ try {
   fs.writeFileSync(path.join(os.tmpdir(), 'gogame-hundred-blackjack-history.png'), Buffer.from(historyShot.result.data, 'base64'));
   await ev('(()=>{const p=' + panelExpr + ';p.hide();return true;})()');
   assert.equal(errors.length, 0, JSON.stringify(errors.map(e => e.exception?.description || e.text)));
+  }
+  assert.equal(errors.length, 0, JSON.stringify(errors.map(e => e.exception?.description || e.text)));
   assert.equal(logs.filter(line => /TypeError|DecimalError|NaN|FrameTaskRunner|逻辑异常|数据异常/.test(line)).length, 0, JSON.stringify(logs.slice(-20)));
   await ev(moduleExpr + '.emit(__require(\'BlackJackConfig\').BlackJackConfig.Event.CLICK_EXIT);true');
   await until(() => ev("!__require('GlobalGameData').default.isInBairenQpGame"), 5000, 'native exit closes the hundred overlay');
@@ -145,7 +151,7 @@ try {
   await until(async () => await ev('cc.director.getScene().name') === 'webHallOb', 10000, 'return to hall');
   await until(() => evaluate("Array.from(document.querySelectorAll('[class*=gameIframe] iframe')).every(el=>getComputedStyle(el).visibility==='hidden'||getComputedStyle(el).display==='none'||!el.getClientRects().length)"), 5000, 'hall visible');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  console.log('PASS: native hundred Blackjack category, host, robots, bet, supply, settlement, review, paging and hall return');
+  console.log(shortcutOnly ? 'PASS: native Blackjack cross-game shortcuts, balances, settlement, new round and hall return' : 'PASS: native hundred Blackjack category, host, robots, bet, supply, settlement, review, paging and hall return');
 } catch (error) {
   console.log('ENTRY_FRAMES', JSON.stringify(frames.filter(f => [2102,2201,6105,6205,6123,6224,6227,6230].includes(f.msgid))));
   console.log('FAIL_FRAMES', JSON.stringify(frames.slice(-40).map(f => ({id:f.msgid,direction:f.direction,data:f.payload}))));

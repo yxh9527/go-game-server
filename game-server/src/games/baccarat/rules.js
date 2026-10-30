@@ -28,7 +28,7 @@ export function drawBaccarat(deck, pos) {
   const natural = p >= 8 || b >= 8;
   if (!natural) {
     let take = false;
-    if (!playerThird) {
+    if (playerThird === null) {
       take = b <= 5;
     } else {
       const v = baccaratValue(playerThird);

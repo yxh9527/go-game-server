@@ -261,7 +261,7 @@ test('hot-reloading hundred robot code preserves profiles, funds and scheduled a
   assert.equal(state.profiles.size, 2);
 });
 
-test('baccarat inherits public robot bets and settles their simulated wallets without RPC', t => {
+test('baccarat inherits public robot bets and settles their simulated wallets without RPC', async t => {
   const f = fixture(t, new BaccaratGame());
   f.game.enter(f.table, f.human);
   f.game.tickRobots(f.ctx); f.advance(); f.game.tickRobots(f.ctx);
@@ -273,10 +273,10 @@ test('baccarat inherits public robot bets and settles their simulated wallets wi
   assert.equal(f.table.state, 5, 'comparison cannot accidentally reopen betting');
   f.advance(); f.game.tickRobots(f.ctx);
   assert.equal(f.table.totalBetsByArea[0].total, 200);
-  baccarat.applyCycle(f.io, f.table, 6);
-  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet + 95);
-  baccarat.applyCycle(f.io, f.table, 6);
-  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet + 95);
+  await baccarat.applyCycle(f.io, f.table, 6);
+  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet + 100);
+  await baccarat.applyCycle(f.io, f.table, 6);
+  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet + 100);
   assert.equal(f.human.wallet, 1000000);
 });
 

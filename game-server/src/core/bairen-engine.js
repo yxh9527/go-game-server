@@ -97,7 +97,7 @@ export function createBairenEngine(adapter) {
     const { table, session, io } = ctx;
     const current = table.playerBets.get(Number(session.userId)) || [];
     const result = (code) => {
-      const payload = { points: session.wallet, roomType: table.roomType, code, roomId: table.roomId, customData: 2,
+      const payload = { points: session.wallet, roomType: table.roomType, code, roomId: table.roomId, customData: Number(body?.customData ?? 2),
         myBets: current.map(row => ({ ...row })), myTotalBets: current.map(row => ({ ...row })),
         betAreaIds: current.map(row => row.areaId) };
       io.sendUser?.(session.userId, responseId, payload);
@@ -148,7 +148,7 @@ export function createBairenEngine(adapter) {
     io.broadcast(PUSH.BET_BROADCAST, { roomType: table.roomType, roomId: table.roomId,
       allPlayerBets: areaIds.map(areaId => ({ areaId, total: table.totalBetsByArea[areaId] })) });
     const payload = { points: session.wallet, roomType: table.roomType, code: 0, myBets: own,
-      myTotalBets: own, betAreaIds: own.map(row => row.areaId), roomId: table.roomId, customData: 2 };
+      myTotalBets: own, betAreaIds: own.map(row => row.areaId), roomId: table.roomId, customData: Number(body?.customData ?? 2) };
     io.sendUser?.(session.userId, responseId, payload);
     return true;
   }

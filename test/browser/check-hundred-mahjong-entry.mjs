@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { decodeFrame } from '../../game-server/src/codec.js';
+import { checkCrossGameShortcuts } from './check-cross-game-shortcuts.mjs';
+const shortcutOnly = process.env.ONLY_CROSS_SHORTCUTS === '1';
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gogame-hundred-mahjong-'));
 const browser = spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', [
@@ -83,6 +85,8 @@ try {
   await until(() => frames.some(f => f.msgid === 6205 && f.payload.roomType === 62), 10000, 'ENTER 62');
   const entry = frames.find(f => f.msgid === 6205 && f.payload.roomType === 62).payload, rid = entry.roomId;
   assert.equal(entry.playMode, 1); assert.equal(Object.keys(entry.areaOdds).length, 11);
+  await checkCrossGameShortcuts({ ev, frames, until, delay, roomType:50, screenshot:async phase=>{const shot=await send('Page.captureScreenshot');fs.writeFileSync(path.join(os.tmpdir(),'gogame-mahjong-shortcut-'+phase+'.png'),Buffer.from(shot.result.data,'base64'));} });
+  if (!shortcutOnly) {
   console.log('ENTRY', JSON.stringify({host:await ev('cc.app.gameRoom?._conf'),entry}));
   console.log('SUBSCRIPTIONS', JSON.stringify(frames.filter(f => [6123,6224,6227,6230].includes(f.msgid))));
   const publicRobotBets = () => frames.filter(f=>f.direction==='receive'&&f.msgid===6202&&f.payload.roomId===rid&&f.payload.allPlayerBets?.some(b=>b.total>0));
@@ -113,6 +117,7 @@ try {
       assert.ok(result.showdownPokers[key].every(c=>Number.isInteger(c)&&(c>=0&&c<=8||c===29)));
       assert.ok(result.showdownTypes[key]>=1&&result.showdownTypes[key]<=30);
     }
+    await until(()=>frames.slice(before).some(f=>f.msgid===6204&&f.payload.roomId===rid&&f.payload.inning===result.inning&&f.payload.state===6),10000,'native settlement updates roads');
     await delay(500);
     const model=await ev("(()=>{const vm="+vmExpr+".model;return {balance:vm.__currentBalance,settle:vm.__currentSettleData,open:vm.__currentOpenCardsData,routes:vm.__routeDataList};})()");
     assert.equal(model.balance,result.points);assert.equal(model.settle.realScore,result.realScore);
@@ -142,6 +147,8 @@ try {
   await ev("__require('Facade').default.getModule('Bairen').emit(__require('BairenTypes').BairenEvent.HIDE_BAIREN_HISTORY);true");
   assert.equal(errors.length,0,JSON.stringify(errors.map(e=>e.exception?.description||e.text)));
   assert.equal(logs.filter(line=>/TypeError|DecimalError|NaN|FrameTaskRunner|逻辑异常|数据异常|麻将牌不存在/.test(line)).length,0,JSON.stringify(logs.slice(-30)));
+  }
+  assert.equal(errors.length,0,JSON.stringify(errors.map(e=>e.exception?.description||e.text)));
   // The native panel hide handler owns its animation, input mask and exit request.
   await ev("__require('Facade').default.getModule('Bairen').emit(__require('BairenTypes').BairenEvent.FORCED_CLOSE_PANEL);true");
   await until(()=>ev("!__require('GlobalGameData').default.isInBairenQpGame"),5000,'overlay closes');
@@ -152,7 +159,7 @@ try {
   await delay(500);
   const hallShot=await send('Page.captureScreenshot');
   fs.writeFileSync(path.join(os.tmpdir(),'gogame-hundred-mahjong-hall.png'),Buffer.from(hallShot.result.data,'base64'));
-  console.log('PASS: native hundred Mahjong category, spectator host, robots, clocks, two bets, settlement, roads, review, paging and hall return');
+  console.log(shortcutOnly ? 'PASS: native Mahjong cross-game shortcuts, balances, settlement, new round and hall return' : 'PASS: native hundred Mahjong category, spectator host, robots, clocks, two bets, settlement, roads, review, paging and hall return');
 } catch(error){
   console.log('ENTRY_FRAMES',JSON.stringify(frames.filter(f=>[2102,2201,6105,6106,6205,6123,6124,6224,6225,6227,6230].includes(f.msgid))));
   console.log('FAIL_FRAMES',JSON.stringify(frames.slice(-35)));

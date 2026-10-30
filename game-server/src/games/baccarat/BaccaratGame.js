@@ -36,7 +36,8 @@ export class BaccaratGame extends HundredGame {
   betOptions(table) {
     const options = super.betOptions(table);
     // Only areas with an implemented winning condition are open here.
-    return { ...options, areas: options.areas.filter(area => [1, 2, 3, 4, 5, 9].includes(area.areaId)) };
+    return { ...options, areas: options.areas.filter(area => [1, 2, 3, 4, 5, 9].includes(area.areaId))
+      .map(area => ({ ...area, odds: (table.config || this.config).odds[area.areaId] })) };
   }
 
   buildConf(table) {
@@ -48,12 +49,18 @@ export class BaccaratGame extends HundredGame {
   }
 
   onCycle(ctx, cycle) {
-    engine.applyCycle(ctx.io, ctx.table, cycle);
+    if (cycle === 0) {
+      ctx.table.config = this.config;
+      ctx.table.totalBetsByArea = engine.emptyAreas(this.config.odds);
+    }
+    return engine.applyCycle(ctx.io, ctx.table, cycle);
   }
 
   pushState(ctx) {
     const table = ctx.table;
+    ctx.io.broadcast(PUSH.MB_SNC_ROOM_STATE, { ...this.enterSnapshot(table, { userId: 0, wallet: 0 }), customData: 2 });
     ctx.io.broadcast(PUSH.GAME_STATE, {
+      roomType: table.roomType, roomId: table.roomId, countDown: Math.max(0, table.phaseEndsAt - Date.now()),
       state: table.state,
       inning: table.inning,
       supplyState: table.supplyState,

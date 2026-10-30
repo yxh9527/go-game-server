@@ -75,11 +75,22 @@ export function baccaratConf(table) {
 }
 
 export function enterSnapshot(table, session) {
+  const conf = baccaratConf(table), mine = table.playerBets.get(Number(session.userId)) || [];
+  const betAreaOdds = Object.fromEntries(emptyAreas(oddsMap(table)).map(area => [area.areaId, { id: area.areaId, oddsList: area.oddsList }]));
+  const result = table.state >= 4 ? table.lastResult : null;
   return {
     roomType: table.roomType,
     state: table.state,
     roomId: table.roomId,
     inning: table.inning,
+    playMode: Number(table.cfg?.play_mode || 0), roomIndex: table.roomIndex,
+    countDown: Math.max(0, (table.phaseEndsAt || Date.now() + 25000) - Date.now()),
+    hundredParams: { ...conf.brbjlParams, betAreaOdds }, areaOdds: betAreaOdds,
+    ownBets: Object.fromEntries(mine.map(bet => [bet.areaId, { ...bet }])),
+    cardColor: 0, realScore: result?.settlements?.get(Number(session.userId))?.realScore || 0,
+    ...(result ? { showdownPokers: { other: result.player, banker: result.banker },
+      showdownPoints: { other: [result.p], banker: [result.b] }, winningAreas: result.areas,
+      areaWinningScores: result.settlements?.get(Number(session.userId))?.areaWinningScores || {} } : {}),
     totalCardsNum: table.totalCardsNum,
     remainCardsNum: table.remainCardsNum,
     cutIndex: table.cutIndex,
@@ -88,7 +99,8 @@ export function enterSnapshot(table, session) {
     dealRealCount: table.dealRealCount,
     supplyState: table.supplyState,
     totalBetsByArea: table.totalBetsByArea,
-    ways: table.ways,
+    ways: { ...table.ways, 1: Array.isArray(table.ways[1]) ? { max: 104, ways: table.ways[1] } : table.ways[1],
+      9: Array.isArray(table.ways[9]) || !table.ways[9] ? { type: 16384, roundNum: 0 } : table.ways[9] },
     points: session.wallet,
     myBets: table.playerBets.get(session.userId) || [],
   };
@@ -167,17 +179,17 @@ function winningAreas(player, banker) {
   const b = baccaratTotal(banker);
   const areas = [];
   if (b > p) {
-    areas.push(1);
-  } else if (p > b) {
     areas.push(2);
+  } else if (p > b) {
+    areas.push(1);
   } else {
     areas.push(3);
   }
   if (banker[0] % 13 === banker[1] % 13) {
-    areas.push(4);
+    areas.push(5);
   }
   if (player[0] % 13 === player[1] % 13) {
-    areas.push(5);
+    areas.push(4);
   }
   if (b === 6 && b > p) {
     areas.push(9);
@@ -202,7 +214,7 @@ export function applyCycle(io, table, cycle) {
     table.remainCardsNum = table.deck.length - table.deckPos;
     const { areas, p, b } = winningAreas(dealt.player, dealt.banker);
     table.lastResult = { player: dealt.player, banker: dealt.banker, areas, p, b };
-    table.ways[1] = [{ winArea: areas[0], p, b }, ...table.ways[1]].slice(0, 104);
+    table.ways[1] = [{ winArea: areas.slice(), isLiPai: false, p, b }, ...table.ways[1]].slice(0, 104);
     io.broadcast(PUSH.SHOWDOWN_POKERS, {
       roomType: table.roomType,
       roomId: table.roomId,
@@ -216,13 +228,17 @@ export function applyCycle(io, table, cycle) {
     table.state = 5;
   } else if (cycle === 6) {
     table.state = 6;
-    settleBets(io, table);
+    const result = table.lastResult;
+    if (!result) return;
+    return result.settlementTask ||= settleBets(io, table).finally(() => { result.settlementTask = null; });
   } else if (cycle === 7) {
     table.state = 7;
     table.inning += 1;
     table.totalBetsByArea = emptyAreas(oddsMap(table));
     table.playerBets.clear();
     table.lastResult = null;
+  } else if (cycle === 8) {
+    table.state = 0;
   } else {
     table.state = 2;
   }
@@ -243,12 +259,12 @@ export function tickBaccarat(io, table) {
   });
 }
 
-function settleBets(io, table) {
+async function settleBets(io, table) {
   const result = table.lastResult;
   if (!result || result.settled) {
     return;
   }
-  result.settled = true;
+  result.settlements ||= new Map();
   const participants = new Map(table.playerSessions || []);
   const peers = new Map();
   io.forEachPlayer(session => {
@@ -258,19 +274,25 @@ function settleBets(io, table) {
   });
   for (const [uid, session] of participants) {
     const mine = table.playerBets.get(session.userId) || [];
-    let realScore = 0;
-    const areaWinningScores = {};
-    for (const bet of mine) {
-      if (result.areas.includes(bet.areaId)) {
-        const win = Math.floor(bet.total * (oddsMap(table)[bet.areaId] || 1));
-        credit(session, bet.total + win, hundredWalletContext(io, session));
-        realScore += win;
-        areaWinningScores[String(bet.areaId)] = win;
-      } else {
-        realScore -= bet.total;
-        areaWinningScores[String(bet.areaId)] = -bet.total;
+    let payment = result.settlements.get(uid);
+    if (!payment) {
+      const areaWinningScores = {};
+      let realScore = 0, stake = 0;
+      for (const bet of mine) {
+        const net = result.areas.includes(3) && [1, 2].includes(bet.areaId) ? 0
+          : result.areas.includes(bet.areaId) ? Math.floor(bet.total * oddsMap(table)[bet.areaId]) : -bet.total;
+        realScore += net; stake += bet.total; areaWinningScores[bet.areaId] = net;
       }
+      payment = { realScore, areaWinningScores, payout: stake + realScore, credited: false, notified: false };
+      result.settlements.set(uid, payment);
     }
+    if (!payment.credited) {
+      const receipt = payment.payout > 0 ? await credit(session, payment.payout, hundredWalletContext(io, session)) : { ok: true };
+      if (receipt?.ok === false) throw new Error('Baccarat payout rejected');
+      payment.credited = true;
+    }
+    if (payment.notified) continue;
+    const { realScore, areaWinningScores } = payment;
     const send = (id, payload) => {
       if (session.bot) return;
       if (io.sendUser) io.sendUser(uid, id, payload);
@@ -289,7 +311,10 @@ function settleBets(io, table) {
       remainCardsNum: table.remainCardsNum,
       cutIndex: table.cutIndex,
     });
+    send(PUSH.MB_ROOM_BET_SETTLE, { ...enterSnapshot(table, session), realScore, areaWinningScores, customData: 2 });
+    payment.notified = true;
     if (table.visitors && !table.visitors.has(uid)) table.playerSessions?.delete(uid);
   }
+  result.settled = true;
   table.hundredSettledInning = table.inning;
 }

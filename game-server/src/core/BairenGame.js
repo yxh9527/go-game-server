@@ -2,6 +2,7 @@ import { rel } from '../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { HundredGame } = await rel(import.meta.url, './HundredGame.js', v);
 const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', v);
+const { configuredHundredRooms } = await rel(import.meta.url, './hundred-subscriptions.js', v);
 
 export class BairenGame extends HundredGame {
   constructor(config, engine, roomRules) { super(config); this.engine = engine; this.rulesForRoom = roomRules; }
@@ -69,22 +70,7 @@ export class BairenGame extends HundredGame {
 
   configuredRooms(ctx) {
     const { runtime, table, session } = ctx;
-    const configs = (runtime.configs || []).filter(row => Number(row.state ?? 1) === 1
-      && Number(row.room_type) === this.roomType);
-    const list = [];
-    configs.forEach((row, index) => {
-      const roomIndex = Number(row.room_index) || 0;
-      const roomId = Number(row.game_room_config_id) * 10000 + roomIndex;
-      let sibling = runtime.registry.getTable(roomId, session.agentId, this.id);
-      if (!sibling && roomId !== Number(table.roomId)) {
-        sibling = this.createTable(roomId, this.roomType, { ...row, room_index: roomIndex });
-        sibling.agentId = Number(session.agentId) || 0;
-        runtime.registry.setTable(roomId, sibling, session.agentId, this.id);
-      }
-      sibling ||= table;
-      if (Number(sibling.roomId) === Number(table.roomId)) sibling = table;
-      list.push(sibling);
-    });
+    const list = configuredHundredRooms(runtime, this, session);
     if (!list.some(row => Number(row.roomId) === Number(table.roomId))) list.unshift(table);
     return list;
   }

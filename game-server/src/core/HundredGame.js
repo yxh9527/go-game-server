@@ -88,10 +88,11 @@ export class HundredGame extends GameBase {
     }
   }
 
-  placeBet(ctx, body) {
+  placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
     const { table, session, send } = ctx;
-    if (table.state !== this.betState()) {
-      send(PUSH.BET_RESPONSE, {
+    const customData = Number(body?.customData ?? 2);
+    if (table.state !== this.betState() || table.phaseEndsAt && Date.now() >= table.phaseEndsAt) {
+      send(responseId, { customData,
         points: session.wallet,
         roomType: table.roomType,
         code: 1,
@@ -103,11 +104,16 @@ export class HundredGame extends GameBase {
     const params = Array.isArray(body?.params) ? body.params : [];
     const options = this.betOptions(table);
     const normalized = params.map(item => ({ areaId: Number(item?.areaId), total: Number(item?.total) }));
+    const cumulative = new Map((table.playerBets.get(session.userId) || []).map(bet => [bet.areaId, bet.total]));
+    for (const bet of normalized) cumulative.set(bet.areaId, (cumulative.get(bet.areaId) || 0) + bet.total);
     const total = normalized.reduce((sum, item) => sum + item.total, 0);
     if (!normalized.length || normalized.some(item => !options.areas.some(area => area.areaId === item.areaId)
       || !Number.isSafeInteger(item.total) || item.total < options.minBet || item.total > options.maxBet)
+      || [...cumulative.values()].some(amount => !Number.isSafeInteger(amount) || amount > options.maxBet)
+      || body.roomId != null && Number(body.roomId) !== Number(table.roomId)
+      || body.roomType != null && Number(body.roomType) !== Number(table.roomType)
       || !Number.isSafeInteger(total) || !debit(session, total, ctx).ok) {
-      send(PUSH.BET_RESPONSE, { points: session.wallet, roomType: table.roomType, code: 1,
+      send(responseId, { customData, points: session.wallet, roomType: table.roomType, code: 1,
         myBets: table.playerBets.get(session.userId) || [], roomId: table.roomId });
       return false;
     }
@@ -135,7 +141,7 @@ export class HundredGame extends GameBase {
       roomType: table.roomType,
       allPlayerBets: table.totalBetsByArea,
     });
-    send(PUSH.BET_RESPONSE, {
+    send(responseId, { customData,
       points: session.wallet,
       roomType: table.roomType,
       code: 0,
@@ -167,6 +173,32 @@ export class HundredGame extends GameBase {
 
   tick(ctx) {
     const table = ctx.table;
+    const phases = this.config.timedPhases;
+    if (phases?.length) {
+      const now = Date.now();
+      if (table.hundredCycleTask) return table.hundredCycleTask;
+      if (table.hundredPhaseIndex == null) {
+        table.hundredPhaseIndex = Math.max(0, phases.findIndex(p => p.state === table.state));
+        table.phaseEndsAt = now + phases[table.hundredPhaseIndex].seconds * 1000;
+        this.pushState(ctx);
+      } else if (now >= table.phaseEndsAt) {
+        const index = (table.hundredPhaseIndex + 1) % phases.length, phase = phases[index];
+        table.phaseEndsAt = now + phase.seconds * 1000;
+        const done = () => {
+          table.hundredPhaseIndex = index;
+          table.phaseEndsAt = Date.now() + phase.seconds * 1000;
+          this.pushState(ctx); this.tickRobots(ctx);
+        };
+        const result = this.onCycle(ctx, phase.cycle);
+        if (result?.then) {
+          const task = result.then(done).catch(error => { table.phaseEndsAt = Date.now(); throw error; })
+            .finally(() => { table.hundredCycleTask = null; });
+          table.hundredCycleTask = task; return task;
+        }
+        done(); return;
+      }
+      this.tickRobots(ctx); return;
+    }
     table.tick = (table.tick || 0) + 1;
     const cycle = table.tick % (this.config.tickCycle || 8);
     this.onCycle(ctx, cycle);
