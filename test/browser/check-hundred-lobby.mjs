@@ -4,6 +4,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import { hallCardAssets } from '../../scripts/sync-hall-card-assets.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gogame-hundred-hall-'));
@@ -45,6 +46,13 @@ try {
   await Promise.all([send('Page.enable'),send('Runtime.enable'),send('Network.enable')]);
   await send('Page.navigate', { url: 'http://lobby.localhost:11042/21/0?userId=10001&userToken=dev&openId=10001&v=2.0.1279' });
   await until(() => evaluate('!!document.querySelector(\'img[src*="category/02.webp"]\')'), 'hundred category');
+  const cardImages = await evaluate('Promise.all(' + JSON.stringify(hallCardAssets) + '.map(name=>new Promise(resolve=>{'
+    + 'const img=new Image(),timer=setTimeout(()=>resolve({name,ok:false}),10000);'
+    + 'img.onload=()=>{clearTimeout(timer);resolve({name,ok:img.naturalWidth>0})};'
+    + 'img.onerror=()=>{clearTimeout(timer);resolve({name,ok:false})};'
+    + 'img.src="/l01/img/cards/small/"+name;})))');
+  assert.deepEqual(cardImages.filter(card => !card.ok), [], 'original hall card images must actually load');
+  console.log('HALL_CARD_IMAGES', cardImages.length);
   await delay(6000);
   await evaluate('document.querySelector(\'img[src*="category/02.webp"]\').parentElement.click()');
   await until(() => evaluate('!!document.querySelector(\'img[src*="types/1001.png"]\')'), 'arcade menu');
