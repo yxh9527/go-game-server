@@ -145,9 +145,15 @@ export function mountWeb(app, runtime) {
   if (fs.existsSync(chunks)) {
     const bundles = fs.readdirSync(chunks).filter(name => /^434[.-][a-f0-9]+\.js$/.test(name));
     for (const name of bundles) {
-      const source = fs.readFileSync(path.join(chunks, name), "utf8");
-      const adapted = roomListRefresh.adaptRoomListRefresh(source);
+      const filename = path.join(chunks, name);
+      let modified = fs.statSync(filename).mtimeMs;
+      let adapted = roomListRefresh.adaptRoomListRefresh(fs.readFileSync(filename, "utf8"));
       app.get("/_next/static/chunks/" + name, (_req, res) => {
+        const current = fs.statSync(filename).mtimeMs;
+        if (current !== modified) {
+          adapted = roomListRefresh.adaptRoomListRefresh(fs.readFileSync(filename, "utf8"));
+          modified = current;
+        }
         res.set("Cache-Control", "no-store").type("js").send(adapted);
       });
     }

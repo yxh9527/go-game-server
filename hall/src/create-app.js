@@ -146,12 +146,20 @@ export async function createApp(runtime) {
     const poolRooms = !population.enabled && selected.some((row) => [19, 24, 25, 32].includes(Number(row.room_type)))
       && params.userId && (params.token || params.userToken)
       ? await roomPool.requestRoomPool(runtime, params, "list") : [];
+    const hundredRooms = selected.some(row => [1000, 1001, 1002, 1003].includes(Number(row.game_type)))
+      && params.userId && (params.token || params.userToken) && (runtime.config.hundred_server || runtime.config.game_server)
+      ? await roomPool.requestRoomPool(runtime, params, "hundred-list", {
+        gameType, ...(params.roomType ? { roomType: Number(params.roomType) } : {}),
+      }) : [];
     const now = Date.now();
     return [{
       gameType,
       roomClassifications: [],
       roomInfoData: selected.map((row) => {
         const result = toClient.toClientRoom(row);
+        const liveHundred = hundredRooms.find(room => room.gameRoomConfigId === Number(row.game_room_config_id)
+          && room.roomType === Number(row.room_type) && room.roomIndex === Number(row.room_index || 0));
+        if (liveHundred) Object.assign(result, liveHundred);
         if (!population.enabled && [19, 24, 25, 32].includes(Number(row.room_type))) {
           const live = poolRooms.filter((table) => table.gameRoomConfigId === Number(row.game_room_config_id)
             && table.roomType === Number(row.room_type));

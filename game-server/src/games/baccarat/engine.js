@@ -1,14 +1,101 @@
 import { rel } from '../../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
-const { credit, debit } = await rel(import.meta.url, '../../wallet/index.js', v);
+const { credit, walletOf } = await rel(import.meta.url, '../../wallet/index.js', v);
 const { makeDeck, shuffle } = await rel(import.meta.url, '../holdem/cards.js', v);
-const { baccaratTotal, drawBaccarat } = await rel(import.meta.url, './rules.js', v);
+const { baccaratValue, drawBaccarat, winningAreas, winningOdds, pointStages, supplyState } = await rel(import.meta.url, './rules.js', v);
 const { default: gameConfig } = await rel(import.meta.url, './config.js', v);
 const { hundredWalletContext } = await rel(import.meta.url, '../../core/robot.js', v);
+const pricing = await rel(import.meta.url, './odds.js', v);
+const history = await rel(import.meta.url, './history.js', v);
+const owner = await rel(import.meta.url, './table-owner.js', v);
+const bankers = await rel(import.meta.url, '../../core/hundred-banker.js', v);
+
+export function migrateTable(table, config = gameConfig) {
+  table.playMode ??= Number(table.cfg?.play_mode || 0);
+  for (const [key, value] of Object.entries(config)) if (table.config[key] === undefined) table.config[key] = value;
+  table.playerSessions ||= new Map(); table.visitors ||= new Set();
+  if (table.hundredPhaseIndex != null && !table.hundredCycleTask
+    && !(table.state === 6 && table.lastResult && !table.lastResult.settled)) {
+    const phases = phasesFor(table);
+    if (phases[table.hundredPhaseIndex]?.state !== table.state) {
+      const index = phases.findIndex(p => p.state === table.state
+        && (table.state !== 9 || p.cycle === (table.otherSupply ? 91 : 90)));
+      if (index >= 0) table.hundredPhaseIndex = index;
+    }
+  }
+}
 
 function oddsMap(table) {
   return table.config?.odds || gameConfig.odds;
+}
+
+export function currentOdds(table) {
+  return table.preparedHand?.areaOdds || table.lastResult?.areaOdds || pricing.configuredOdds(table.config || gameConfig);
+}
+
+export function roadSnapshot(table) {
+  return { 1: Array.isArray(table.ways[1]) ? { max: 104, ways: table.ways[1] } : table.ways[1],
+    9: Array.isArray(table.ways[9]) || !table.ways[9] ? { type: 16384, roundNum: 0 } : table.ways[9] };
+}
+
+export function prepareHand(io, table) {
+  if (table.preparedHand) return table.preparedHand;
+  const config = table.config || gameConfig;
+  const cards = table.deck.slice(table.deckPos);
+  if (cards.length < 6) throw new Error('Baccarat shoe must be shuffled before dealing');
+  const dealt = drawBaccarat(table.deck, table.deckPos);
+  const areaOdds = table.playMode === 3
+    ? pricing.brightOdds(cards, { other: dealt.player[0], banker: dealt.banker[0] }, config)
+    : pricing.configuredOdds(config);
+  table.preparedHand = { ...dealt, start: table.deckPos, areaOdds };
+  table.supplyState = 1; table.otherSupply = false;
+  table.totalBetsByArea = table.totalBetsByArea.map(row => ({ ...row, oddsList: areaOdds[row.areaId].oddsList.slice() }));
+  return table.preparedHand;
+}
+
+export function phasesFor(table) {
+  const config = table.config || gameConfig, mode = table.playMode ?? Number(table.cfg?.play_mode || 0);
+  const peek = mode === 3 ? config.brightPeekSeconds : config.peekSeconds;
+  const phases = [
+    // Six native deal tweens are spaced 0.75s apart. Betting must begin
+    // after those cards and their new dynamic prices have reached the table.
+    ...(mode === 3 ? [{ state: 1, cycle: 1, seconds: 5 }] : []),
+    { state: 2, cycle: 0, seconds: mode === 4 ? owner.privilege(table).activeBetTime : config.betSeconds[mode] },
+    { state: 3, cycle: 3, seconds: 1 },
+    { state: 4, cycle: 4, seconds: mode === 2 || table.baccaratFlying ? 3
+      : mode === 4 && owner.snapshot(table).hostActive && owner.privilege(table).activePeekTime > 0
+        ? owner.privilege(table).activePeekTime * owner.betAreas(table).length + 3
+        : mode === 1 || mode === 3 ? peek + 3 : 7 },
+    ...(mode === 1 || mode === 3 || mode === 4 ? [
+      { state: 9, cycle: 90, seconds: (mode === 3 ? config.brightPeekSeconds : mode === 4 ? Math.max(0, owner.privilege(table).activePeekTime) : config.supplyPeekSeconds) + 3,
+        skip: table.supplyState === 1 || mode === 4 && (!owner.snapshot(table).hostActive || owner.privilege(table).activePeekTime < 0) },
+      { state: 9, cycle: 91, seconds: (mode === 3 ? config.brightPeekSeconds : mode === 4 ? Math.max(0, owner.privilege(table).activePeekTime) : config.supplyPeekSeconds) + 3,
+        skip: table.supplyState !== 3 || mode === 4 && (!owner.snapshot(table).hostActive || owner.privilege(table).activePeekTime < 0) },
+    ] : []),
+    { state: 6, cycle: 6, seconds: config.settleSeconds },
+    { state: 7, cycle: 7, seconds: 1 },
+    { state: 8, cycle: 80, seconds: config.shuffleSeconds, skip: !needsShuffle(table) },
+    { state: 0, cycle: 8, seconds: 1 },
+  ];
+  return phases;
+}
+
+function needsShuffle(table) {
+  return Boolean(table.shuffleRequested || table.deckPos >= table.cutIndex
+    || table.deck.length - table.deckPos < (table.config?.reshuffleAt ?? 30));
+}
+
+function shuffleShoe(io, table) {
+  table.deck = makeShoe(table.config?.decks || 8); table.deckPos = 0;
+  const card = table.deck[0], point = baccaratValue(card) || 10;
+  table.deckPos = point + 1;
+  table.totalCardsNum = table.deck.length; table.remainCardsNum = table.deck.length - table.deckPos;
+  table.collectCardCount = table.dealCardCount = table.dealRealCount = table.deckPos;
+  table.ways = { 1: [], 9: [] }; table.cardColor = (table.cardColor || 0) ^ 1;
+  table.shuffleRequested = false; table.shoeHands = 0; table.lastResult = null; table.preparedHand = null;
+  io.broadcast(PUSH.SHUFFLING_POKERS, { roomType: table.roomType, roomId: table.roomId,
+    cardColor: table.cardColor, cutIndex: table.cutIndex, card, point });
 }
 
 export function emptyAreas(odds) {
@@ -16,6 +103,7 @@ export function emptyAreas(odds) {
 }
 
 function oddsList(areaId, odds) {
+  if (gameConfig.sideOdds[areaId]) return gameConfig.sideOdds[areaId].map(n => Math.round(n * 100));
   const n = Math.round(((odds || gameConfig.odds)[areaId] || 1) * 100);
   return [n];
 }
@@ -63,33 +151,43 @@ export function baccaratConf(table) {
   return {
     roomType: cfg.confRoomType,
     brbjlParams: {
-      gameName: cfg.gameName,
+      gameName: cfg.modeNames?.[Number(table.cfg?.play_mode || 0)] || cfg.gameName,
       gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
       maxBet: Number(table.cfg?.hundred_max_bet || cfg.defaultMaxBet),
       roomIndex: table.roomIndex,
+      betAreaOdds: currentOdds(table),
     },
     hundredSwitch: false,
     gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
     playMode: Number(table.cfg?.play_mode || 0),
+    roomIndex: table.roomIndex,
   };
 }
 
 export function enterSnapshot(table, session) {
   const conf = baccaratConf(table), mine = table.playerBets.get(Number(session.userId)) || [];
-  const betAreaOdds = Object.fromEntries(emptyAreas(oddsMap(table)).map(area => [area.areaId, { id: area.areaId, oddsList: area.oddsList }]));
+  const betAreaOdds = currentOdds(table);
   const result = table.state >= 4 ? table.lastResult : null;
   return {
     roomType: table.roomType,
     state: table.state,
     roomId: table.roomId,
     inning: table.inning,
+    playerId: Number(session.userId),
     playMode: Number(table.cfg?.play_mode || 0), roomIndex: table.roomIndex,
     countDown: Math.max(0, (table.phaseEndsAt || Date.now() + 25000) - Date.now()),
     hundredParams: { ...conf.brbjlParams, betAreaOdds }, areaOdds: betAreaOdds,
     ownBets: Object.fromEntries(mine.map(bet => [bet.areaId, { ...bet }])),
-    cardColor: 0, realScore: result?.settlements?.get(Number(session.userId))?.realScore || 0,
+    cardColor: table.cardColor || 0, playerNum: table.people,
+    realScore: result?.settlements?.get(Number(session.userId))?.realScore || 0,
+    otherSupply: Boolean(table.otherSupply),
+    ...owner.snapshot(table),
+    ...(Number(table.cfg?.play_mode) === 3 && table.preparedHand ? {
+      otherShowPoker: [table.preparedHand.player[0]], bankerShowPoker: [table.preparedHand.banker[0]],
+    } : {}),
     ...(result ? { showdownPokers: { other: result.player, banker: result.banker },
-      showdownPoints: { other: [result.p], banker: [result.b] }, winningAreas: result.areas,
+      showdownPoints: { other: pointStages(result.player), banker: pointStages(result.banker) }, winningAreas: result.areas,
+      showdownTypes: { other: result.p, banker: result.b },
       areaWinningScores: result.settlements?.get(Number(session.userId))?.areaWinningScores || {} } : {}),
     totalCardsNum: table.totalCardsNum,
     remainCardsNum: table.remainCardsNum,
@@ -98,9 +196,8 @@ export function enterSnapshot(table, session) {
     dealCardCount: table.dealCardCount,
     dealRealCount: table.dealRealCount,
     supplyState: table.supplyState,
-    totalBetsByArea: table.totalBetsByArea,
-    ways: { ...table.ways, 1: Array.isArray(table.ways[1]) ? { max: 104, ways: table.ways[1] } : table.ways[1],
-      9: Array.isArray(table.ways[9]) || !table.ways[9] ? { type: 16384, roundNum: 0 } : table.ways[9] },
+    totalBetsByArea: Object.fromEntries(table.totalBetsByArea.map(row => [row.areaId, row.total])),
+    ways: roadSnapshot(table),
     points: session.wallet,
     myBets: table.playerBets.get(session.userId) || [],
   };
@@ -127,104 +224,47 @@ export function onBaccaratEnter(send, table, session) {
   send(PUSH.ENTER_RESPONSE, enterSnapshot(table, session));
 }
 
-export function onBaccaratBet(send, table, session, body) {
-  if (table.state !== 2) {
-    send(PUSH.BET_RESPONSE, {
-      points: session.wallet,
-      roomType: table.roomType,
-      code: 1,
-      myBets: table.playerBets.get(session.userId) || [],
-      roomId: table.roomId,
-    });
-    return;
-  }
-  const params = Array.isArray(body?.params) ? body.params : [];
-  const mine = table.playerBets.get(session.userId) || [];
-  for (const item of params) {
-    const areaId = Number(item.areaId);
-    const total = Number(item.total || 0);
-    if (total <= 0 || !debit(session, total).ok) {
-      continue;
-    }
-    const area = table.totalBetsByArea.find((row) => row.areaId === areaId);
-    if (area) {
-      area.total += total;
-    }
-    const exist = mine.find((row) => row.areaId === areaId);
-    if (exist) {
-      exist.total += total;
-    } else {
-      mine.push({ areaId, total });
-    }
-  }
-  table.playerBets.set(session.userId, mine);
-  send(PUSH.BET_BROADCAST, {
-    roomId: table.roomId,
-    roomType: table.roomType,
-    allPlayerBets: table.totalBetsByArea,
-  });
-  send(PUSH.BET_RESPONSE, {
-    points: session.wallet,
-    roomType: table.roomType,
-    code: 0,
-    myBets: mine,
-    myTotalBets: mine,
-    betAreaIds: mine.map((item) => item.areaId),
-    roomId: table.roomId,
-  });
-}
-
-function winningAreas(player, banker) {
-  const p = baccaratTotal(player);
-  const b = baccaratTotal(banker);
-  const areas = [];
-  if (b > p) {
-    areas.push(2);
-  } else if (p > b) {
-    areas.push(1);
-  } else {
-    areas.push(3);
-  }
-  if (banker[0] % 13 === banker[1] % 13) {
-    areas.push(5);
-  }
-  if (player[0] % 13 === player[1] % 13) {
-    areas.push(4);
-  }
-  if (b === 6 && b > p) {
-    areas.push(9);
-  }
-  return { areas, p, b };
-}
-
 export function applyCycle(io, table, cycle) {
-  if (cycle === 3) {
+  if (cycle === 0 || cycle === 1) {
+    table.state = cycle === 1 ? 1 : 2;
+    prepareHand(io, table);
+  } else if (cycle === 3) {
     table.state = 3;
+    bankers.lock(table, table.preparedHand || prepareHand(io, table), table.config.bankerAreas || gameConfig.bankerAreas, currentOdds(table));
+    bankers.push(io, table, table.config.bankerAreas || gameConfig.bankerAreas);
   } else if (cycle === 4) {
+    if (table.lastResult) return;
     table.state = 4;
-    if (table.remainCardsNum < (table.config?.reshuffleAt || 30)) {
+    if (!table.preparedHand && table.remainCardsNum < (table.config?.reshuffleAt || 30)) {
       table.deck = makeShoe(table.config?.decks || 8);
       table.deckPos = 0;
       table.remainCardsNum = table.deck.length;
     }
-    const dealt = drawBaccarat(table.deck, table.deckPos);
+    const dealt = table.preparedHand || prepareHand(io, table);
     table.deckPos = dealt.next;
     table.dealCardCount += dealt.player.length + dealt.banker.length;
     table.dealRealCount = table.dealCardCount;
     table.remainCardsNum = table.deck.length - table.deckPos;
     const { areas, p, b } = winningAreas(dealt.player, dealt.banker);
-    table.lastResult = { player: dealt.player, banker: dealt.banker, areas, p, b };
+    table.supplyState = supplyState(dealt.player, dealt.banker);
+    table.lastResult = { player: dealt.player, banker: dealt.banker, areas, p, b, areaOdds: dealt.areaOdds };
+    table.shoeHands = (table.shoeHands || 0) + 1;
     table.ways[1] = [{ winArea: areas.slice(), isLiPai: false, p, b }, ...table.ways[1]].slice(0, 104);
     io.broadcast(PUSH.SHOWDOWN_POKERS, {
       roomType: table.roomType,
       roomId: table.roomId,
       showdownPokers: { other: dealt.player, banker: dealt.banker },
-      showdownPoints: { other: [p], banker: [b] },
+      showdownPoints: { other: pointStages(dealt.player), banker: pointStages(dealt.banker) },
       winningAreas: areas,
+      ...owner.snapshot(table),
+      showdownTypes: { other: p, banker: b }, realScore: 0, areaWinningScores: {},
       remainCardsNum: table.remainCardsNum,
       cutIndex: table.cutIndex,
     });
+  } else if (cycle === 90 || cycle === 91) {
+    table.state = 9; table.otherSupply = cycle === 91;
   } else if (cycle === 5) {
+    // Legacy direct callers may mark comparison; it must never reopen bets.
     table.state = 5;
   } else if (cycle === 6) {
     table.state = 6;
@@ -233,14 +273,17 @@ export function applyCycle(io, table, cycle) {
     return result.settlementTask ||= settleBets(io, table).finally(() => { result.settlementTask = null; });
   } else if (cycle === 7) {
     table.state = 7;
-    table.inning += 1;
-    table.totalBetsByArea = emptyAreas(oddsMap(table));
-    table.playerBets.clear();
-    table.lastResult = null;
+    table.collectCardCount = table.dealCardCount;
+  } else if (cycle === 80) {
+    table.state = 8; shuffleShoe(io, table);
   } else if (cycle === 8) {
     table.state = 0;
+    table.inning += 1;
+    table.totalBetsByArea = emptyAreas(oddsMap(table)); table.playerBets.clear();
+    table.lastResult = null; table.preparedHand = null;
+    table.baccaratFlying = false; owner.beforeRound(io, table);
   } else {
-    table.state = 2;
+    throw new Error('Unsupported baccarat cycle: ' + cycle);
   }
 }
 
@@ -276,20 +319,31 @@ async function settleBets(io, table) {
     const mine = table.playerBets.get(session.userId) || [];
     let payment = result.settlements.get(uid);
     if (!payment) {
-      const areaWinningScores = {};
+      const areaWinningScores = {}, betOdds = {};
       let realScore = 0, stake = 0;
       for (const bet of mine) {
+        const tier = bet.areaId === 6 ? result.banker.length - 2 : bet.areaId === 7 ? result.player.length - 2
+          : bet.areaId === 8 ? result.player.length + result.banker.length - 4 : 0;
+        const price = result.areaOdds?.[bet.areaId]?.oddsList[tier]
+          ?? Math.round(winningOdds(bet.areaId, result, table.config || gameConfig) * 100);
+        if (!Number.isSafeInteger(price) || price < 0) throw new Error('Invalid baccarat payout price');
         const net = result.areas.includes(3) && [1, 2].includes(bet.areaId) ? 0
-          : result.areas.includes(bet.areaId) ? Math.floor(bet.total * oddsMap(table)[bet.areaId]) : -bet.total;
+          : result.areas.includes(bet.areaId) ? Number(BigInt(bet.total) * BigInt(price) / 100n) : -bet.total;
         realScore += net; stake += bet.total; areaWinningScores[bet.areaId] = net;
+        betOdds[bet.areaId] = price / 100;
       }
-      payment = { realScore, areaWinningScores, payout: stake + realScore, credited: false, notified: false };
+      payment = { realScore, areaWinningScores, betOdds, payout: stake + realScore, credited: false, notified: false };
+      if (!Number.isSafeInteger(payment.payout) || payment.payout < 0 || !Number.isSafeInteger(realScore)) throw new Error('Invalid baccarat payout total');
       result.settlements.set(uid, payment);
     }
     if (!payment.credited) {
       const receipt = payment.payout > 0 ? await credit(session, payment.payout, hundredWalletContext(io, session)) : { ok: true };
       if (receipt?.ok === false) throw new Error('Baccarat payout rejected');
       payment.credited = true;
+    }
+    if (!payment.persisted) {
+      if (mine.length) await walletOf(hundredWalletContext(io, session)).persist?.(session);
+      payment.persisted = true;
     }
     if (payment.notified) continue;
     const { realScore, areaWinningScores } = payment;
@@ -303,11 +357,12 @@ async function settleBets(io, table) {
       roomType: table.roomType,
       roomId: table.roomId,
       showdownPokers: { other: result.player, banker: result.banker },
-      showdownPoints: { other: [result.p], banker: [result.b] },
+      showdownPoints: { other: pointStages(result.player), banker: pointStages(result.banker) },
       winningAreas: result.areas,
       areaWinningScores,
       points: session.wallet,
       realScore,
+      ...owner.snapshot(table),
       remainCardsNum: table.remainCardsNum,
       cutIndex: table.cutIndex,
     });
@@ -315,6 +370,8 @@ async function settleBets(io, table) {
     payment.notified = true;
     if (table.visitors && !table.visitors.has(uid)) table.playerSessions?.delete(uid);
   }
+  bankers.settle(io, table, result, table.config.bankerAreas || gameConfig.bankerAreas);
+  history.record(table, result, participants, io);
   result.settled = true;
   table.hundredSettledInning = table.inning;
 }

@@ -108,11 +108,16 @@ test("hall serves the adapted bundle without changing the static source file", a
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const response = await fetch("http://127.0.0.1:" + server.address().port + "/_next/static/chunks/" + bundle,
-    { headers: { Host: "lobby.example.com" } });
+  const response = await new Promise((resolve, reject) => {
+    http.get("http://127.0.0.1:" + server.address().port + "/_next/static/chunks/" + bundle,
+      { headers: { Host: "lobby.example.com" } }, res => {
+        let body = ''; res.setEncoding('utf8'); res.on('data', chunk => { body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      }).on('error', reject);
+  });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.equal(await response.text(), adaptRoomListRefresh(source));
+  assert.equal(response.headers['cache-control'], "no-store");
+  assert.equal(response.body, adaptRoomListRefresh(source));
   assert.equal(fs.readFileSync(new URL("../../static/hall/_next/static/chunks/" + bundle, import.meta.url), "utf8"), source);
   assert.throws(() => adaptRoomListRefresh("unrelated client"), /layout changed/);
 });

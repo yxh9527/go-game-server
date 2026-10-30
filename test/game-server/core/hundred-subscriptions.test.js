@@ -23,12 +23,13 @@ async function fixture(type = 60, agentId = 7) {
     async reload() { handler = await createHandler(runtime); } };
 }
 
-test('Blackjack discovers and subscribes the native three Baccarat shortcuts without replacing its host or selected table', async () => {
+test('Blackjack discovers and subscribes Baccarat shortcuts without replacing its host or selected table', async () => {
   const f = await fixture();
   await f.send(6126, { roomType: 58, type: [] });
   const list = f.messages.find(m => m.msgid === 6230).payload;
-  assert.equal(list.length, 3); assert.ok(list.every(r => r.roomType === 58));
-  await f.send(6123, { roomType: 58, roomIds: list.map(r => r.roomId), customData: 2 });
+  assert.equal(list.length, 50); assert.ok(list.every(r => r.roomType === 58));
+  const selected = list.filter(r => r.playMode === 0).slice(0, 3);
+  await f.send(6123, { roomType: 58, roomIds: selected.map(r => r.roomId), customData: 2 });
   const rooms = f.messages.findLast(m => m.msgid === 6227).payload;
   assert.equal(rooms.customData, 2); assert.equal(rooms.roomInfos.length, 3);
   for (const room of rooms.roomInfos) {
@@ -50,7 +51,7 @@ test('Blackjack discovers and subscribes the native three Baccarat shortcuts wit
   assert.equal(table.playerBets.get(971)[0].total, 100);
   assert.equal(f.messages.some(m => m.msgid === 6202 && m.payload.roomType === 58), false);
   await f.reload();
-  await f.send(6123, { roomType: 58, roomIds: list.map(r => r.roomId), customData: 2 });
+  await f.send(6123, { roomType: 58, roomIds: selected.map(r => r.roomId), customData: 2 });
   assert.equal(f.session.wallet, before - 100); assert.equal(table.people, 1);
   assert.equal(f.messages.findLast(m => m.msgid === 6227).payload.roomInfos[0].ownBets[1].total, 100);
   table.lastResult = { player:[3,4], banker:[0,1], areas:[1], p:9, b:3 };

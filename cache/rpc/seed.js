@@ -23,9 +23,19 @@ export function seedRooms() {
       sort_index: 1900 + index, category: 'normal',
       name: `${mode === 8 ? 'AOF必推' : mode === 2 ? '暴击德州' : '德州'}${show ? '秀牌' : '不秀牌'} ${sb}/${bb}`,
     })),
-    room({ game_type: 1002, room_type: 58, game_room_config_id: 5803, play_mode: 0, room_index: 1, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 1", category: "hundred" }),
-    room({ game_type: 1002, room_type: 58, game_room_config_id: 5804, play_mode: 0, room_index: 2, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 2", category: "hundred" }),
-    room({ game_type: 1002, room_type: 58, game_room_config_id: 5805, play_mode: 0, room_index: 3, hundred_min_bet: 100, hundred_max_bet: 100000000, name: "经典百家乐 3", category: "hundred" }),
+    // Original op=38 catalog: ten tables in each baccarat mode. VIP tables
+    // share config 5895; room_index is part of their routing identity.
+    ...[
+      [0, '经典百家乐', [140, 141, 142, 143, 144, 145, 146, 5801, 5802, 5803]],
+      [1, '共咪百家乐', [147, 148, 149, 150, 151, 152, 153, 5824, 5825, 5826]],
+      [2, '极速百家乐', [154, 155, 156, 157, 158, 159, 5847, 5848, 5849, 5850]],
+      [3, '明牌百家乐', [180, 182, 183, 184, 185, 186, 5871, 5872, 5873, 5874]],
+      [4, '包桌百家乐', Array(10).fill(5895)],
+    ].flatMap(([mode, name, ids]) => ids.map((id, index) => room({
+      game_type: 1002, room_type: 58, game_room_config_id: id, play_mode: mode,
+      room_index: index + 1, hundred_min_bet: 100, hundred_max_bet: 100000000,
+      name: name + ' ' + (index + 1), category: 'hundred', sort_index: 5800 + mode * 10 + index,
+    }))),
     ...[[100, 1, "暗五公牌"], [5002, 2, "明三公牌"], [5003, 3, "明二公牌"],
       [5004, 4, "明一公牌"], [5005, 5, "全暗"]].map(([id, mode, name], index) => room({
       game_type: 1000, room_type: 50, game_room_config_id: id, play_mode: mode,
@@ -138,6 +148,16 @@ function room(row) {
     hundredMaxBet: row.hundred_max_bet || 0,
     key: `${roomType}/${row.small_blind || 0}/${row.big_blind || 0}`,
   };
+  if (roomType === 58) {
+    const params = { gameName: row.name, gameRoomConfigId: row.game_room_config_id,
+      maxBet: row.hundred_max_bet, roomIndex: row.room_index };
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false,
+      roomClassification: 0, ante: 0, initialBet: 0, straddle: false, seeCardNo: 0,
+      brbjlParams: params, hundredParams: params,
+      key: [58, 0, 0, false, row.play_mode, 0, 0, 0, 0, row.room_index].join('/'),
+      ...(row.play_mode === 4 ? { vipTableData: { bg: 1, dealer: 223 } } : {}),
+    });
+  }
   if ([53,54,55,56,57].includes(roomType)) {
     const key = {53:'bcbm',54:'slwh',55:'fqzs',56:'mjzl',57:'qwby'}[roomType];
     const params = { gameName: row.name, gameRoomConfigId: row.game_room_config_id,

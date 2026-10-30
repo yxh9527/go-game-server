@@ -84,11 +84,22 @@ test('failed payout holds the phase across hot replacement and a slow retry pres
   f.io.wallet.credit=async(s,n)=>{now+=5000;s.wallet+=n;return {ok:true};};
   const reloaded=new BaccaratGame();await reloaded.tick(f.ctx);
   assert.equal(f.table.hundredPhaseIndex,3);assert.equal(f.table.state,6);
-  assert.equal(f.table.phaseEndsAt,now+3000);assert.equal(f.session.wallet,10100);
+  assert.equal(f.table.phaseEndsAt,now+f.table.config.settleSeconds*1000);assert.equal(f.session.wallet,10100);
   reloaded.tick(f.ctx);assert.equal(f.table.inning,1);assert.equal(f.session.wallet,10100);
 });
 
 test('encoded Ace zero is still a real third card and cannot trigger the no-third-card banker rule',()=>{
   const hand=drawBaccarat([0,1,2,14,0,8],0);
   assert.deepEqual(hand.player,[0,1,0]);assert.deepEqual(hand.banker,[2,14]);assert.equal(hand.next,5);
+});
+
+test('Baccarat retries failed payout persistence without applying credit twice',async()=>{
+  const f=fixture();f.bet([{areaId:1,total:100}]);
+  f.table.lastResult={player:[3,4],banker:[0,1],p:9,b:3,areas:[1]};
+  let fail=true;f.io.wallet.persist=async()=>{if(fail)throw Error('persist failed');};
+  await assert.rejects(applyCycle(f.io,f.table,6),/persist failed/);
+  assert.equal(f.session.wallet,10100);assert.equal(f.table.lastResult.settled,undefined);
+  fail=false;await applyCycle(f.io,f.table,6);
+  assert.equal(f.session.wallet,10100);assert.deepEqual(f.credits,[200]);
+  assert.equal(f.table.lastResult.settled,true);
 });

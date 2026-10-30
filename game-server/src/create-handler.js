@@ -64,7 +64,8 @@ export async function createHandler(runtime) {
   function tableIo(table) {
     const singleHundredPushes = new Set([PUSH.GAME_STATE, PUSH.DEAL_CARDS_AND_ODDS,
       PUSH.SHOWDOWN_POKERS, PUSH.PLAYER_NUM_CHANGE, PUSH.BET_BROADCAST,
-      PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE, PUSH.SHUFFLING_POKERS]);
+      PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE, PUSH.SHUFFLING_POKERS,
+      6233, 6234, 6235, 6236, 6237, 6238, 6240, 6241, 6242, 6243, 6244]);
     const selected = (session, msgid) => table.kind !== 'hundred' || !singleHundredPushes.has(msgid)
       || (Number(session.hundredRoomId ?? session.roomId) === Number(table.roomId)
         && String(session.hundredGameId ?? session.gameId) === String(table.gameId));
@@ -227,6 +228,11 @@ export async function createHandler(runtime) {
       }
       const profile = await runtime.gateway.getLoginData(uid);
       const agentId = Number(profile?.agentId) || 0;
+      if (body.action === "hundred-list") {
+        const { listHundredLobbyRooms } = await rel(import.meta.url, './core/hundred-lobby.js', v);
+        respond({ code: 200, data: listHundredLobbyRooms(runtime, gameOf, agentId, body) });
+        return;
+      }
       if (body.action === "list") {
         respond({ code: 200, data: pool.list(agentId) });
         return;
@@ -433,7 +439,7 @@ export async function createHandler(runtime) {
     }
     // The native Bairen overlay logs in independently, then sends 6105 without
     // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
-    const hundredRequest = [6107, 6111, SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
+    const hundredRequest = [6107, 6111, 6129, 6130, 6131, 6132, 6133, 6134, 6135, SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
       SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.GR_GET_ALL_ROOMS_REQ,
       SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
     if (hundredRequest && (gameOf(payload?.roomType)?.kind === 'hundred'

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
+import { WebSocketServer } from "ws";
 import { createRoomPopulation, roomEntryAmount } from "../../hall/src/room-population.js";
 import { createApp } from "../../hall/src/create-app.js";
 
@@ -173,9 +174,15 @@ test("op 38 applies common counts to every game without waking or allocating roo
   const before = JSON.stringify(rows);
   let gameServerRequests = 0;
   const fakeGameServer = http.createServer((_req, res) => { gameServerRequests++; res.end(); });
+  const roomQueries = [];
+  const sockets = new WebSocketServer({ server: fakeGameServer });
+  sockets.on('connection', socket => socket.on('message', raw => {
+    const query = JSON.parse(raw.toString());
+    roomQueries.push(query);
+    socket.send(JSON.stringify({ type: 'room-pool-result', code: 200, data: [] }));
+  }));
   await new Promise(resolve => fakeGameServer.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise(resolve => fakeGameServer.close(resolve)));
-  fakeGameServer.on("upgrade", (_req, socket) => { gameServerRequests++; socket.destroy(); });
   const runtime = {
     env: "prod", hotVersion: "population-http", config: { game_server: "127.0.0.1:" + fakeGameServer.address().port },
     log: { error() {} }, matchStore: { listMatches: () => [] }, roomStore: { list: () => rows },
@@ -197,7 +204,10 @@ test("op 38 applies common counts to every game without waking or allocating roo
     assert.ok(list[0].totalPeople > list[1].totalPeople && list[1].totalPeople > list[2].totalPeople);
     assert.ok(list.every(item => item.unchangedField === "ok"));
   }
-  assert.equal(gameServerRequests, 0, "list never invokes the live room pool");
+  assert.equal(gameServerRequests, 0, "population decoration needs no HTTP request");
+  assert.equal(roomQueries.length, 2);
+  assert.ok(roomQueries.every(query => query.type === 'room-pool' && query.action === 'hundred-list'),
+    'hundred lists read public snapshots; never allocate or wake rooms');
   assert.equal(JSON.stringify(rows), before);
   runtime.config.room_population = { minPeople: 42, maxPeople: 42 };
   runtime.hotVersion = "population-http-hot";

@@ -1,6 +1,6 @@
 export default {
   id: "baccarat",
-  name: "经典百家乐",
+  name: "百人百家乐",
   kind: "hundred",
   roomTypes: [58],
   confRoomType: "brbjl",
@@ -25,6 +25,17 @@ export default {
     6: 12,
     7: 6,
     8: 30,
-    9: 12,
+    9: 0.09,
   },
+  // Protocol prices are net odds multiplied by 100, not returned stakes.
+  sideOdds: { 6: [12, 20], 7: [6, 15], 8: [30, 40, 100] },
+  modeNames: ['经典百家乐', '共咪百家乐', '极速百家乐', '明牌百家乐', '包桌百家乐'],
+  betSeconds: [25, 20, 15, 25, 20],
+  peekSeconds: 16,
+  brightPeekSeconds: 10,
+  supplyPeekSeconds: 8,
+  settleSeconds: 10,
+  // Original shuffle spine plus reveal/burn (up to ten cards) takes >14s.
+  shuffleSeconds: 16,
+  bankerAreas: [[1, 2, 3, 9], [4, 5, 6, 7, 8]],
 };

@@ -56,6 +56,7 @@ export function createRoomLogic(decode) {
     const scored = (rows || []).filter((row) => num(row.state, 1) === 1
       && (cfgId === undefined || num(row.game_room_config_id, 0) === cfgId)
       && (roomType === undefined || num(row.room_type, 0) === roomType)
+      && (num(row.room_type, 0) !== 58 || roomIndex === undefined || num(row.room_index, 0) === roomIndex)
       && (playMode === undefined || num(row.play_mode, 0) === playMode
         || (num(row.room_type, 0) === 62 && [0, 1].includes(playMode) && [0, 1].includes(num(row.play_mode, 0))))
       && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)

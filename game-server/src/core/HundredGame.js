@@ -54,6 +54,7 @@ export class HundredGame extends GameBase {
   }
 
   tickRobots(ctx, now = Date.now(), rng = Math.random) {
+    if (this.robotsEnabled?.(ctx.table) === false) return;
     robots.tickHundredRoom(this, ctx, now, rng);
   }
 
@@ -171,9 +172,12 @@ export class HundredGame extends GameBase {
     return false;
   }
 
+  phasesFor(_table) { return this.config.timedPhases; }
+
   tick(ctx) {
+    this.beforeTick?.(ctx);
     const table = ctx.table;
-    const phases = this.config.timedPhases;
+    const phases = this.phasesFor(table);
     if (phases?.length) {
       const now = Date.now();
       if (table.hundredCycleTask) return table.hundredCycleTask;
@@ -182,7 +186,9 @@ export class HundredGame extends GameBase {
         table.phaseEndsAt = now + phases[table.hundredPhaseIndex].seconds * 1000;
         this.pushState(ctx);
       } else if (now >= table.phaseEndsAt) {
-        const index = (table.hundredPhaseIndex + 1) % phases.length, phase = phases[index];
+        let index = (table.hundredPhaseIndex + 1) % phases.length;
+        for (let skipped = 0; phases[index].skip && skipped < phases.length; skipped++) index = (index + 1) % phases.length;
+        const phase = phases[index];
         table.phaseEndsAt = now + phase.seconds * 1000;
         const done = () => {
           table.hundredPhaseIndex = index;

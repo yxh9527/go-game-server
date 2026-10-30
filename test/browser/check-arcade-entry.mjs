@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
-import { decodeFrame } from '../../game-server/src/codec.js';
+import { encodeFrame, decodeFrame } from '../../game-server/src/codec.js';
 
 
 
@@ -15,8 +15,31 @@ const browser = spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome
   '--window-size=1280,900', 'about:blank',
 ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitForEntryWindow(type) {
+  if (!process.env.ARCADE_LATE_ENTRY) return;
+  const socket = new WebSocket('ws://127.0.0.1:11041');
+  let snapshot, loggedIn = false;
+  socket.on('message', data => {
+    const frame = decodeFrame(data);
+    if (frame?.msgid === 1205) loggedIn = true;
+    if (frame?.msgid === 6205) snapshot = frame.payload;
+  });
+  try {
+    await new Promise((resolve,reject) => { socket.once('open',resolve);socket.once('error',reject); });
+    socket.send(encodeFrame(1105,{userId:88030000+type,userToken:'dev-arcade-entry',roomId:(type+50)*10000}));
+    const deadline=Date.now()+65000;
+    while(Date.now()<deadline) {
+      if (loggedIn) socket.send(encodeFrame(6105,{roomType:type}));
+      await delay(200);
+      if(snapshot?.state===2 && snapshot.countDown>=4000 && snapshot.countDown<4700) {
+        console.log('ENTRY_WINDOW',type,JSON.stringify(snapshot));return;
+      }
+    }
+    throw new Error('timeout: late betting entry window '+type);
+  } finally { socket.close(); }
+}
 const sessions = [], errors = [], frames = [], logs = [];
-let ws, ev, send;
+let ws, ev, send, lifecycleSource;
 try {
   let port;
   for (let i = 0; i < 100; i++) {
@@ -37,15 +60,25 @@ try {
     if (m.id) { pending.get(m.id)?.(m); pending.delete(m.id); }
     else if (m.method === 'Target.attachedToTarget') {
       sessions.push(m.params.sessionId);
-      send('Runtime.enable', {}, m.params.sessionId).catch(() => {});
-      send('Network.enable', {}, m.params.sessionId).catch(() => {});
-    } else if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails);
+      const session = m.params.sessionId;
+      (async () => {
+        await Promise.all([send('Runtime.enable', {}, session), send('Network.enable', {}, session)]);
+        if (lifecycleSource) {
+          await send('Page.enable', {}, session);
+          await send('Page.addScriptToEvaluateOnNewDocument', { source: lifecycleSource }, session);
+        }
+        await send('Runtime.runIfWaitingForDebugger', {}, session);
+      })().catch(error => console.log('ATTACH_ERROR',error.message));
+    } else if (m.method === 'Runtime.exceptionThrown') errors.push({...m.params.exceptionDetails,observedAt:Date.now()});
     else if (m.method === 'Runtime.consoleAPICalled') {
       const line = m.params.args.map(a => a.value ?? a.description ?? '').join(' ');
-      if (!line.includes('[HALL-NET]') && /Turntable|BlackJack|Bairen|gotoScene|TypeError|NaN|FrameTaskRunner|逻辑异常|数据异常/.test(line)) logs.push(line.slice(0, 700));
+      if (m.params.type === 'error' && /FrameTaskRunner.*任务出错|TypeError:|ReferenceError:|SyntaxError:|Bundle .*doesn't contain/.test(line)) {
+        errors.push({ text: line, observedAt: Date.now(), source: 'console' });
+      }
+      if (!line.includes('[HALL-NET]') && /ARCADE_LIFECYCLE|Turntable|BlackJack|Bairen|gotoScene|TypeError|NaN|FrameTaskRunner|逻辑异常|数据异常/.test(line)) logs.push(line.slice(0, 700));
     } else if (/Network.webSocketFrame(Sent|Received)/.test(m.method)) {
       try { const frame = decodeFrame(Buffer.from(m.params.response.payloadData, 'base64'));
-        if (frame) frames.push({ direction: m.method.endsWith('Sent') ? 'send' : 'receive', ...frame }); } catch {}
+        if (frame) frames.push({ observedAt:Date.now(), direction: m.method.endsWith('Sent') ? 'send' : 'receive', ...frame }); } catch {}
     }
   });
   const evaluate = async (expression, sessionId) => {
@@ -59,7 +92,40 @@ try {
     assert.fail('timeout: ' + description);
   };
   await send('Page.enable'); await send('Runtime.enable'); await send('Network.enable');
-  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  if (process.env.ARCADE_TRACE_LIFECYCLE) {
+    lifecycleSource = '(' + (() => {
+      const trace = (event, component) => console.log('ARCADE_LIFECYCLE', JSON.stringify({
+        event, at: Date.now(), frame: window.cc?.director?.getTotalFrames(),
+        component: component && cc.js.getClassName(component), ready: !!component?._module,
+      }));
+      const timer = setInterval(() => {
+        if (!window.cc?.director?.runSceneImmediate) return;
+        clearInterval(timer);
+        const director = cc.director, runScene = director.runSceneImmediate;
+        director.runSceneImmediate = function(scene, ...args) {
+          for (const [name, methods] of [['AudioPart',['start','playSound']],['TurntableMain',['onLoad']]]) {
+            let prototype;
+            try { prototype = window.__require(name).default.prototype; } catch { continue; }
+            for (const method of methods) {
+              const original = prototype[method];
+              if (typeof original !== 'function' || original.__arcadeTrace) continue;
+              const wrapped = function(...values) {
+                trace(method + ':before', this);
+                const result = original.apply(this, values);
+                trace(method + ':after', this);
+                return result;
+              };
+              wrapped.__arcadeTrace = true;
+              prototype[method] = wrapped;
+            }
+          }
+          return runScene.call(this, scene, ...args);
+        };
+      }, 10);
+    }).toString() + ')();';
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: lifecycleSource });
+  }
+  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: !!lifecycleSource, flatten: true });
   const requested = process.env.ARCADE_TYPES ? process.env.ARCADE_TYPES.split(',').map(Number) : [53,54,55,56,57];
   for (const type of requested) {
     const names = {53:'奔驰宝马',54:'森林舞会',55:'飞禽走兽',56:'麻将转了',57:'趣味捕鱼'};
@@ -73,6 +139,7 @@ try {
     await delay(2500);
     const listed=await evaluate("Array.from(document.querySelectorAll('[class*=roomList] li')).map(el=>({text:el.innerText,image:el.querySelector('img')?.getAttribute('src')}))");
     console.log('LIST',type,JSON.stringify(listed));assert.equal(listed.filter(row=>Object.values(names).some(name=>row.text.startsWith(name))).length,5);
+    await waitForEntryWindow(type);
     const entered=await evaluate("(()=>{const rows=Array.from(document.querySelectorAll('[class*=roomList] li'));const el=rows.find(el=>el.innerText.includes("+JSON.stringify(names[type])+")||el.querySelector('img')?.getAttribute('src').includes('/"+type+".'));el?.click();return !!el;})()");
     assert.ok(entered,'native lobby arcade entry '+type);await delay(15000);
     let session;
@@ -82,11 +149,24 @@ try {
     }
     assert.ok(session,'original arcade scene '+scene);ev=expression=>evaluate(expression,session);
     const ownFrames=()=>frames.slice(startFrames);
+    console.log('ENTRY_FLOW',type,JSON.stringify(ownFrames().filter(f=>[1105,1205,2102,2201,2111,6105,6205].includes(f.msgid))
+      .map(f=>({at:f.observedAt,direction:f.direction,id:f.msgid,state:f.payload?.state,countDown:f.payload?.countDown}))));
+    if (process.env.ARCADE_TRACE_LIFECYCLE) console.log('LIFECYCLE',type,JSON.stringify(logs.filter(line=>line.includes('ARCADE_LIFECYCLE'))));
     await until(()=>ownFrames().some(f=>f.msgid===6205&&f.payload.roomType===type),5000,'ENTER '+type);
     const entry=ownFrames().find(f=>f.msgid===6205&&f.payload.roomType===type).payload,rid=entry.roomId;
+    if (process.env.ARCADE_LATE_ENTRY) {
+      assert.equal(entry.state,2,'late-entry regression must enter during betting');
+      assert.ok(entry.countDown>0&&entry.countDown<=5000,'late-entry regression must exercise the countdown sound');
+    }
     assert.equal(entry.defaultOuter.length,24);assert.equal(entry.defaultInner.length,24);assert.equal(Object.keys(entry.areaOdds).length,30);
     const main="(()=>{let found;function walk(n){const c=n.getComponent&&n.getComponent('TurntableMain');if(c)found=c;n.children?.forEach(walk);}walk(cc.director.getScene());return found;})()";
     const state=()=>ev('('+main+').viewModel.model.__currentGameState');
+    if(process.env.ARCADE_ENTRY_ONLY) {
+      assert.equal(errors.length,startErrors,JSON.stringify(errors.slice(startErrors)));
+      await ev('('+main+').viewModel.commandLeaveGame();true');
+      await until(async()=>await ev('cc.director.getScene().name')==='webHallOb',10000,'entry-only return '+type);
+      console.log('PASS_ARCADE_ENTRY',type,JSON.stringify({state:entry.state,countDown:entry.countDown}));continue;
+    }
     await until(async()=>await state()===2,45000,'betting '+type);
     const betStart=frames.length;
     console.log('BEFORE_UI',type,JSON.stringify(await ev('(()=>{const p='+main+';return {state:p.viewModel.model.__currentGameState,balance:p.viewModel.model.__currentBalance,chip:p.viewModel.__currentChipValue};})()')));

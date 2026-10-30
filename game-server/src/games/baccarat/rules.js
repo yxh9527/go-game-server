@@ -13,6 +13,38 @@ export function baccaratTotal(ids) {
   return ids.reduce((sum, id) => sum + baccaratValue(id), 0) % 10;
 }
 
+// The original renderer reads index 0 after turning over the first two cards,
+// and index 1 only after the third card has been exposed.
+export function pointStages(cards) {
+  return cards.length > 2 ? [baccaratTotal(cards.slice(0, 2)), baccaratTotal(cards)] : [baccaratTotal(cards)];
+}
+
+export function winningAreas(player, banker) {
+  const p = baccaratTotal(player), b = baccaratTotal(banker);
+  const areas = [p > b ? 1 : b > p ? 2 : 3];
+  if (player[0] % 13 === player[1] % 13) areas.push(4);
+  if (banker[0] % 13 === banker[1] % 13) areas.push(5);
+  if (b > p && b === 6) areas.push(6);
+  if (p > b && p === 7) areas.push(7);
+  if (p === 7 && b === 6) areas.push(8);
+  if (p !== b) areas.push(9);
+  return { areas, p, b };
+}
+
+export function winningOdds(areaId, result, config) {
+  if (areaId === 6) return config.sideOdds[6][result.banker.length === 3 ? 1 : 0];
+  if (areaId === 7) return config.sideOdds[7][result.player.length === 3 ? 1 : 0];
+  if (areaId === 8) return config.sideOdds[8][result.player.length + result.banker.length - 4];
+  return config.odds[areaId];
+}
+
+export function supplyState(player, banker) {
+  const p = player.length === 3, b = banker.length === 3;
+  if (!p && !b) return 1;
+  if (p && b) return baccaratTotal(banker.slice(0, 2)) <= 2 ? 2 : 3;
+  return p ? 4 : 5;
+}
+
 export function drawBaccarat(deck, pos) {
   const player = [deck[pos], deck[pos + 1]];
   const banker = [deck[pos + 2], deck[pos + 3]];

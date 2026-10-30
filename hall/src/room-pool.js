@@ -1,7 +1,8 @@
 import WebSocket from "ws";
 
 export function requestRoomPool(runtime, params, action, selection = {}) {
-  const configured = String(runtime.config.game_server || "127.0.0.1:11041");
+  const configured = String((action === 'hundred-list' ? runtime.config.hundred_server : null)
+    || runtime.config.game_server || "127.0.0.1:11041");
   const endpoint = new URL(configured.includes("://") ? configured : "ws://" + configured);
   if (endpoint.protocol === "http:") endpoint.protocol = "ws:";
   if (endpoint.protocol === "https:") endpoint.protocol = "wss:";
