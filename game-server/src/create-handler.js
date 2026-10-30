@@ -49,8 +49,9 @@ export async function createHandler(runtime) {
       const table = session?.inRoom !== false && session
         ? runtime.registry.getTable(session.roomId, session.agentId, session.gameId) : null;
       if (table) payload = seatView.projectSeatMessage(table, session, msgid, payload);
-      if (msgid === PUSH.ROOM_TYPE_RESULT && Number(payload?.roomType) === 19
-        && runtime.configs.some(row => Number(row.state ?? 1) === 1 && Number(row.room_type) === 50)) {
+      const hostHundredType = {19: 50, 25: 51, 24: 52, 31: 60, 26: 62}[Number(payload?.roomType)];
+      if (msgid === PUSH.ROOM_TYPE_RESULT && hostHundredType
+        && runtime.configs.some(row => Number(row.state ?? 1) === 1 && Number(row.room_type) === hostHundredType)) {
         payload = { ...payload, openHundredGame: Boolean(session?.openHundredGame),
           conf: { ...payload.conf, hundredSwitch: true } };
       }
@@ -61,7 +62,7 @@ export async function createHandler(runtime) {
   function tableIo(table) {
     const singleHundredPushes = new Set([PUSH.GAME_STATE, PUSH.DEAL_CARDS_AND_ODDS,
       PUSH.SHOWDOWN_POKERS, PUSH.PLAYER_NUM_CHANGE, PUSH.BET_BROADCAST,
-      PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE]);
+      PUSH.PLAYER_BALANCE_UPDATE, PUSH.BET_RESPONSE, PUSH.SHUFFLING_POKERS]);
     const selected = (session, msgid) => table.kind !== 'hundred' || !singleHundredPushes.has(msgid)
       || Number(session.hundredRoomId ?? session.roomId) === Number(table.roomId);
     const subscribed = (session) => table.kind === "hundred"
@@ -166,17 +167,20 @@ export async function createHandler(runtime) {
   }
 
   function hundredTable(session, body = {}) {
-    const game = gameOf(50);
+    const roomType = Number(body.roomType || 50);
+    const game = gameOf(roomType);
+    if (![50, 51, 52, 60, 62].includes(roomType) || !game) return null;
     const requestedId = Number(body.roomId);
     if (requestedId) {
       const existing = runtime.registry.getTable(requestedId, session.agentId, game.id);
-      if (existing && Number(existing.roomType) === 50) return existing;
+      if (existing && Number(existing.roomType) === roomType) return existing;
     }
     const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
-      && Number(row.room_type) === 50
+      && Number(row.room_type) === roomType
       && (requestedId ? Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0) === requestedId
-        : Number(row.play_mode) === Number(body.playMode || 1)));
-    return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), 50, session.agentId) : null;
+        : Number(row.play_mode) === Number(body.playMode ?? (roomType === 60 ? 0 : 1))
+          || (roomType === 62 && [0, 1].includes(Number(row.play_mode)) && [0, 1].includes(Number(body.playMode ?? 1)))));
+    return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), roomType, session.agentId) : null;
   }
 
   function leaveHundred(ws, session) {
@@ -373,14 +377,19 @@ export async function createHandler(runtime) {
     // The native Bairen overlay logs in independently, then sends 6105 without
     // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
     const hundredRequest = [SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
-      SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
-    if (hundredRequest && (Number(payload?.roomType) === 50
-      || (payload?.roomType == null && session.hundredGameId === gameOf(50)?.id))) {
+      SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.GR_GET_ALL_ROOMS_REQ,
+      SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
+    if (hundredRequest && ([50, 51, 52, 60, 62].includes(Number(payload?.roomType))
+      || (payload?.roomType == null && ['hundred-holdem', 'hundred-zjh', 'hundred-niuniu', 'hundred-blackjack', 'hundred-mahjong'].includes(session.hundredGameId)))) {
       const entering = msgid === SEND.ENTER;
       const registered = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
       const table = entering ? hundredTable(session, payload) : registered;
+      if (table && payload?.roomType != null && Number(payload.roomType) !== Number(table.roomType)) return;
       if (table) {
         if (entering) {
+          if (session.hundredInRoom && (session.hundredRoomId !== table.roomId || session.hundredGameId !== table.gameId)) {
+            leaveHundred(ws, session);
+          }
           session.hundredRoomId = table.roomId;
           session.hundredGameId = table.gameId;
           session.hundredInRoom = true;

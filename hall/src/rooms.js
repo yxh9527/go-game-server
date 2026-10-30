@@ -7,6 +7,11 @@ export function createRoomLogic(decode) {
 
   function filterRooms(rows, params = {}) {
     const gameType = num(params.gameType, undefined);
+    const subGameType = params.subGameType === undefined || params.subGameType === ''
+      ? undefined : num(params.subGameType, undefined);
+    const roomType = params.roomType === undefined || params.roomType === ''
+      ? (gameType === 1000 ? { 1: 50, 2: 51, 3: 52, 4: 60, 5: 62 }[subGameType] : undefined)
+      : num(params.roomType, undefined);
     const playMode = params.playMode === undefined || params.playMode === "" ? undefined : num(params.playMode, 0);
     const forceShowCard = params.forceShowCard === undefined || params.forceShowCard === ""
       ? undefined
@@ -16,6 +21,9 @@ export function createRoomLogic(decode) {
         return false;
       }
       if (gameType !== undefined && num(row.game_type, 0) !== gameType) {
+        return false;
+      }
+      if (roomType !== undefined && num(row.room_type, 0) !== roomType) {
         return false;
       }
       if (playMode !== undefined && num(row.play_mode, 0) !== playMode) {
@@ -48,7 +56,8 @@ export function createRoomLogic(decode) {
     const scored = (rows || []).filter((row) => num(row.state, 1) === 1
       && (cfgId === undefined || num(row.game_room_config_id, 0) === cfgId)
       && (roomType === undefined || num(row.room_type, 0) === roomType)
-      && (playMode === undefined || num(row.play_mode, 0) === playMode)
+      && (playMode === undefined || num(row.play_mode, 0) === playMode
+        || (num(row.room_type, 0) === 62 && [0, 1].includes(playMode) && [0, 1].includes(num(row.play_mode, 0))))
       && (smallBlind === undefined || num(row.small_blind, 0) === smallBlind)
       && (bigBlind === undefined || num(row.big_blind, 0) === bigBlind)
       && (num(row.room_type, 0) !== 19 || matchesHoldem(row, params))
@@ -90,11 +99,22 @@ export function createRoomLogic(decode) {
     return num(row.game_room_config_id, 0) * 10000 + num(row.room_index, 0);
   }
 
-  function hundredHostRoom(rows) {
+  function hundredHostRoom(rows, hundredRoomType = 50) {
     // Captured op=45 for roomType=50 opens a normal Holdem observer table.
     // Bairen is an overlay of that scene, not a roomType=50 scene.
+    const hostType = {50: 19, 51: 25, 52: 24, 60: 31, 62: 26}[Number(hundredRoomType)];
+    const hostMode = [24, 25].includes(hostType) ? 3 : 0;
+    const seeCards = row => {
+      let payload = {};
+      try { payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload || {}; } catch {}
+      return num(row.see_card_no, num(payload.seeCardNo ?? payload.qznn?.seeCardNo, 0));
+    };
     return (rows || []).filter(row => num(row.state, 1) === 1
-      && num(row.room_type, 0) === 19 && num(row.play_mode, 0) === 0)
+      && num(row.room_type, 0) === hostType && num(row.play_mode, 0) === hostMode
+      && (hostType !== 24 || seeCards(row) === 4)
+      && (hostType !== 26 || (() => {
+        try { return Number((typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload)?.maxPeople) === 4; } catch { return false; }
+      })()))
       .sort((a, b) => num(a.carry_min, 0) - num(b.carry_min, 0)
         || num(a.sort_index, 0) - num(b.sort_index, 0))[0] || null;
   }

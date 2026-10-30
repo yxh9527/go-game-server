@@ -12,6 +12,10 @@ const GAME_ENTRIES = [
   "./sgay/index.js",
   "./mahjong/index.js",
   "./hundred-holdem/index.js",
+  "./hundred-zjh/index.js",
+  "./hundred-niuniu/index.js",
+  "./hundred-blackjack/index.js",
+  "./hundred-mahjong/index.js",
 ];
 
 export async function loadGames(version) {

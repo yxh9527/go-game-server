@@ -12,7 +12,7 @@ export class HundredGame extends GameBase {
       people: 0,
       inning: 1,
       state: this.betState(),
-      roomIndex: Number(roomRow?.room_index || 1),
+      roomIndex: Number(roomRow?.room_index ?? 1),
       playerBets: new Map(),
       playerSessions: new Map(), visitors: new Set(),
       totalBetsByArea: this.createAreas(),
@@ -42,11 +42,15 @@ export class HundredGame extends GameBase {
   }
 
   betOptions(table) {
+    const odds = table.rules?.betAreaOdds || this.config.odds || {};
+    const ids = Array.isArray(table.totalBetsByArea)
+      ? table.totalBetsByArea.map(row => row.areaId)
+      : Object.keys(table.totalBetsByArea || {}).map(Number);
+    const areas = ids.map(areaId => ({ areaId, odds: Number(odds[areaId] ?? 1) }))
+      .filter(area => !this.config.rejectZeroOdds || (Number.isFinite(area.odds) && area.odds > 0));
     return { minBet: Number(table.cfg?.hundred_min_bet ?? table.rules?.minBet ?? this.config.minBet ?? 100),
       maxBet: Number(table.cfg?.hundred_max_bet ?? table.rules?.maxBet ?? this.config.defaultMaxBet ?? 100000000),
-      areas: Array.isArray(table.totalBetsByArea)
-        ? table.totalBetsByArea.map(row => ({ areaId: row.areaId, odds: this.config.odds?.[row.areaId] || 1 }))
-        : Object.keys(table.totalBetsByArea || {}).map(id => ({ areaId: Number(id), odds: table.rules?.betAreaOdds?.[id] || 1 })) };
+      areas };
   }
 
   tickRobots(ctx, now = Date.now(), rng = Math.random) {

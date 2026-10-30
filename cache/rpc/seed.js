@@ -34,6 +34,24 @@ export function seedRooms() {
     })),
     room({ game_type: 1004, room_type: 61, game_room_config_id: 6101, room_index: 26, carry_min: 100000000, name: "麻将胡了", category: "slots" }),
     room({ game_type: 1004, room_type: 63, game_room_config_id: 6301, room_index: 26, carry_min: 100000000, name: "赏金女王", category: "slots" }),
+    ...[[101, 1, '明牌红1黑1'], [5102, 2, '明牌红2黑1'], [5103, 3, '明牌红2黑2'],
+      [5104, 4, '明牌红3黑1'], [5105, 5, '全暗']].map(([id, mode, name], index) => room({
+      game_type: 1000, room_type: 51, game_room_config_id: id, play_mode: mode,
+      room_index: index + 1, hundred_min_bet: 100, hundred_max_bet: 1000000000,
+      name: '百人金花 ' + name, category: 'hundred',
+    })),
+    ...[[102, 1, '牛牛看三张'], [5202, 2, '牛牛看四张'], [5203, 3, '牛牛看二张'],
+      [5204, 4, '牛牛看一张'], [5205, 5, '牛牛全暗']].map(([id, mode, name], index) => room({
+      game_type: 1000, room_type: 52, game_room_config_id: id, play_mode: mode,
+      room_index: index + 1, hundred_min_bet: 100, hundred_max_bet: 1000000000,
+      name: '百人' + name, category: 'hundred',
+    })),
+    room({ game_type: 1000, room_type: 60, game_room_config_id: 6001, play_mode: 0,
+      room_index: 0, hundred_min_bet: 100, hundred_max_bet: 1000000000,
+      name: '百人21点', category: 'hundred' }),
+    room({ game_type: 1000, room_type: 62, game_room_config_id: 6201, play_mode: 0,
+      room_index: 0, hundred_min_bet: 100, hundred_max_bet: 1000000000,
+      name: '百人麻将', category: 'hundred' }),
     ...[
       [2501, 3, 10, 100, 2, "炸金花"],
       [16, 3, 100, 1000, 2, "炸金花"],
@@ -141,6 +159,36 @@ function room(row) {
       },
     });
     payloadObj.key = [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0].join("/");
+  }
+  if (roomType === 51) {
+    const modeNames = {1: '明牌红1黑1', 2: '明牌红2黑1', 3: '明牌红2黑2', 4: '明牌红3黑1', 5: '全暗'};
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false, roomClassification: 0,
+      ante: 0, initialBet: 0, straddle: false, seeCardNo: 0, maxBet: row.hundred_max_bet,
+      hundredParams: { gameName: modeNames[row.play_mode] + '(底注1)',
+        gameRoomConfigId: row.game_room_config_id, maxBet: row.hundred_max_bet } });
+    payloadObj.key = [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0].join('/');
+  }
+  if (roomType === 52) {
+    const modeNames = {1: '牛牛看三张', 2: '牛牛看四张', 3: '牛牛看二张', 4: '牛牛看一张', 5: '牛牛全暗'};
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false, roomClassification: 0,
+      ante: 0, initialBet: 0, straddle: false, seeCardNo: 0, maxBet: row.hundred_max_bet,
+      hundredParams: { gameName: modeNames[row.play_mode] + '(底注1)',
+        gameRoomConfigId: row.game_room_config_id, maxBet: row.hundred_max_bet,
+        specialPayoutMultiple: 10 } }); // Development default; formal multiplier is not yet confirmed.
+    payloadObj.key = [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0].join('/');
+  }
+  if (roomType === 62) {
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false, roomClassification: 0,
+      ante: 0, initialBet: 0, straddle: false, seeCardNo: 0, maxBet: row.hundred_max_bet,
+      hundredParams: { gameName: '百人麻将', gameRoomConfigId: row.game_room_config_id, maxBet: row.hundred_max_bet } });
+    payloadObj.key = [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0].join('/');
+  }
+  if (roomType === 60) {
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false, roomClassification: 0,
+      ante: 0, initialBet: 0, straddle: false, seeCardNo: 0, maxBet: row.hundred_max_bet,
+      hundredParams: { gameName: '百人21点', gameRoomConfigId: row.game_room_config_id,
+        maxBet: row.hundred_max_bet, cutIndex: 262 } });
+    payloadObj.key = [roomType, 0, 0, false, 0, 0, 0, 0, 0].join('/');
   }
   if (roomType === 25) {
     Object.assign(payloadObj, { ante: row.ante, initialBet: row.ante, straddle: false,

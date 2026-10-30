@@ -172,9 +172,9 @@ export async function createApp(runtime) {
     if (!selected) {
       return [];
     }
-    const openHundredGame = Number(selected.room_type) === 50;
-    const row = openHundredGame ? rooms.hundredHostRoom(runtime.roomStore.list()) : selected;
-    if (!row) throw new Error("No ordinary Holdem room is configured for the hundred-game host");
+    const openHundredGame = [50, 51, 52, 60, 62].includes(Number(selected.room_type));
+    const row = openHundredGame ? rooms.hundredHostRoom(runtime.roomStore.list(), selected.room_type) : selected;
+    if (!row) throw new Error('No ordinary room is configured for this hundred-game host');
     if (Number(row.room_type) === 19) assertHoldemPlayable(row);
     const domain = web.publicWsHost(req, runtime.config, runtime.env);
     const payload = rooms.enterRoomPayload(row, openHundredGame ? {} : params, {

@@ -94,9 +94,11 @@ test('shared server hundred entry, unsubscribe and exit preserve normal table id
   assert.equal(registry.session(main.ws).roomId, 700000);
   await main.send(SEND.MB_REG_ROOMS_REQ, { mulRoomTypeList: [{ roomType: 50 }], customData: 2 });
   await main.send(SEND.MB_UNREG_ROOMS_REQ, { mulRoomTypeList: [{ roomType: 50 }], customData: 2 });
-  assert.equal(registry.session(main.ws).hundredRoomIds.size, 0);
-  for (const table of registry.listAgentGameRooms(77, 'hundred-holdem')) assert.equal(table.visitors.has(13), false);
+  assert.deepEqual([...registry.session(main.ws).hundredRoomIds], [registry.session(main.ws).hundredRoomId]);
+  for (const table of registry.listAgentGameRooms(77, 'hundred-holdem'))
+    assert.equal(table.visitors.has(13), Number(table.roomId) === registry.session(main.ws).hundredRoomId);
   await main.send(SEND.EXIT, { roomType: 50 });
+  assert.equal(registry.session(main.ws).hundredRoomIds.size, 0);
   assert.equal(registry.session(main.ws).inRoom, true);
   await main.send(SEND.LOGIN_ROOM, { roomId: 700000 });
   assert.ok(main.frames.some(f => f.msgid === PUSH.ROOM_INFO));

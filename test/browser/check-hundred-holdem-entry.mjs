@@ -7,7 +7,14 @@ import WebSocket from 'ws';
 import { decodeFrame } from '../../game-server/src/codec.js';
 import { PUSH } from '../../game-server/src/messages.js';
 
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gogame-hundred-holdem-'));
+const gameId = process.argv.find(arg => arg.startsWith('--game='))?.slice(7) || 'holdem';
+assert.ok(['holdem', 'zjh', 'niuniu'].includes(gameId));
+const jinhua = gameId === 'zjh';
+const niuniu = gameId === 'niuniu';
+const roomType = niuniu ? 52 : jinhua ? 51 : 50;
+const expectedScene = niuniu ? 'Qznn' : jinhua ? 'gameZjh' : 'gameHoldem';
+const artifact = 'gogame-hundred-' + gameId;
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), artifact + '-'));
 const mode = Number(process.argv.find(arg => arg.startsWith('--mode='))?.slice(7) || 1);
 assert.ok([1, 2, 3, 4, 5].includes(mode));
 const browser = spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', [
@@ -59,7 +66,7 @@ try {
   };
   await send('Page.enable'); await send('Runtime.enable'); await send('Network.enable');
   await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-  const uid = 88000750 + mode;
+  const uid = (jinhua ? 88000850 : 88000750) + mode;
   await send('Page.navigate', { url: `http://lobby.localhost:11042/21/0?userId=${uid}&userToken=dev-${uid}&openId=${uid}&v=2.0.1279` });
   await delay(8000);
   const category = await evaluate(`(()=>{const el=document.querySelector('img[src*="category/02.webp"]');el?.parentElement.click();return !!el;})()`);
@@ -69,14 +76,26 @@ try {
   const game = await evaluate(`(()=>{const el=document.querySelector('img[src*="types/1000.png"]');el?.parentElement.click();return !!el;})()`);
   assert.ok(game, 'native hundred card game menu is available');
   await delay(3000);
+  const tab = niuniu ? '牛牛' : jinhua ? '金花' : '德州';
+  const clickedTab = await evaluate(`(()=>{const el=Array.from(document.querySelectorAll('[class*=categorySelector] li')).find(el=>el.textContent.trim()===${JSON.stringify(tab)});el?.click();return !!el;})()`);
+  assert.ok(clickedTab, 'the native ' + tab + ' category tab is available');
+  await delay(2500);
+  const listed = await evaluate(`Array.from(document.querySelectorAll('[class*=roomList] li')).map(el=>({text:el.innerText,image:el.querySelector('img')?.getAttribute('src')}))`);
+  assert.equal(listed.length, 5, 'native category displays only its five game modes');
+  assert.ok(listed.every(row=>row.text.includes(tab)), JSON.stringify(listed));
+  assert.ok(listed.every(row=>row.image.includes('/1000/' + roomType + '/')), JSON.stringify(listed));
+  console.log('CATEGORY_LIST', JSON.stringify({tab,roomType,rows:listed}));
   console.log('ROOMS', await evaluate(`Array.from(document.querySelectorAll('[class*=roomList] li')).map(e=>e.innerText)`));
-  const selected = await evaluate(`(()=>{const rows=Array.from(document.querySelectorAll('[class*=roomList] li'));const row=rows[${mode - 1}];row?.click();return row?.innerText;})()`);
+  const title = (niuniu ? ['牛牛看三张','牛牛看四张','牛牛看二张','牛牛看一张','牛牛全暗']
+    : jinhua ? ['金花明一','金花明二','金花明三','金花明四','金花全暗']
+    : ['德州暗五','德州暗二','德州暗三','德州暗四','德州全暗'])[mode - 1];
+  const selected = await evaluate(`(()=>{const row=Array.from(document.querySelectorAll('[class*=roomList] li')).find(el=>el.innerText.includes(${JSON.stringify(title)}));row?.click();return row?.innerText;})()`);
   assert.ok(selected, 'hundred Holdem rooms are listed');
   await delay(25000);
   let session;
   for (const candidate of sessions) {
     const name = await evaluate('window.cc&&cc.director.getScene()?.name', candidate);
-    console.log('SCENE', name); if (name === 'gameHoldem') session = candidate;
+    console.log('SCENE', name); if (name === expectedScene) session = candidate;
   }
   console.log('FRAMES', JSON.stringify(frames.filter(f => [1105,1205,2102,2201,2111,6105,6205,6123,6224,6227,6124,6225,2110,2205].includes(f.msgid)).map(f=>({direction:f.direction,id:f.msgid,roomType:f.payload?.roomType,roomId:f.payload?.roomId,state:f.payload?.state,rooms:f.payload?.roomInfos?.length}))));
   console.log('LOGS', JSON.stringify(logs.slice(-55)));
@@ -86,12 +105,12 @@ try {
   console.log('STATE', JSON.stringify(await ev(`(()=>{const g=__require('GlobalGameData').default;const F=__require('Facade').default;const b=F.getModule('Bairen');return {roomId:g.roomId,roomItem:g.roomItemData,openHundredGame:g.openHundredGame,isInBairenQpGame:g.isInBairenQpGame,conf:cc.app.gameRoom?._conf,module:b&&{roomType:b.roomType,roomId:b.roomId,playMode:b.playMode},nodes:Object.values(cc.game._persistRootNodes).map(n=>({name:n.name,active:n.active}))};})()`)));
   console.log('OVERLAY',await ev(`(()=>{const b=__require('Facade').default.getModule('Bairen');return {isAutoOpen:b._isAutoOpen,hundredSwitch:b._hundredSwitch,rootChildren:b._rootNode?.children.map(n=>({name:n.name,active:n.active,components:n._components.map(c=>({type:c.constructor.name,isPanelShow:c._isPanelShow}))})),sceneOptions:__require('SceneManager').default.instance?.currentOptions};})()`));
   assert.equal(await ev(`__require('GlobalGameData').default.isInBairenQpGame`), true, 'native hundred overlay opens automatically');
-  assert.ok(frames.some(f => f.direction === 'receive' && f.msgid === 6205 && f.payload.roomType === 50), 'native ENTER receives a hundred room snapshot');
+  assert.ok(frames.some(f => f.direction === 'receive' && f.msgid === 6205 && f.payload.roomType === roomType), 'native ENTER receives a hundred room snapshot');
   assert.equal(frames.find(f => f.direction === 'receive' && f.msgid === 6205).payload.playMode, mode);
   assert.ok(frames.some(f => f.direction === 'receive' && f.msgid === 6227 && f.payload.roomInfos.length === 5), 'native registration receives all five modes');
   assert.equal(errors.length, 0, 'no uncaught client exceptions');
   const shot = await send('Page.captureScreenshot');
-  fs.writeFileSync(path.join(os.tmpdir(), 'gogame-hundred-holdem-entry.png'), Buffer.from(shot.result.data, 'base64'));
+  fs.writeFileSync(path.join(os.tmpdir(), artifact + '-entry.png'), Buffer.from(shot.result.data, 'base64'));
   const until = async (check, timeout, description) => {
     const end = Date.now() + timeout;
     while (Date.now() < end) { if (await check()) return; await delay(250); }
@@ -104,9 +123,9 @@ try {
   const readCardOdds = () => ev("(()=>{const result=[],seen=new Set();function walk(n){if(!n||seen.has(n))return;seen.add(n);for(const c of n._components||[]){if(c.areaOddsLbMap&&c.roomId){const odds=[];c.areaOddsLbMap.forEach((label,id)=>odds.push({id,text:label.string,value:c._areaOddsValue?.[id]}));result.push({roomId:c.roomId,state:c.currentGameState,odds});}}for(const child of n.children||[])walk(child);}walk(cc.director.getScene());Object.values(cc.game._persistRootNodes).forEach(walk);return result;})()");
   const assertCardOdds = (card, expected) => {
     assert.ok(card, 'original multi-bet card exists');
-    assert.deepEqual(card.odds.map(row => Number(row.id)).sort(), [1, 2], 'native compact card exposes the two side odds');
+    assert.deepEqual(card.odds.map(row => Number(row.id)).sort(), niuniu ? [1,2,3,4,5,6] : [1, 2], 'native compact card exposes its legal areas');
     for (const {id, text, value} of card.odds) {
-      assert.ok(Number.isFinite(value) && value > 0, JSON.stringify({roomId:card.roomId,id,text,value}));
+      assert.ok(Number.isFinite(value) && (jinhua || niuniu ? value >= 0 : value > 0), JSON.stringify({roomId:card.roomId,id,text,value}));
       assert.equal(value, expected[id].odds);
       assert.equal(text, '1:' + expected[id].odds, 'original card renders the server odds');
     }
@@ -147,7 +166,7 @@ try {
     assertCardOdds(restoredOdds.find(c => c.roomId === room.roomId), room.hundredParams.betAreaOdds);
   }
   const clockShot = await send('Page.captureScreenshot');
-  fs.writeFileSync(path.join(os.tmpdir(), 'gogame-hundred-holdem-countdown.png'), Buffer.from(clockShot.result.data, 'base64'));
+  fs.writeFileSync(path.join(os.tmpdir(), artifact + '-countdown.png'), Buffer.from(clockShot.result.data, 'base64'));
   await until(() => publicRobotBets().length > 0, 35000, 'automatic public robot bets before any human bet');
   console.log('ROBOT_BETS', JSON.stringify({ roomId: selectedRoom, broadcasts: publicRobotBets().length,
     totals: publicRobotBets().at(-1).payload.allPlayerBets }));
@@ -155,8 +174,21 @@ try {
   console.log('CLOCKS_BETTING', JSON.stringify(await readClocks()));
   await delay(2200);
   console.log('CLOCKS_LATER', JSON.stringify(await readClocks()));
+  await until(() => ev("__require('BairenHelper').default.vm.isBetting()"), 35000, 'betting still open at click time');
+  const latestDeal = frames.filter(f => f.msgid === 6212 && f.payload.roomId === selectedRoom).at(-1)?.payload
+    || frames.find(f => f.msgid === 6205).payload;
+  if (niuniu) {
+    const visibleCount = [3,4,2,1,0][mode - 1];
+    for (const key of ['banker','a','b','c']) {
+      assert.equal(latestDeal[key].length, 5);
+      assert.equal(latestDeal[key].filter(card=>card>=0).length, visibleCount, 'native mode visibility for '+key);
+    }
+  }
+  const chosenArea = niuniu ? [1,2,3,4,5,6].find(id => latestDeal.areaOdds[id] > 0)
+    : jinhua ? [1, 2].find(id => latestDeal.areaOdds[id] > 0) : 1;
+  assert.ok(chosenArea, 'a legal side is available');
   const before = frames.length;
-  assert.equal(await ev(`(()=>{const vm=__require('BairenHelper').default.vm;vm.commandSetChipValue(100);const accepted=vm.commandBet(1);vm.commandSureBet();return accepted;})()`), true);
+  assert.equal(await ev(`(()=>{const vm=__require('BairenHelper').default.vm;vm.commandSetChipValue(100);const accepted=vm.commandBet(${chosenArea});vm.commandSureBet();return accepted;})()`), true);
   await until(() => frames.slice(before).some(f=>f.direction==='receive'&&f.msgid===6201), 5000, 'bet receipt');
   const bet = frames.slice(before).find(f=>f.direction==='receive'&&f.msgid===6201).payload;
   assert.equal(bet.code, 0, JSON.stringify(bet));
@@ -167,11 +199,19 @@ try {
   const rid = bet.roomId;
   await until(() => frames.slice(before).some(f=>f.direction==='receive'&&f.msgid===6229&&f.payload.roomId===rid), 30000, 'personal settlement');
   const result=frames.slice(before).find(f=>f.direction==='receive'&&f.msgid===6229&&f.payload.roomId===rid).payload;
-  assert.equal(result.points, bet.points + stake + result.realScore);
+  assert.equal(result.points, bet.points + stake * (niuniu ? 10 : 1) + result.realScore);
   assert.equal(Number.isFinite(result.realScore), true);
+  if (niuniu) {
+    assert.equal(new Set(Object.values(result.showdownPokers).flat()).size,20);
+    assert.equal(result.winningAreas.length,3);
+    for (const [i,key] of ['a','b','c'].entries()) {
+      assert.equal(result[key+'WinCount'],result.ways[1].ways[i+1].filter(v=>v===1).length);
+      assert.equal(result.ways[2][key+'WinCount'],result[key+'WinCount']);
+    }
+  }
   console.log('BET_AND_SETTLE',JSON.stringify({bet:bet.myBets,stake,pointsAfterBet:bet.points,pointsAfterSettlement:result.points,realScore:result.realScore}));
   await until(() => frames.slice(before).some(f=>f.direction==='receive'&&f.msgid===6204&&f.payload.roomId===rid&&f.payload.inning>result.inning), 15000, 'next round');
-  assert.equal(await ev(`cc.director.getScene().name`), 'gameHoldem', 'the game remains open after settlement');
+  assert.equal(await ev(`cc.director.getScene().name`), expectedScene, 'the game remains open after settlement');
   const historyStart = frames.length;
   await ev("__require('Facade').default.getModule('Bairen').emit(__require('BairenTypes').BairenEvent.SHOW_BAIREN_HISTORY);true");
   await until(() => frames.slice(historyStart).some(f => f.msgid === 6222), 5000, 'native history list automatically requests its latest detail');
@@ -180,11 +220,19 @@ try {
   assert.equal(historyDetail.gameRoomId, rid);
   assert.equal(historyDetail.currInning, result.inning);
   assert.deepEqual(historyDetail.showdownPokers, result.showdownPokers);
-  assert.equal(historyDetail.betDetailTableMap[1].betScore, stake);
-  assert.equal(historyDetail.betDetailTableMap[1].realScore, result.realScore);
-  const historyPanelExpr = "(()=>{const roots=[cc.director.getScene(),...Object.values(cc.game._persistRootNodes)],seen=new Set();function find(n){if(!n||seen.has(n))return null;seen.add(n);const c=(n._components||[]).find(c=>c.public_node&&c.tool_bar&&c.round_label&&c.node.activeInHierarchy);if(c)return c;for(const child of n.children||[]){const found=find(child);if(found)return found;}return null;}for(const root of roots){const c=find(root);if(c)return c;}return null;})()";
-  const readHistory = () => ev("(()=>{const c=" + historyPanelExpr + ";return c&&{round:c.round_label.string,cards:c.public_node.getChildByName('layout').childrenCount,rows:c.info_content.content.childrenCount,page:c.tool_bar.getChildByName('text_content').getChildByName('text').getComponent(cc.Label).string};})()");
-  await until(async () => (await readHistory())?.cards === 5, 5000, 'five public cards render in the original history panel');
+  assert.equal(historyDetail.betDetailTableMap[chosenArea].betScore, stake);
+  assert.equal(historyDetail.betDetailTableMap[chosenArea].realScore, result.realScore);
+  const historyPanelExpr = "(()=>{const roots=[cc.director.getScene(),...Object.values(cc.game._persistRootNodes)],seen=new Set();function find(n){if(!n||seen.has(n))return null;seen.add(n);const c=(n._components||[]).find(c=>c.other_node&&c.tool_bar&&c.round_label&&c.node.activeInHierarchy);if(c)return c;for(const child of n.children||[]){const found=find(child);if(found)return found;}return null;}for(const root of roots){const c=find(root);if(c)return c;}return null;})()";
+  const readHistory = () => ev("(()=>{const c=" + historyPanelExpr + ";return c&&{round:c.round_label.string,cards:c.public_node?.getChildByName('layout')?.childrenCount||0,sides:" + JSON.stringify(niuniu ? ['banker','a','b','c'] : ['a','b']) + ".map(name=>{const n=c.other_node.getChildByName(name);return {active:n.activeInHierarchy,cards:n.children.filter(p=>/^poker_/.test(p.name)&&p.activeInHierarchy).map(p=>({value:p._components.find(v=>typeof v.setValue==='function')?.value}))};}),rows:c.info_content.content.childrenCount,page:c.tool_bar.getChildByName('text_content').getChildByName('text').getComponent(cc.Label).string};})()");
+  await until(async () => { const ui = await readHistory(); return jinhua
+    ? ui?.sides.every(side => side.active && side.cards.length === 3)
+    : niuniu ? ui?.sides.every(side => side.active && side.cards.length === 5) : ui?.cards === 5;
+  }, 5000, 'native history renders the correct game cards');
+  if (jinhua) {
+    assert.equal(historyDetail.showdownPokers.hong.length, 3);
+    assert.equal(historyDetail.showdownPokers.hei.length, 3);
+    assert.equal(historyDetail.showdownPokers.board, undefined);
+  }
   let historyUi = await readHistory();
   assert.equal(Number(historyUi.round), result.inning);
   assert.ok(historyUi.rows > 0, 'personal betting rows render');
@@ -198,7 +246,7 @@ try {
   }
   console.log('HISTORY_UI', JSON.stringify({list:historyList.list,detail:historyDetail,ui:await readHistory()}));
   const historyShot = await send('Page.captureScreenshot');
-  fs.writeFileSync(path.join(os.tmpdir(), 'gogame-hundred-holdem-history.png'), Buffer.from(historyShot.result.data, 'base64'));
+  fs.writeFileSync(path.join(os.tmpdir(), artifact + '-history.png'), Buffer.from(historyShot.result.data, 'base64'));
   await ev("__require('Facade').default.getModule('Bairen').emit(__require('BairenTypes').BairenEvent.HIDE_BAIREN_HISTORY);true");
   assert.equal(errors.length, 0, JSON.stringify(errors.map(e=>e.exception?.description||e.text)));
   assert.equal(frames.some(f=>f.direction==='receive'&&f.msgid===0), false, 'hot modules retain valid wire message IDs');
@@ -209,7 +257,7 @@ try {
   await until(() => evaluate(`Array.from(document.querySelectorAll('[class*=gameIframe] iframe')).every(el=>getComputedStyle(el).visibility==='hidden'||getComputedStyle(el).display==='none'||!el.getClientRects().length)`), 5000, 'game iframe releases the hall');
   assert.ok(await evaluate(`Array.from(document.querySelectorAll('[class*=roomList] li')).some(el=>el.getBoundingClientRect().height>0)`), 'the original hall room list is visible after exit');
   const hallShot = await send('Page.captureScreenshot');
-  fs.writeFileSync(path.join(os.tmpdir(), 'gogame-hundred-holdem-return-hall.png'), Buffer.from(hallShot.result.data, 'base64'));
+  fs.writeFileSync(path.join(os.tmpdir(), artifact + '-return-hall.png'), Buffer.from(hallShot.result.data, 'base64'));
   assert.equal(errors.length, 0, 'exit has no uncaught client exceptions');
   console.log('PASS: native entry, five-room registration, bet, settlement, next round and exit');
 } catch (error) {

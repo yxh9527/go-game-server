@@ -14,7 +14,7 @@ test("hall allocates live empty reserves through authenticated game-server queri
   const registry = createRegistry();
   const rows = [{ game_type: 19, room_type: 19, game_room_config_id: 70, room_index: 0,
     play_mode: 0, small_blind: 10, big_blind: 20, carry_min: 500, state: 1 },
-    ...seedRooms().filter(row => row.room_type === 50)];
+    ...seedRooms().filter(row => [24, 25, 26, 31, 50, 51, 52, 60, 62].includes(row.room_type))];
   const errors = [];
   let loads = 0;
   let persists = 0;
@@ -70,6 +70,37 @@ test("hall allocates live empty reserves through authenticated game-server queri
     assert.equal(selected.data.gameRoomConfigId, 70);
     assert.equal(selected.data.openHundredGame, true);
     assert.notEqual(selected.data.domain, selected.data.hundredDomain);
+  }
+  for (const row of rows.filter(row => row.room_type === 51)) {
+    const selected = await query(45, 1, 'token-1', { gameType: '1000', roomType: '51',
+      gameRoomConfigId: String(row.game_room_config_id), playMode: String(row.play_mode) });
+    assert.equal(selected.msgCode, 200);
+    assert.equal(selected.data.roomType, 25, 'Jinhua hundred modes use the ordinary Jinhua host');
+    assert.equal(selected.data.playMode, 3);
+    assert.equal(selected.data.openHundredGame, true);
+    assert.notEqual(selected.data.domain, selected.data.hundredDomain);
+  }
+  for (const row of rows.filter(row => row.room_type === 52)) {
+    const selected = await query(45, 1, 'token-1', { gameType: '1000', roomType: '52',
+      gameRoomConfigId: String(row.game_room_config_id), playMode: String(row.play_mode) });
+    assert.equal(selected.msgCode, 200); assert.equal(selected.data.roomType, 24);
+    assert.equal(selected.data.playMode, 3); assert.equal(selected.data.openHundredGame, true);
+    assert.notEqual(selected.data.domain, selected.data.hundredDomain);
+  }
+  const list = await query(38, 1, 'token-1', { gameType: '1000', gameRoomConfigId: '', roomType: '' });
+  assert.equal(list.msgCode, 200);
+  assert.equal(list.data[0].roomInfoData.length, 17);
+  const blackjack = await query(45, 1, 'token-1', { gameType: '1000', roomType: '60', gameRoomConfigId: '6001', playMode: '0' });
+  assert.equal(blackjack.msgCode, 200); assert.equal(blackjack.data.roomType, 31);
+  assert.equal(blackjack.data.playMode, 0); assert.equal(blackjack.data.openHundredGame, true);
+  const mahjong = await query(45, 1, 'token-1', { gameType: '1000', roomType: '62', gameRoomConfigId: '6201', playMode: '1' });
+  assert.equal(mahjong.msgCode, 200); assert.equal(mahjong.data.roomType, 26);
+  assert.equal(mahjong.data.playMode, 0); assert.equal(mahjong.data.openHundredGame, true);
+  for (const roomType of [50, 51, 52, 60, 62]) {
+    const catalog = await query(38, 1, 'token-1', { gameType: '1000', gameRoomConfigId: '', roomType: String(roomType) });
+    assert.equal(catalog.msgCode, 200);
+    assert.equal(catalog.data[0].roomInfoData.length, [60, 62].includes(roomType) ? 1 : 5);
+    assert.ok(catalog.data[0].roomInfoData.every(item => item.roomType === roomType));
   }
   const table = registry.getTable(first.data.roomId, 1, "holdem");
   assert.deepEqual(table.members, []);

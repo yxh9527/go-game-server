@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HundredGame } from '../../../game-server/src/core/HundredGame.js';
 import { HundredHoldemGame } from '../../../game-server/src/games/hundred-holdem/HundredHoldemGame.js';
+import { HundredZjhGame } from '../../../game-server/src/games/hundred-zjh/HundredZjhGame.js';
+import { HundredNiuniuGame } from '../../../game-server/src/games/hundred-niuniu/HundredNiuniuGame.js';
+import { HundredBlackjackGame } from '../../../game-server/src/games/hundred-blackjack/HundredBlackjackGame.js';
+import { HundredMahjongGame } from '../../../game-server/src/games/hundred-mahjong/HundredMahjongGame.js';
+import * as mahjong from '../../../game-server/src/games/hundred-mahjong/engine.js';
+import * as blackjack from '../../../game-server/src/games/hundred-blackjack/engine.js';
+import * as niuniu from '../../../game-server/src/games/hundred-niuniu/engine.js';
+import { betNet } from '../../../game-server/src/games/hundred-niuniu/hand.js';
+import * as zjh from '../../../game-server/src/games/hundred-zjh/engine.js';
 import { BaccaratGame } from '../../../game-server/src/games/baccarat/BaccaratGame.js';
 import * as holdem from '../../../game-server/src/games/hundred-holdem/engine.js';
 import * as baccarat from '../../../game-server/src/games/baccarat/engine.js';
@@ -14,12 +23,29 @@ const policy = { initialRobots: 2, targetRobots: 2, maxRobots: 2,
   checkMinMs: 1000, checkMaxMs: 1000, betMinMs: 1000, betMaxMs: 1000,
   cooldownMinMs: 3000, cooldownMaxMs: 3000, minStayMs: 0, maxBetsPerRound: 1 };
 
+test('hundred Blackjack robots bet legal pairs, settle through shared virtual wallets and never debit a human', async t => {
+  const f = fixture(t, new HundredBlackjackGame(), 0);
+  blackjack.beginRound(f.io, f.table, f.now(), () => 0.42);
+  f.table.state = 2; f.table.phaseEndsAt = f.now() + 20000;
+  f.game.tickRobots(f.ctx); f.advance(); f.game.tickRobots(f.ctx);
+  assert.equal(f.table.playerBets.size, 2);
+  const profiles = [...f.table.hundredRobots.profiles.values()];
+  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet - 100);
+  await blackjack.settleRound(f.ctx);
+  const expected = f.table.hand.tieAreas.includes(1) ? 0 : f.table.hand.winningAreas.includes(1)
+    ? Number(100n * BigInt(Math.round(f.table.hand.areaOdds[1] * 1000)) / 1000n) : -100;
+  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet + expected);
+  assert.equal(f.human.wallet, 1000000);
+  const own = f.messages.find(m => m.uid === 42 && m.id === PUSH.SHOWDOWN_POKERS);
+  assert.equal(own.data.realScore, 0); assert.equal(own.data.blackJackAreaInfos.length, 4);
+});
+
 function fixture(t, game = new HundredHoldemGame(), mode = 1) {
   let now = 1_800_000_000_000;
   t.mock.method(Date, 'now', () => now);
   t.mock.method(Math, 'random', () => 0);
   const row = seedRooms().find(row => row.room_type === game.roomTypes[0]
-    && (game.id !== 'hundred-holdem' || row.play_mode === mode)) || {};
+    && (!['hundred-holdem', 'hundred-zjh', 'hundred-niuniu'].includes(game.id) || row.play_mode === mode)) || {};
   const table = game.createTable(700500 + mode, game.roomTypes[0], { ...row, robot_behavior: { ...policy } });
   const human = { userId: 42, wallet: 1000000 };
   const messages = [];
@@ -35,6 +61,25 @@ function fixture(t, game = new HundredHoldemGame(), mode = 1) {
   return { game, table, human, io, ctx, messages,
     advance(ms = 1000) { now += ms; }, now: () => now, hideHuman() { present = false; } };
 }
+
+test('hundred Mahjong inherits legal public robot bets, virtual settlement and personal results', async t => {
+  const f = fixture(t, new HundredMahjongGame());
+  mahjong.beginRound(f.io, f.table, f.now(), () => 0.42);
+  f.table.state = 2; f.table.phaseEndsAt = f.now() + 20000;
+  f.game.tickRobots(f.ctx); f.advance(); f.game.tickRobots(f.ctx);
+  assert.equal(f.table.playerBets.size, 2);
+  for (const bets of f.table.playerBets.values()) for (const bet of bets) assert.ok(f.table.hand.areaOdds[bet.areaId] > 0);
+  const profiles = [...f.table.hundredRobots.profiles.values()];
+  for (const p of profiles) assert.equal(p.session.wallet, p.openingWallet - 100);
+  await mahjong.settleRound(f.ctx);
+  for (const p of profiles) {
+    const result = f.table.hand.settlements.get(p.session.userId);
+    assert.equal(p.session.wallet, p.openingWallet + result.realScore);
+  }
+  assert.equal(f.human.wallet, 1000000);
+  const own = f.messages.find(m => m.uid === 42 && m.id === PUSH.SHOWDOWN_POKERS);
+  assert.equal(own.data.realScore, 0); assert.equal(own.data.showdownPokers.banker.length, 2);
+});
 
 test('new HundredGame inherits real public bets without game-specific robot orchestration', t => {
   class NewHundred extends HundredGame {
@@ -92,6 +137,55 @@ for (let mode = 1; mode <= 5; mode++) {
   });
 }
 
+for (let mode = 1; mode <= 5; mode++) {
+  test('hundred Jinhua mode ' + mode + ' robots use public legal odds and isolated settlement', async t => {
+    const f = fixture(t, new HundredZjhGame(), mode);
+    zjh.beginRound(f.io, f.table, f.now());
+    f.table.state = 2; f.table.phaseEndsAt = f.now() + 15000;
+    const options = f.game.betOptions(f.table);
+    assert.ok(options.areas.length > 0);
+    assert.ok(options.areas.every(area => area.odds > 0));
+    assert.equal(options.areas.length, Object.values(f.table.rules.betAreaOdds).filter(odds => odds > 0).length);
+    f.game.tickRobots(f.ctx); f.advance(); f.game.tickRobots(f.ctx);
+    assert.equal(f.table.playerBets.size, 2);
+    const profiles = [...f.table.hundredRobots.profiles.values()];
+    for (const p of profiles) {
+      const bets = f.table.playerBets.get(p.session.userId);
+      assert.ok(bets.every(bet => options.areas.some(area => area.areaId === bet.areaId)));
+      assert.equal(p.session.wallet, p.openingWallet - 100);
+    }
+    await zjh.settleRound(f.ctx);
+    for (const p of profiles) {
+      const bets = f.table.playerBets.get(p.session.userId);
+      const payout = bets.reduce((sum, bet) => sum + (f.table.hand.winningAreas.includes(bet.areaId)
+        ? bet.total + Math.floor(bet.total * f.table.hand.areaOdds[bet.areaId]) : 0), 0);
+      assert.equal(p.session.wallet, p.openingWallet - 100 + payout);
+    }
+    assert.equal(f.human.wallet, 1000000);
+    assert.equal(await zjh.settleRound(f.ctx), false);
+  });
+}
+
+for (let mode = 1; mode <= 5; mode++) {
+  test('hundred Niuniu mode '+mode+' robots share six-area betting, risk reserves and isolated payouts', async t => {
+    const f=fixture(t,new HundredNiuniuGame(),mode);
+    niuniu.beginRound(f.io,f.table,f.now());
+    f.table.state=2;f.table.phaseEndsAt=f.now()+15000;
+    f.game.tickRobots(f.ctx);f.advance();f.game.tickRobots(f.ctx);
+    assert.equal(f.table.playerBets.size,2);
+    const profiles=[...f.table.hundredRobots.profiles.values()];
+    for(const p of profiles)assert.equal(p.session.wallet,p.openingWallet-1000);
+    await niuniu.settleRound(f.ctx);
+    for(const p of profiles) {
+      const bets=f.table.playerBets.get(p.session.userId);
+      assert.ok(bets.every(bet=>bet.areaId>=1&&bet.areaId<=6));
+      const expected=bets.reduce((sum,bet)=>sum+betNet(f.table.hand,bet,f.table.hand.areaOdds),0);
+      assert.equal(p.session.wallet,p.openingWallet+expected);
+    }
+    assert.equal(f.human.wallet,1000000);
+    assert.equal(await niuniu.settleRound(f.ctx),false);
+  });
+}
 test('robots only bet in state 2, respect the close deadline and never exceed the per-round limit', t => {
   const f = fixture(t);
   for (const state of [0, 1, 4, 5, 6, 7]) {

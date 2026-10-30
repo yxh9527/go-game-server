@@ -7,6 +7,72 @@ import { seedRooms } from "../../cache/rpc/seed.js";
 
 const rooms = createRoomLogic(decode);
 
+test('hundred catalogs honor native subgame and explicit room type filters', () => {
+  const rows = seedRooms();
+  for (const [subGameType, roomType] of [[1, 50], [2, 51], [3, 52]]) {
+    const selected = rooms.filterRooms(rows, { gameType: '1000', subGameType: String(subGameType) });
+    assert.equal(selected.length, 5);
+    assert.ok(selected.every(row => row.room_type === roomType));
+    assert.deepEqual(rooms.filterRooms(rows, { gameType: 1000, roomType }), selected);
+  }
+  assert.equal(rooms.filterRooms(rows, { gameType: 1000, subGameType: 0 }).length, 17);
+  assert.equal(rooms.filterRooms(rows, { gameType: 1000, subGameType: 4 }).length, 1);
+});
+test('hundred Blackjack has its own category, mode zero and ordinary Blackjack host', () => {
+  const rows = seedRooms(), list = rooms.filterRooms(rows, { gameType: 1000, roomType: 60 });
+  assert.equal(list.length, 1); assert.equal(list[0].game_room_config_id, 6001);
+  assert.equal(list[0].play_mode, 0); assert.equal(rooms.findRoom(rows, JSON.parse(list[0].payload)), list[0]);
+  const host = rooms.hundredHostRoom(rows, 60);
+  assert.equal(host.room_type, 31); assert.equal(host.play_mode, 0);
+  assert.equal(rooms.hundredHostRoom(rows.filter(row => row.room_type !== 31), 60), null);
+});
+
+test('hundred Mahjong lists only Mahjong and selects a four-person speed Mahjong spectator host', () => {
+  const rows = seedRooms(), list = rooms.filterRooms(rows, { gameType: 1000, subGameType: 5 });
+  assert.equal(list.length, 1); assert.equal(list[0].room_type, 62);
+  assert.equal(list[0].game_room_config_id, 6201); assert.equal(list[0].play_mode, 0);
+  assert.equal(rooms.findRoom(rows, JSON.parse(list[0].payload)), list[0]);
+  assert.equal(rooms.findRoom(rows, { roomType: 62, playMode: 0 }), list[0]);
+  assert.equal(rooms.findRoom(rows, { roomType: 62, playMode: 1 }), list[0]);
+  assert.equal(rooms.findRoom(rows, { roomType: 62, playMode: 2 }), null);
+  assert.deepEqual(rooms.filterRooms(rows, { gameType: 1000, roomType: 62 }), list);
+  const host = rooms.hundredHostRoom(rows, 62);
+  assert.equal(host.room_type, 26); assert.equal(host.play_mode, 0); assert.equal(JSON.parse(host.payload).maxPeople, 4);
+  assert.equal(rooms.hundredHostRoom(rows.filter(row => row.room_type !== 26), 62), null);
+  assert.equal(rooms.hundredHostRoom([{ ...host, payload: '{' }], 62), null);
+});
+test('hundred Niuniu lists five modes and uses the ordinary four-card Niuniu host', () => {
+  const rows = seedRooms();
+  const list = rooms.filterRooms(rows, { gameType: 1000, roomType: 52 });
+  assert.deepEqual(list.map(row => row.play_mode), [1, 2, 3, 4, 5]);
+  for (const row of list) {
+    const payload = JSON.parse(row.payload);
+    assert.equal(payload.roomType, 52); assert.equal(payload.hundredGame, 1);
+    assert.equal(rooms.findRoom(rows, payload), row);
+  }
+  const host = rooms.hundredHostRoom(rows, 52);
+  assert.equal(host.room_type, 24); assert.equal(host.play_mode, 3); assert.equal(host.see_card_no, 4);
+  const payloadOnly = {...host}; delete payloadOnly.see_card_no;
+  assert.equal(rooms.hundredHostRoom([payloadOnly],52),payloadOnly);
+  assert.equal(rooms.hundredHostRoom(rows.filter(row => row.room_type !== 24), 52), null);
+});
+
+test('hundred Jinhua lists five native modes and selects its ordinary Jinhua host', () => {
+  const rows = seedRooms();
+  const hundred = rooms.filterRooms(rows, { gameType: 1000 }).filter(row => row.room_type === 51);
+  assert.deepEqual(hundred.map(row => row.play_mode), [1, 2, 3, 4, 5]);
+  for (const row of hundred) {
+    const payload = JSON.parse(row.payload);
+    assert.equal(payload.hundredGame, 1);
+    assert.equal(payload.roomType, 51);
+    assert.equal(rooms.findRoom(rows, payload), row);
+  }
+  const host = rooms.hundredHostRoom(rows, 51);
+  assert.equal(host.room_type, 25);
+  assert.equal(host.play_mode, 3);
+  assert.equal(rooms.hundredHostRoom(rows.filter(row => row.room_type !== 25), 51), null);
+});
+
 test('hundred Holdem lists all five modes and selects a configured ordinary host', () => {
   const rows = seedRooms();
   const hundred = rooms.filterRooms(rows, { gameType: 1000 }).filter(row => row.room_type === 50);
