@@ -3,6 +3,7 @@ import { rel } from "../rel.js";
 const GAME_ENTRIES = [
   "./holdem/index.js",
   "./baccarat/index.js",
+  "./dragon-tiger/index.js",
   "./ggl-mjhl/index.js",
   "./ggl-queen/index.js",
   "./zjh/index.js",

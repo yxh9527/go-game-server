@@ -1,0 +1,15 @@
+export default {
+  id: 'dragon-tiger', name: '百人龙虎斗', gameName: '龙虎斗', kind: 'hundred',
+  roomTypes: [59], confRoomType: 'brlhd', paramsKey: 'brlhdParams',
+  decks: 1, cutIndex: 50, reshuffleAt: 2, defaultConfigId: 172, defaultMaxBet: 100000000,
+  modeNames: { 0: '经典龙虎斗', 1: '共咪龙虎斗', 3: '明牌龙虎斗', 4: '包桌龙虎斗' },
+  betSeconds: { 0: 15, 1: 15, 3: 15, 4: 20 },
+  peekSeconds: 10, brightPeekSeconds: 10, settleSeconds: 10, shuffleSeconds: 16,
+  odds: { 1: 1, 2: 1, 3: 8, 4: 0.81, 5: 1.11, 6: 0.95, 7: 0.95,
+    8: 0.81, 9: 1.11, 10: 0.95, 11: 0.95, 15: 0.07 },
+  bankerAreas: [[1, 2, 3, 15], [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]],
+  ownerDefaults: { betTime: 20, peekTime: 10, dealer: 301, bg: 51 },
+  ownerOnlyBet: false, ownerCanFlyWithBets: true, recordSides: ['dragon', 'tiger'],
+  ownerAppearanceCooldownSeconds: 0, ownerShuffleAfterHands: 0,
+  ownerAppearance: { dealerRanges: [[301, 330], [401, 420], [501, 520]], bgRange: [51, 66] },
+};

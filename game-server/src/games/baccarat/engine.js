@@ -1,11 +1,10 @@
 import { rel } from '../../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
-const { credit, walletOf } = await rel(import.meta.url, '../../wallet/index.js', v);
+const { settleCardBets } = await rel(import.meta.url, '../../core/hundred-card-payout.js', v);
 const { makeDeck, shuffle } = await rel(import.meta.url, '../holdem/cards.js', v);
 const { baccaratValue, drawBaccarat, winningAreas, winningOdds, pointStages, supplyState } = await rel(import.meta.url, './rules.js', v);
 const { default: gameConfig } = await rel(import.meta.url, './config.js', v);
-const { hundredWalletContext } = await rel(import.meta.url, '../../core/robot.js', v);
 const pricing = await rel(import.meta.url, './odds.js', v);
 const history = await rel(import.meta.url, './history.js', v);
 const owner = await rel(import.meta.url, './table-owner.js', v);
@@ -164,6 +163,17 @@ export function baccaratConf(table) {
   };
 }
 
+export const roomConf = baccaratConf;
+export function publicState(table) {
+  return { supplyState: table.supplyState, remainCardsNum: table.remainCardsNum,
+    cutIndex: table.cutIndex, collectCardCount: table.collectCardCount,
+    dealCardCount: table.dealCardCount, dealRealCount: table.dealRealCount,
+    otherSupply: Boolean(table.otherSupply),
+    ...(table.playMode === 3 && table.preparedHand ? {
+      otherShowPoker: [table.preparedHand.player[0]], bankerShowPoker: [table.preparedHand.banker[0]],
+    } : {}) };
+}
+
 export function enterSnapshot(table, session) {
   const conf = baccaratConf(table), mine = table.playerBets.get(Number(session.userId)) || [];
   const betAreaOdds = currentOdds(table);
@@ -303,22 +313,8 @@ export function tickBaccarat(io, table) {
 }
 
 async function settleBets(io, table) {
-  const result = table.lastResult;
-  if (!result || result.settled) {
-    return;
-  }
-  result.settlements ||= new Map();
-  const participants = new Map(table.playerSessions || []);
-  const peers = new Map();
-  io.forEachPlayer(session => {
-    const uid = Number(session.userId);
-    peers.set(uid, session.ws);
-    if (!participants.has(uid)) participants.set(uid, session);
-  });
-  for (const [uid, session] of participants) {
-    const mine = table.playerBets.get(session.userId) || [];
-    let payment = result.settlements.get(uid);
-    if (!payment) {
+  return settleCardBets(io, table, {
+    calculate(table, result, mine) {
       const areaWinningScores = {}, betOdds = {};
       let realScore = 0, stake = 0;
       for (const bet of mine) {
@@ -332,46 +328,11 @@ async function settleBets(io, table) {
         realScore += net; stake += bet.total; areaWinningScores[bet.areaId] = net;
         betOdds[bet.areaId] = price / 100;
       }
-      payment = { realScore, areaWinningScores, betOdds, payout: stake + realScore, credited: false, notified: false };
-      if (!Number.isSafeInteger(payment.payout) || payment.payout < 0 || !Number.isSafeInteger(realScore)) throw new Error('Invalid baccarat payout total');
-      result.settlements.set(uid, payment);
-    }
-    if (!payment.credited) {
-      const receipt = payment.payout > 0 ? await credit(session, payment.payout, hundredWalletContext(io, session)) : { ok: true };
-      if (receipt?.ok === false) throw new Error('Baccarat payout rejected');
-      payment.credited = true;
-    }
-    if (!payment.persisted) {
-      if (mine.length) await walletOf(hundredWalletContext(io, session)).persist?.(session);
-      payment.persisted = true;
-    }
-    if (payment.notified) continue;
-    const { realScore, areaWinningScores } = payment;
-    const send = (id, payload) => {
-      if (session.bot) return;
-      if (io.sendUser) io.sendUser(uid, id, payload);
-      else if (peers.has(uid)) io.send(peers.get(uid), id, payload);
-    };
-    send(PUSH.PLAYER_BALANCE_UPDATE, { points: session.wallet });
-    send(PUSH.SHOWDOWN_POKERS, {
-      roomType: table.roomType,
-      roomId: table.roomId,
-      showdownPokers: { other: result.player, banker: result.banker },
-      showdownPoints: { other: pointStages(result.player), banker: pointStages(result.banker) },
-      winningAreas: result.areas,
-      areaWinningScores,
-      points: session.wallet,
-      realScore,
-      ...owner.snapshot(table),
-      remainCardsNum: table.remainCardsNum,
-      cutIndex: table.cutIndex,
-    });
-    send(PUSH.MB_ROOM_BET_SETTLE, { ...enterSnapshot(table, session), realScore, areaWinningScores, customData: 2 });
-    payment.notified = true;
-    if (table.visitors && !table.visitors.has(uid)) table.playerSessions?.delete(uid);
-  }
-  bankers.settle(io, table, result, table.config.bankerAreas || gameConfig.bankerAreas);
-  history.record(table, result, participants, io);
-  result.settled = true;
-  table.hundredSettledInning = table.inning;
+      return { realScore, areaWinningScores, betOdds, payout: stake + realScore, credited: false, notified: false };
+
+    },
+    resultPayload(table, result) { return { showdownPokers: { other: result.player, banker: result.banker },
+      showdownPoints: { other: pointStages(result.player), banker: pointStages(result.banker) }, ...owner.snapshot(table) }; },
+    snapshot: enterSnapshot, record: history.record, bankerAreas: table.config.bankerAreas || gameConfig.bankerAreas,
+  });
 }

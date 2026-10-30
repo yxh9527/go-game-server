@@ -201,7 +201,7 @@ export async function createHandler(runtime) {
     const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
       && Number(row.room_type) === roomType
       && (requestedId ? Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0) === requestedId
-        : Number(row.play_mode) === Number(body.playMode ?? ([53, 54, 55, 56, 57, 58, 60].includes(roomType) ? 0 : 1))
+        : Number(row.play_mode) === Number(body.playMode ?? ([53, 54, 55, 56, 57, 58, 59, 60].includes(roomType) ? 0 : 1))
           || (roomType === 62 && [0, 1].includes(Number(row.play_mode)) && [0, 1].includes(Number(body.playMode ?? 1)))));
     return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), roomType, session.agentId) : null;
   }
@@ -415,7 +415,10 @@ export async function createHandler(runtime) {
       const body = payload || {};
       const tables = subscriptions.register(session, body), customData = Number(body.customData) || 0;
       send(ws, PUSH.MB_REG_ROOMS_RES, { mulRoomTypeList: tables.map(t => ({ roomType: t.roomType, roomId: t.roomId })), customData });
-      send(ws, PUSH.MB_REGED_ROOM_INFOS, { roomInfos: tables.map(t => gameOf(t.roomType).enterSnapshot(t, session)), customData });
+      send(ws, PUSH.MB_REGED_ROOM_INFOS, { roomInfos: tables.map(t => {
+        const game = gameOf(t.roomType);
+        return game.multiRoomSnapshot?.(t, session) ?? game.enterSnapshot(t, session);
+      }), customData });
       return;
     }
     if (msgid === SEND.MB_UNREG_ROOMS_REQ) {

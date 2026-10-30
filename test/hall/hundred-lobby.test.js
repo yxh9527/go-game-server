@@ -31,7 +31,8 @@ test('hundred lobby snapshots cover every game without creating rooms or leaking
     const game = select(row.room_type), now = Date.now();
     const table = game.createTable(row.game_room_config_id * 10000 + (row.room_index || 0), row.room_type, row);
     runtime.registry.setTable(table.roomId, table, 1, game.id);
-    if (game.engine) game.engine.beginRound({ broadcast() {} }, table, now);
+    if (game.engine?.beginRound) game.engine.beginRound({ broadcast() {} }, table, now);
+    else if (game.engine?.prepareHand) game.engine.prepareHand({ broadcast() {} }, table);
     table.state = 2;
     table.phaseEndsAt = now + 12500;
     const own = game.enterSnapshot(table, { userId: 0, wallet: 0 });

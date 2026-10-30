@@ -82,7 +82,7 @@ test('static chunks render shared badges and visible cards for every hundred gam
     elements.push(element); render(element.props?.children, elements); return elements;
   }
   for (const card of cards) {
-    const module = card.roomType >= 53 && card.roomType <= 57 ? 553 : card.roomType === 58 ? 6194 : 7726;
+    const module = card.roomType >= 53 && card.roomType <= 57 ? 553 : card.roomType === 58 ? 6194 : card.roomType === 59 ? 2726 : 7726;
     const room = { ...card, extendInfo: JSON.parse(card.extendInfo) };
     const elements = render(require(module).default({ roomInfoData: [room] }));
     assert.equal(elements.filter(el => el.props?.['data-room-status']).length, 1);

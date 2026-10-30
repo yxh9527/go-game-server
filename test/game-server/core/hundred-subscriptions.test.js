@@ -114,3 +114,21 @@ test('unsubscribed, wrong-type and another agent targets reject before debit; so
   await applyCycle({ wallet: f.runtime.wallet, forEachPlayer() {}, sendUser() {} }, table, 6);
   assert.equal(f.session.wallet, 1000100); assert.equal(table.playerSessions.has(971), false);
 });
+
+test('Dragon Tiger registration and discovery project settled snapshots without changing the main peek response', async () => {
+  const f = await fixture(59), table = f.main;
+  table.state = 6; table.phaseEndsAt = Date.now() + 10000;
+  table.lastResult = { showdownPokers: { dragon: [12], tiger: [0] },
+    showdownTypes: { dragon: 13, tiger: 1 }, d: 13, t: 1, areas: [1, 4, 6, 8, 10, 15], settled: true };
+  await f.send(6123, { roomType: 59, roomIds: [table.roomId], customData: 2 });
+  const registered = f.messages.findLast(m => m.msgid === 6227).payload.roomInfos[0];
+  assert.equal(registered.state, 6); assert.equal(Object.hasOwn(registered, 'showdownPoints'), false);
+  assert.deepEqual(registered.showdownTypes, { dragon: 13, tiger: 1 });
+  await f.send(6126, { roomType: 59 });
+  const discovered = f.messages.findLast(m => m.msgid === 6230).payload.find(r => r.roomId === table.roomId);
+  assert.equal(Object.hasOwn(discovered, 'showdownPoints'), false);
+  assert.deepEqual(discovered.showdownTypes, registered.showdownTypes);
+  await f.send(6105, { roomType: 59, roomId: table.roomId, playMode: table.playMode });
+  assert.deepEqual(f.messages.findLast(m => m.msgid === 6205).payload.showdownPoints,
+    { dragon: [13], tiger: [1] });
+});

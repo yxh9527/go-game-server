@@ -21,8 +21,9 @@ export function hundredLobbySnapshot(game, table, now = Date.now()) {
     roomIndex: Number(table.cfg.room_index || 0), roomId: Number(table.roomId),
     gameStatus: Number.isFinite(Number(snapshot.state)) ? Number(snapshot.state) : 0, gameStatusStartTime: now,
     gameStatusDuration: countDown, serverNow: now,
-    ...(Number(table.roomType) === 58 && table.playMode === 4 ? { vipTableData: {
-      bg: table.baccaratOwnerSettings?.bg || 1, dealer: table.baccaratOwnerSettings?.dealer || 223,
+    ...([58, 59].includes(Number(table.roomType)) && table.playMode === 4 ? { vipTableData: {
+      bg: table.baccaratOwnerSettings?.bg || table.config?.ownerDefaults?.bg || 1,
+      dealer: table.baccaratOwnerSettings?.dealer || table.config?.ownerDefaults?.dealer || 223,
       ...(table.baccaratOwner ? { hostUid: table.baccaratOwner.uid } : {}),
     } } : {}),
     extendInfo: JSON.stringify(info),

@@ -36,6 +36,14 @@ export function seedRooms() {
       room_index: index + 1, hundred_min_bet: 100, hundred_max_bet: 100000000,
       name: name + ' ' + (index + 1), category: 'hundred', sort_index: 5800 + mode * 10 + index,
     }))),
+    // Only tables explicitly identified by captured protocols. The complete
+    // online Dragon-Tiger catalog is truncated, so do not invent its IDs.
+    ...[[172, 0, 3, '经典龙虎斗'], [163, 1, 4, '共咪龙虎斗'],
+      [5906, 3, 6, '明牌龙虎斗'], [5909, 3, 9, '明牌龙虎斗'], [5971, 4, 2, '包桌龙虎斗']]
+      .map(([id, mode, index, name]) => room({ game_type: 1003, room_type: 59,
+        game_room_config_id: id, play_mode: mode, room_index: index,
+        hundred_min_bet: 100, hundred_max_bet: 100000000,
+        name: name + ' ' + index, category: 'hundred', sort_index: 5900 + mode * 10 + index })),
     ...[[100, 1, "暗五公牌"], [5002, 2, "明三公牌"], [5003, 3, "明二公牌"],
       [5004, 4, "明一公牌"], [5005, 5, "全暗"]].map(([id, mode, name], index) => room({
       game_type: 1000, room_type: 50, game_room_config_id: id, play_mode: mode,
@@ -148,14 +156,14 @@ function room(row) {
     hundredMaxBet: row.hundred_max_bet || 0,
     key: `${roomType}/${row.small_blind || 0}/${row.big_blind || 0}`,
   };
-  if (roomType === 58) {
+  if ([58, 59].includes(roomType)) {
     const params = { gameName: row.name, gameRoomConfigId: row.game_room_config_id,
       maxBet: row.hundred_max_bet, roomIndex: row.room_index };
     Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false,
       roomClassification: 0, ante: 0, initialBet: 0, straddle: false, seeCardNo: 0,
-      brbjlParams: params, hundredParams: params,
-      key: [58, 0, 0, false, row.play_mode, 0, 0, 0, 0, row.room_index].join('/'),
-      ...(row.play_mode === 4 ? { vipTableData: { bg: 1, dealer: 223 } } : {}),
+      [roomType === 59 ? 'brlhdParams' : 'brbjlParams']: params, hundredParams: params,
+      key: [roomType, 0, 0, false, row.play_mode, 0, 0, 0, 0, row.room_index].join('/'),
+      ...(row.play_mode === 4 ? { vipTableData: roomType === 59 ? { bg: 51, dealer: 301 } : { bg: 1, dealer: 223 } } : {}),
     });
   }
   if ([53,54,55,56,57].includes(roomType)) {

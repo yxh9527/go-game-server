@@ -11,6 +11,13 @@ export const hallCardAssets = Object.freeze([
   'card-back-blue.png',
 ]);
 
+// Native hundred-room list: 60 renders showdownTypes; 62 renders tile IDs.
+// Keep the list scoped to the actual missing URLs captured in the hall log.
+export const hallRoomTileAssets = Object.freeze([
+  ...[1, 2, 3, 4].map(id => 'room/type/1000/60/' + id + '.png'),
+  ...[-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 29].map(id => 'room/type/1000/62/' + id + '.png'),
+]);
+
 function validateImage(bytes, name) {
   const valid = name.endsWith('.png')
     ? bytes.length >= 33 && bytes.subarray(0, 8).toString('hex') === '89504e470d0a1a0a'
@@ -23,7 +30,7 @@ function validateImage(bytes, name) {
 }
 
 export async function syncHallCardAssets({ root = path.join(repository, 'static/hall'), source,
-  audit = false, fetcher = fetch, onProgress = () => {} } = {}) {
+  audit = false, includeRoomTiles = false, fetcher = fetch, onProgress = () => {} } = {}) {
   let base;
   if (source) {
     base = new URL(source);
@@ -33,10 +40,12 @@ export async function syncHallCardAssets({ root = path.join(repository, 'static/
     }
   }
   if (!audit && !base) throw new Error('Specify --source <public hall origin> or --audit');
-  const directory = path.resolve(root, 'l01/img/cards/small');
-  const report = { outputDirectory: directory, expected: hallCardAssets.length,
+  const directory = path.resolve(root, includeRoomTiles ? 'l01/img' : 'l01/img/cards/small');
+  const assets = includeRoomTiles
+    ? [...hallCardAssets.map(name => 'cards/small/' + name), ...hallRoomTileAssets] : [...hallCardAssets];
+  const report = { outputDirectory: directory, expected: assets.length,
     existing: 0, downloaded: [], missing: [], errors: [] };
-  const queue = [...hallCardAssets];
+  const queue = [...assets];
   async function syncOne(name) {
     const destination = path.join(directory, name);
     try {
@@ -47,13 +56,13 @@ export async function syncHallCardAssets({ root = path.join(repository, 'static/
       if (error.code !== 'ENOENT') throw error;
     }
     if (audit) { report.missing.push(name); return; }
-    const response = await fetcher(new URL('l01/img/cards/small/' + name, base), {
+    const response = await fetcher(new URL((includeRoomTiles ? 'l01/img/' : 'l01/img/cards/small/') + name, base), {
       redirect: 'follow', signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + name);
     const bytes = Buffer.from(await response.arrayBuffer());
     validateImage(bytes, name);
-    await fs.mkdir(directory, { recursive: true });
+    await fs.mkdir(path.dirname(destination), { recursive: true });
     try {
       await fs.writeFile(destination, bytes, { flag: 'wx' });
       report.downloaded.push(name); onProgress(name);
@@ -79,6 +88,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const args = process.argv.slice(2);
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--audit') options.audit = true;
+      else if (args[i] === '--all') options.includeRoomTiles = true;
       else if (args[i] === '--source' && args[i + 1] && !args[i + 1].startsWith('--')) options.source = args[++i];
       else throw new Error('Unknown or incomplete argument: ' + args[i]);
     }
