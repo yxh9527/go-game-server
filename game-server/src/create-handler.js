@@ -27,6 +27,7 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
+    if (table.kind === 'slots') table.config = gameOf(table.roomType).config;
     if (["zjh", "niuniu", "sss", "blackjack", "sgay", "mahjong"].includes(table.gameId)) {
       // Refresh only room policy; preserve the resident hand, seats and clocks.
       table.roomRules = gameOf(table.roomType).roomPolicy(table);
@@ -150,7 +151,8 @@ export async function createHandler(runtime) {
   }
 
   function pushPoint(ws, session) {
-    send(ws, PUSH.GAME_POINT_UPDATE, { uid: session.userId, point: session.wallet });
+    send(ws, PUSH.GAME_POINT_UPDATE, gameOf(runtime.registry.getTable(session.roomId, session.agentId, session.gameId)?.roomType)?.kind === 'slots'
+      ? Number(session.wallet) : { uid: session.userId, point: session.wallet });
   }
 
   function sendWalletPoint(ws, session) {
@@ -596,9 +598,9 @@ export async function createHandler(runtime) {
       await expireRoom(table);
     }
     if (handled && game.kind === "normal") pool.expand();
-    if (handled && (msgid === SEND.GGL_BUY || msgid === SEND.SEND_CARRY_SCORE || msgid === SEND.SEND_STANDUP)) {
-      pushPoint(ws, session);
-      await persist(session);
+    if (handled && ([SEND.GGL_BUY, SEND.GGL_PURCHASE, SEND.SEND_CARRY_SCORE, SEND.SEND_STANDUP].includes(msgid))) {
+      if (messageGame.kind === 'slots') sendWalletPoint(ws, session);
+      else { pushPoint(ws, session); await persist(session); }
     }
   }
 
@@ -610,13 +612,16 @@ export async function createHandler(runtime) {
     if (session.leaveTask) return session.leaveTask;
     const task = (async () => {
       if (table.kind !== "hundred") leaveHundred(ws, session);
+      await game.beforeLeave?.(ctxOf(ws, session, table));
       await game.afterRound?.(ctxOf(ws, session, table));
       session.inRoom = false;
       const cash = game.onLeave(ctxOf(ws, session, table));
-      if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
-      else session.wallet += Number(cash || 0);
+      if (table.kind !== 'slots') {
+        if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
+        else session.wallet += Number(cash || 0);
+      }
       pushPoint(ws, session);
-      await persist(session);
+      if (table.kind !== 'slots') await persist(session);
       await game.afterRound?.(ctxOf(ws, session, table));
       // The original client returns to its hall only after receiving 2205
       // for its own uid/roomId. Spectators need the same receipt as players.

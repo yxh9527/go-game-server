@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SeatGame } from "../../../game-server/src/core/SeatGame.js?v=0";
 import { HundredGame } from "../../../game-server/src/core/HundredGame.js?v=0";
-import { SlotsGame } from "../../../game-server/src/core/SlotsGame.js";
+import { SlotsGame } from "../../../game-server/src/core/SlotsGame.js?v=0";
 import holdem from "../../../game-server/src/games/holdem/index.js";
 import baccarat from "../../../game-server/src/games/baccarat/index.js";
 import mjhl from "../../../game-server/src/games/ggl-mjhl/index.js";

@@ -12,6 +12,7 @@ export async function createApp(runtime) {
   const roomMod = await rel(import.meta.url, "./rooms.js", v);
   const web = await rel(import.meta.url, "./web.js", v);
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
+  const smartBet = await rel(import.meta.url, "./smart-bet.js", v);
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const populationMod = await rel(import.meta.url, "./room-population.js", v);
   const { assertHoldemPlayable } = await rel(import.meta.url, "../../shared/holdem-room.js", v);
@@ -60,6 +61,10 @@ export async function createApp(runtime) {
       ...req.query,
     };
     const op = decode.num(params.op, 0);
+    if (op === 71) {
+      res.set("Cache-Control", "no-store").json(smartBet.smartBetResponse(params));
+      return;
+    }
     if (op === 29) {
       res.set("Cache-Control", "no-store").json(await fairCode.requestFairCode(runtime, params));
       return;

@@ -15,7 +15,7 @@ class DemoSlots extends SlotsGame {
   }
 }
 
-test("SlotsGame buy and state go through base onMessage", () => {
+test("SlotsGame buy and state go through base onMessage", async () => {
   const game = new DemoSlots();
   const table = game.createTable(61, 61, {});
   const session = { userId: 1, wallet: 500 };
@@ -27,8 +27,8 @@ test("SlotsGame buy and state go through base onMessage", () => {
       sent.push({ id, payload });
     },
   };
-  game.onMessage(ctx, SEND.GGL_STATE, {});
-  game.onMessage(ctx, SEND.GGL_BUY, { faceValue: 100 });
+  await game.onMessage(ctx, SEND.GGL_STATE, {});
+  await game.onMessage(ctx, SEND.GGL_BUY, { faceValue: 100 });
   assert.equal(session.wallet, 400);
   assert.ok(sent.some((m) => m.id === PUSH.GGL_STATE));
   assert.ok(sent.some((m) => m.id === PUSH.GGL_RESULT && m.payload.walletAmount === 400));

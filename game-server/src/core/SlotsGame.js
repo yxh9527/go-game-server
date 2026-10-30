@@ -32,20 +32,20 @@ export class SlotsGame extends GameBase {
     };
   }
 
-  onMessage(ctx, msgid, payload) {
+  async onMessage(ctx, msgid, payload) {
     if (msgid === SEND.GGL_STATE) {
-      ctx.send(PUSH.GGL_STATE, this.playerState(ctx.table, ctx.session));
+      ctx.send(PUSH.GGL_STATE, await this.playerState(ctx.table, ctx.session, ctx));
       return true;
     }
     if (msgid === SEND.GGL_BUY) {
-      const result = this.buy(ctx, payload || {});
+      const result = await this.buy(ctx, payload || {});
       if (result) {
         ctx.send(PUSH.GGL_RESULT, result);
       }
       return true;
     }
-    if (msgid === SEND.RETURN_100_RECORD) {
-      ctx.send(PUSH.RETURN_100_RECORD, this.historyPayload(ctx.table));
+    if ([SEND.REQUEST_100_RECORD, SEND.RETURN_100_RECORD].includes(msgid)) {
+      ctx.send(PUSH.RETURN_100_RECORD, await this.historyPayload(ctx.table, ctx.session, ctx));
       return true;
     }
     return false;

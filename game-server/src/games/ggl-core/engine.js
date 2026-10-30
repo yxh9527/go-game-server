@@ -1,132 +1,56 @@
-import { PUSH } from "../../messages.js";
-import { credit, debit } from "../../wallet/index.js";
+import { rel } from '../../rel.js';
+import { env } from '../../../../shared/rpc/env.js';
+const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { ERROR, kindOf, prizeFromMask } = await rel(import.meta.url, './rules.js', v);
+const local = env.isDev ? await rel(import.meta.url, '../../../../cache/game-server/scratch-tickets.js', v) : null;
+const history = await rel(import.meta.url, './history.js', v);
+export { prizeFromMask };
 
-export function createScratchTable(roomId, roomType, roomRow, gameConfig) {
-  return {
-    gameId: gameConfig.id,
-    kind: gameConfig.kind,
-    roomId: Number(roomId),
-    roomType: Number(roomType) || gameConfig.roomTypes[0],
-    cfg: roomRow || {},
-    config: gameConfig,
-    gameRoomId: Number(roomId) + 1000000,
-    history: [],
-    roomIndex: Number(roomRow?.room_index || gameConfig.defaultRoomIndex || 0),
-  };
+export function createScratchTable(roomId, roomType, roomRow, config) {
+  return { gameId: config.id, kind: config.kind, roomId: Number(roomId), roomType: Number(roomType) || config.roomTypes[0],
+    cfg: roomRow || {}, config, gameRoomId: Number(roomId) + 1000000,
+    roomIndex: Number(roomRow?.room_index ?? config.defaultRoomIndex ?? 0) };
 }
-
 export function scratchConf(table) {
   const cfg = table.config;
-  return {
-    roomType: cfg.confRoomType,
-    gglParams: {
-      gameName: cfg.gameName,
-      gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
-      maxBet: Number(table.cfg?.hundred_max_bet || cfg.defaultMaxBet),
-      roomIndex: table.roomIndex,
-      title: cfg.title,
-    },
+  return { roomType: cfg.confRoomType, playMode: 0,
     gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
-    playMode: 0,
-  };
+    gglParams: { gameName: cfg.gameName, title: cfg.title,
+      gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
+      maxBet: Number(table.cfg?.hundred_max_bet || cfg.defaultMaxBet), roomIndex: table.roomIndex } };
 }
-
-export function scratchState(table, session) {
-  const cfg = table.config;
-  return {
-    code: 0,
-    roomId: table.roomId,
-    gameRoomId: table.gameRoomId,
-    roomTypeCode: table.roomType,
-    pendingTickets: [],
-    walletAmount: session.wallet,
-    winMultipliers: cfg.winMultipliers,
-    denominations: cfg.denominations,
-    accumulatedWin: session.accumulatedWin || 0,
-    accumulatedWinByKind: session.accumulatedWinByKind || { GGL1: 0, GGL2: 0 },
-  };
-}
-
-export function prizeFromMask(huMask, prizeTiers) {
-  const counts = new Map();
-  for (const n of huMask) {
-    counts.set(n, (counts.get(n) || 0) + 1);
+function service(ctx) {
+  if (ctx.runtime?.scratchTickets) return ctx.runtime.scratchTickets;
+  if (local && ctx.runtime?.env !== 'prod') {
+    // Resident owner preserves inventory and wallet tasks across hot replacement.
+    const owner = ctx.runtime || ctx.table;
+    return local.createScratchTickets({ resident: owner.scratchTicketState ||= {} });
   }
-  const huCount = Math.max(0, ...counts.values());
-  const hit = (prizeTiers || []).find((item) => huCount >= item.min);
-  return {
-    huCount,
-    multiplier: hit?.multiplier || 0,
-    prizeTier: hit?.tier || "NONE",
-  };
+  throw Object.assign(new Error('Production scratch ticket service is not configured'), { code: ERROR.STORAGE });
 }
-
-export function buyTicket(table, session, body, host) {
-  const cfg = table.config;
-  const faceValue = Number(body?.faceValue || 100);
-  const kind = String(body?.kind || "ggl1").toLowerCase();
-  if (faceValue <= 0 || !debit(session, faceValue, host).ok) {
-    return { ...scratchState(table, session), code: 1, winAmount: 0, prizeTier: "NONE" };
+function base(table, session) {
+  return { code: 0, roomId: table.roomId, gameRoomId: table.gameRoomId,
+    roomTypeCode: table.roomType, walletAmount: Number(session.wallet) };
+}
+export async function scratchRequest(ctx, method, body = {}) {
+  const { table, session } = ctx;
+  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  try {
+    if (body.kind !== undefined && body.kind !== kindOf(table)) throw Object.assign(new Error('Wrong ticket kind'), { code: ERROR.INVALID });
+    const result = await service(ctx)[method](ctx, body);
+    if (!result || typeof result !== 'object' || !Number.isInteger(result.code)) throw new Error('Scratch service returned no valid result');
+    return { ...base(table, session), ...result };
+  } catch (err) {
+    ctx.runtime?.log?.error?.('scratch ' + method + ' failed', err?.message || String(err));
+    return { ...base(table, session), code: Object.values(ERROR).includes(err?.code) ? err.code : ERROR.STORAGE,
+      pendingTickets: [], denominations: table.config.denominations.slice(), winMultipliers: table.config.winMultipliers.slice(),
+      accumulatedWin: 0, accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
+      newTickets: [], failedItems: [], matchedSerials: [], searchType: body.searchType, purchaseMode: body.purchaseMode };
   }
-  const huMask = Array.from({ length: cfg.maskSize || 20 }, () => 2 + Math.floor(Math.random() * 9));
-  const { huCount, multiplier, prizeTier } = prizeFromMask(huMask, cfg.prizeTiers);
-  const winAmount = Math.floor(faceValue * multiplier);
-  credit(session, winAmount, host);
-  session.accumulatedWin = (session.accumulatedWin || 0) + winAmount;
-  const kindKey = kind.toUpperCase();
-  session.accumulatedWinByKind = session.accumulatedWinByKind || { GGL1: 0, GGL2: 0 };
-  session.accumulatedWinByKind[kindKey] = (session.accumulatedWinByKind[kindKey] || 0) + winAmount;
-  const now = new Date();
-  const stamp = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-  const serialFull = `${kind}-${stamp}-${table.gameRoomId}-${session.userId}-${table.history.length + 1}`;
-  const result = {
-    code: 0,
-    roomId: table.roomId,
-    gameRoomId: table.gameRoomId,
-    roomTypeCode: table.roomType,
-    serialFull,
-    huCount,
-    multiplier,
-    winAmount,
-    prizeTier,
-    huMask,
-    walletAmount: session.wallet,
-    gglKind: kindKey,
-    accumulatedWin: session.accumulatedWin,
-    accumulatedWinByKind: session.accumulatedWinByKind,
-  };
-  table.history.unshift({
-    huCount,
-    amount: winAmount - faceValue,
-    huMask,
-    faceValue,
-    multiplier,
-    roomType: table.roomType,
-    serialNo: serialFull,
-  });
-  table.history = table.history.slice(0, 100);
-  return result;
 }
-
-export function onScratchJoin(send, table) {
-  send(PUSH.ROOM_TYPE_RESULT, {
-    roomId: table.roomId,
-    roomType: table.roomType,
-    conf: scratchConf(table),
-  });
-}
-
-export function onScratchState(send, table, session) {
-  send(PUSH.GGL_STATE, scratchState(table, session));
-}
-
-export function onScratchBuy(send, table, session, body) {
-  send(PUSH.GGL_RESULT, buyTicket(table, session, body || {}));
-}
-
-export function onScratchHistory(send, table) {
-  send(PUSH.RETURN_100_RECORD, {
-    gameRoomId: table.gameRoomId,
-    winInfo: table.history,
-  });
+export function scratchState(table, session, ctx = {}) { return scratchRequest({ ...ctx, table, session }, 'state'); }
+export function buyTicket(table, session, body, ctx = {}) { return scratchRequest({ ...ctx, table, session }, 'reveal', body); }
+export async function scratchHistory(ctx) {
+  if (local && ctx.runtime?.env !== 'prod') return { gameRoomId: ctx.table.gameRoomId, winInfo: await service(ctx).history(ctx) };
+  return history.list(ctx);
 }
