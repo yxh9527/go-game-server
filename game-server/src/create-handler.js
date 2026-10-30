@@ -184,6 +184,10 @@ export async function createHandler(runtime) {
     return table;
   }
 
+  function registeredHundredGame(session) {
+    return runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId)?.kind === 'hundred';
+  }
+
   function hundredTable(session, body = {}) {
     const roomType = Number(body.roomType || 50);
     const game = gameOf(roomType);
@@ -196,7 +200,7 @@ export async function createHandler(runtime) {
     const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
       && Number(row.room_type) === roomType
       && (requestedId ? Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0) === requestedId
-        : Number(row.play_mode) === Number(body.playMode ?? ([58, 60].includes(roomType) ? 0 : 1))
+        : Number(row.play_mode) === Number(body.playMode ?? ([53, 54, 55, 56, 57, 58, 60].includes(roomType) ? 0 : 1))
           || (roomType === 62 && [0, 1].includes(Number(row.play_mode)) && [0, 1].includes(Number(body.playMode ?? 1)))));
     return row ? ensureTable(Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0), roomType, session.agentId) : null;
   }
@@ -429,11 +433,11 @@ export async function createHandler(runtime) {
     }
     // The native Bairen overlay logs in independently, then sends 6105 without
     // 2102. Its room selection must not replace the normal Holdem roomId/gameId.
-    const hundredRequest = [SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
+    const hundredRequest = [6107, 6111, SEND.ENTER, SEND.EXIT, SEND.BET, SEND.MB_REG_ROOMS_REQ,
       SEND.MB_UNREG_ROOMS_REQ, SEND.MB_ROOM_BET_REQ, SEND.GR_GET_ALL_ROOMS_REQ,
       SEND.REQUEST_100_RECORD, SEND.REQUEST_ONE_RECORD].includes(msgid);
     if (hundredRequest && (gameOf(payload?.roomType)?.kind === 'hundred'
-      || (payload?.roomType == null && ['hundred-holdem', 'hundred-zjh', 'hundred-niuniu', 'hundred-blackjack', 'hundred-mahjong'].includes(session.hundredGameId)))) {
+      || (payload?.roomType == null && registeredHundredGame(session)))) {
       const entering = msgid === SEND.ENTER;
       const registered = runtime.registry.getTable(session.hundredRoomId, session.agentId, session.hundredGameId);
       const table = entering ? hundredTable(session, payload) : registered;

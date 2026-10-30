@@ -52,6 +52,10 @@ export function seedRooms() {
     room({ game_type: 1000, room_type: 62, game_room_config_id: 6201, play_mode: 0,
       room_index: 0, hundred_min_bet: 100, hundred_max_bet: 1000000000,
       name: '百人麻将', category: 'hundred' }),
+    ...[[53,103,'奔驰宝马'],[54,104,'森林舞会'],[55,105,'飞禽走兽'],[56,106,'麻将转了'],[57,107,'趣味捕鱼']]
+      .map(([type,id,name]) => room({ game_type: 1001, room_type: type, game_room_config_id: id,
+        play_mode: 0, room_index: 0, hundred_min_bet: 100, hundred_max_bet: 100000000,
+        name, category: 'hundred' })),
     ...[
       [2501, 3, 10, 100, 2, "炸金花"],
       [16, 3, 100, 1000, 2, "炸金花"],
@@ -134,6 +138,13 @@ function room(row) {
     hundredMaxBet: row.hundred_max_bet || 0,
     key: `${roomType}/${row.small_blind || 0}/${row.big_blind || 0}`,
   };
+  if ([53,54,55,56,57].includes(roomType)) {
+    const key = {53:'bcbm',54:'slwh',55:'fqzs',56:'mjzl',57:'qwby'}[roomType];
+    const params = { gameName: row.name, gameRoomConfigId: row.game_room_config_id,
+      maxBet: row.hundred_max_bet, roomIndex: row.room_index || 0 };
+    Object.assign(payloadObj, { hundredGame: 1, openHundredGame: false, maxBet: row.hundred_max_bet,
+      hundredParams: params, [key + 'Params']: params });
+  }
   if (roomType === 19) {
     Object.assign(payloadObj, { straddle: row.straddle ?? false, initialBet: row.initial_bet ?? row.big_blind,
       roomClassification: row.room_classification ?? 2, aofBet: row.aof_bet ?? 0,

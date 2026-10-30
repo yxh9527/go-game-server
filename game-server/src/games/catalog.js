@@ -16,6 +16,11 @@ const GAME_ENTRIES = [
   "./hundred-niuniu/index.js",
   "./hundred-blackjack/index.js",
   "./hundred-mahjong/index.js",
+  "./arcade-bcbm/index.js",
+  "./arcade-slwh/index.js",
+  "./arcade-fqzs/index.js",
+  "./arcade-mjzl/index.js",
+  "./arcade-qwby/index.js",
 ];
 
 export async function loadGames(version) {

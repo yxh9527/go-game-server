@@ -51,7 +51,7 @@ export function createBairenEngine(adapter) {
       ...adapter.statistics?.(table),
       systemInningScore: table.systemInningScore || 0, systemTodayTotalScore: table.systemTodayTotalScore || 0,
       winType: 0, waitingNextRound: table.state >= PHASE.SETTLING ? Math.max(0, table.phaseEndsAt - now) : 0,
-      consecutiveWinCounts: {}, maintenance: false, forcedWin: false,
+      consecutiveWinCounts: table.consecutiveWinCounts || {}, maintenance: false, forcedWin: false,
       cardColor: table.cardColor, dealPokers: hand ? visibleCards(hand, table.rules) : adapter.emptyCards(),
       ...(adapter.snapshotCards?.(hand ? visible : adapter.emptyCards()) || {}),
       ...(hand && table.state >= PHASE.DEALING && table.state < PHASE.SHOWDOWN ? {
@@ -73,7 +73,8 @@ export function createBairenEngine(adapter) {
     io.broadcast(PUSH.MB_SNC_ROOM_STATE, payload);
     io.broadcast(PUSH.GAME_STATE, { state: table.state, inning: table.inning, roomType: table.roomType,
       roomId: table.roomId, ways: roadSnapshot(table), cardColor: table.cardColor, ...adapter.statistics?.(table),
-      systemInningScore: table.systemInningScore || 0, systemTodayTotalScore: table.systemTodayTotalScore || 0 });
+      systemInningScore: table.systemInningScore || 0, systemTodayTotalScore: table.systemTodayTotalScore || 0,
+      countDown: Math.max(0, table.phaseEndsAt - Date.now()), consecutiveWinCounts: table.consecutiveWinCounts || {} });
   }
 
   function beginRound(io, table, now = Date.now(), rng = Math.random) {
@@ -82,8 +83,8 @@ export function createBairenEngine(adapter) {
     table.hand.betReserveFactor = table.config.betBalanceFactor || 1;
     adapter.prepareRound?.(table, table.hand);
     table.hand.createdAt = now;
-    table.state = PHASE.DEALING;
-    table.phaseEndsAt = now + (adapter.dealSeconds || 1) * 1000;
+    table.state = adapter.startBetting ? PHASE.BETTING : PHASE.DEALING;
+    table.phaseEndsAt = now + (adapter.startBetting ? table.config.betSeconds || 20 : adapter.dealSeconds || 1) * 1000;
     table.totalBetsByArea = emptyTotals();
     table.playerBets.clear();
     table.cardColor = table.inning % 2;
@@ -102,7 +103,7 @@ export function createBairenEngine(adapter) {
         betAreaIds: current.map(row => row.areaId) };
       io.sendUser?.(session.userId, responseId, payload);
     };
-    if (table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
+    if (table.hand?.cancelTask || table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
       || (body.roomId != null && Number(body.roomId) !== Number(table.roomId))) {
       result(1);
       return false;
@@ -153,6 +154,40 @@ export function createBairenEngine(adapter) {
     return true;
   }
 
+  async function cancelBets(ctx, body = {}) {
+    const { table, session, io } = ctx;
+    const uid = Number(session.userId), hand = table.hand;
+    const respond = (code, canceledIds = []) => io.sendUser?.(uid, 6211, { code, areaIds: canceledIds,
+      roomType: table.roomType, roomId: table.roomId, points: session.wallet,
+      myBets: table.playerBets.get(uid) || [], myTotalBets: table.playerBets.get(uid) || [],
+      betAreaIds: (table.playerBets.get(uid) || []).map(b => b.areaId) });
+    if (!hand || hand.cancelTask || hand.settling || table.state !== PHASE.BETTING
+      || Date.now() >= table.phaseEndsAt || Number(body.roomType) !== Number(table.roomType)
+      || body.roomId != null && Number(body.roomId) !== Number(table.roomId)
+      || !Array.isArray(body.areaIds) || body.areaIds.some(id => !areaIds.includes(Number(id)))) {
+      respond(100085); return true;
+    }
+    const ids = new Set(body.areaIds.map(Number)), current = table.playerBets.get(uid) || [];
+    const canceled = current.filter(b => ids.has(b.areaId));
+    const refund = canceled.reduce((sum, bet) => sum + bet.total * (hand.betReserveFactor || 1), 0);
+    if (!refund) { respond(0); return true; }
+    const serial = hand.cancelSerial = (hand.cancelSerial || 0) + 1;
+    // Block phase advancement until wallet and aggregate bets agree.
+    const task = Promise.resolve().then(async () => {
+      const result = await credit(session, refund, hundredWalletContext(ctx, session),
+        { key: 'hundred-cancel:' + table.agentId + ':' + table.roomId + ':' + table.inning + ':' + uid + ':' + serial });
+      if (result?.ok === false) { respond(100085); return; }
+      table.playerBets.set(uid, current.filter(b => !ids.has(b.areaId)));
+      for (const bet of canceled) table.totalBetsByArea[bet.areaId] -= bet.total;
+      respond(0, canceled.map(b => b.areaId));
+      io.broadcast(PUSH.BET_BROADCAST, { roomType: table.roomType, roomId: table.roomId,
+        allPlayerBets: areaIds.map(areaId => ({ areaId, total: table.totalBetsByArea[areaId] })) });
+    }).finally(() => { hand.cancelTask = null; });
+    hand.cancelTask = task;
+    await task;
+    return true;
+  }
+
   function resultForBets(table, bets) {
     const scores = {};
     let net = 0;
@@ -170,7 +205,7 @@ export function createBairenEngine(adapter) {
 
   async function settleRound(ctx) {
     const { table, io } = ctx;
-    if (!table.hand || table.hand.settled || table.hand.settling) return false;
+    if (!table.hand || table.hand.cancelTask || table.hand.settled || table.hand.settling) return false;
     const hand = table.hand;
     hand.settling = true;
     try {
@@ -230,7 +265,7 @@ export function createBairenEngine(adapter) {
       }
       table.lastResult = { inning: table.inning, winningAreas: hand.winningAreas.slice(), winner: hand.winner };
       table.state = PHASE.SETTLING;
-      table.phaseEndsAt = Date.now() + 3000;
+      table.phaseEndsAt = Date.now() + (adapter.settleSeconds || 3) * 1000;
       pushRoomState(io, table, { showdownPokers: cards, showdownTypes: rankTypes,
         winningAreas: hand.winningAreas });
       return true;
@@ -240,6 +275,7 @@ export function createBairenEngine(adapter) {
   }
 
   function tick(io, table, now = Date.now(), ctx = {}) {
+    if (table.hand?.cancelTask) return;
     if (PHASE.SHUFFLING != null && table.state === PHASE.SHUFFLING) {
       if (now < table.phaseEndsAt) return;
       table.state = PHASE.IDLE;
@@ -308,5 +344,5 @@ export function createBairenEngine(adapter) {
     }
   }
 
-  return { PHASE, historyList, historyDetail, configuredOdds, roadSnapshot, createHand, visibleCards, resultCards, betAreaTotals, roomSnapshot, beginRound, acceptBet, settleRound, tick };
+  return { PHASE, historyList, historyDetail, configuredOdds, roadSnapshot, createHand, visibleCards, resultCards, betAreaTotals, roomSnapshot, beginRound, acceptBet, cancelBets, settleRound, tick };
 }
