@@ -1,6 +1,4 @@
 export const prodDeps = {
-  manager: null,
-  player: null,
   redis: null,
 };
 

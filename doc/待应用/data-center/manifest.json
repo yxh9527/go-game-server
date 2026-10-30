@@ -1,0 +1,57 @@
+[
+  {
+    "relative": "micro_service/services/gogame.pb.go",
+    "originalHash": null,
+    "stagedHash": "0fa527f412d33edef0dcd67e56a77695b8b39f1657cbc69dcae36908471337a1"
+  },
+  {
+    "relative": "micro_service/services/gogame_grpc.pb.go",
+    "originalHash": null,
+    "stagedHash": "4629ab2b2520ec5f8e1cda6a1d1f175ad80769f2fc7e1b6a1405c0c893650a9e"
+  },
+  {
+    "relative": "micro_service/proto/gogame.proto",
+    "originalHash": null,
+    "stagedHash": "de9492b67a14c9088ca6e7eae84b80066c4c0f6730d45eb53af53a041771da1f"
+  },
+  {
+    "relative": "data-center/rpc/server.go",
+    "originalHash": "926b6fd3edbd73aa59915040941d04ba2f4d9193af2f5f7bc4f8de0d4e29d097",
+    "stagedHash": "b6ff3e19fdd00c86d9d4d643f7d053e72b53550c632d8dfc93ce6e4074983b3a"
+  },
+  {
+    "relative": "data-center/rpc/service_gogame.go",
+    "originalHash": null,
+    "stagedHash": "483be0a34810e450277a07609d2be8c84bbb0505992ad59b648d63a93480b7e4"
+  },
+  {
+    "relative": "data-center/rpc/service_gogame_test.go",
+    "originalHash": null,
+    "stagedHash": "30e379f7636caad6d657410d1c2a60abb1d003c44aaa08959f794987ee136ee6"
+  },
+  {
+    "relative": "data-center/dao/gogame.go",
+    "originalHash": null,
+    "stagedHash": "7e8a11e4a20b45117acc627e4652753bbeeb70dbc92d4e89c5145cc8f3cfb45d"
+  },
+  {
+    "relative": "data-center/dao/gogame_test.go",
+    "originalHash": null,
+    "stagedHash": "73acf768acedd1f1918b5ff66ba45ff7828c89952ba6091b0f11022e5a9f60b1"
+  },
+  {
+    "relative": "app/tables/gogame/match.go",
+    "originalHash": "9b685535302bbfc9a0f6d92c83593ae21b73de03c8e75a393886fc98d7f650a6",
+    "stagedHash": "adef94b8d3158226c3bcecd00fb92178e3d6cf275030c1d6c1b80d31a40dfd00"
+  },
+  {
+    "relative": "app/tables/gogame/seed.go",
+    "originalHash": "9f658f583028e4a90c62afad0d2fa72800dcb7fffcf0c664b8a1b141ca37aa97",
+    "stagedHash": "cfda1f789682723478b98998f767f25a16d0be2d409b2c2040d859770057680a"
+  },
+  {
+    "relative": "app/tables/gogame/tournament.go",
+    "originalHash": null,
+    "stagedHash": "59da2ec502deca50541e505eb41705048fa218a12236e2c9b592ad9fe26dba65"
+  }
+]

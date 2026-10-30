@@ -3,6 +3,10 @@ import { rel } from "./rel.js";
 
 export async function createApp(runtime) {
   const v = runtime.hotVersion;
+  if(runtime.env==='prod'){
+    const {refreshDataAccess}=await rel(import.meta.url,'../../shared/rpc/adapters/rpcAdapter.js',v);
+    await refreshDataAccess(runtime);
+  }
   if (runtime.env === "dev") {
     const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
     await localConfigs.refreshRoomConfigs(runtime);
@@ -13,6 +17,15 @@ export async function createApp(runtime) {
   const web = await rel(import.meta.url, "./web.js", v);
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
   const smartBet = await rel(import.meta.url, "./smart-bet.js", v);
+  const { matchRequest } = await rel(import.meta.url, './match-client.js', v);
+  if(!runtime.matchStore.supportsTournamentSnapshots||!runtime.matchStore.getPlayers){
+    // Existing listeners retain this object; upgrade methods in place on hot reload.
+    const {createMatchStore}=await rel(import.meta.url,'./store.js',v),next=createMatchStore();
+    const rows=runtime.matchStore.listMatches();next.replaceMatches(rows);
+    next.replaceTables(rows.flatMap(r=>runtime.matchStore.getTables(r.id)));
+    next.replacePlayers(await runtime.rpc?.lobby?.listMatchPlayers?.()||[]);
+    Object.assign(runtime.matchStore,next);
+  }
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const populationMod = await rel(import.meta.url, "./room-population.js", v);
   const { assertHoldemPlayable } = await rel(import.meta.url, "../../shared/holdem-room.js", v);
@@ -61,6 +74,27 @@ export async function createApp(runtime) {
       ...req.query,
     };
     const op = decode.num(params.op, 0);
+    delete params._matchAgent;
+    if([35,36].includes(op)){
+      const gateway=runtime.gateway||runtime.rpc?.gateway,uid=Number(params.userId),token=params.token||params.userToken;
+      if(gateway&&uid>0&&token){
+        const auth=await gateway.authenticate(token,uid);
+        if(!auth.success||Number(auth.userId)!==uid){res.json({msgCode:401,errMsg:'登录凭证无效',data:null});return;}
+        const profile=await gateway.getLoginData(uid);params._matchAgent=Number(profile.agentId);
+      }else if(runtime.env==='dev')params._matchAgent=1;
+      else {res.json({msgCode:401,errMsg:'缺少登录凭证',data:null});return;}
+    }
+    if ([42,43,48].includes(op)) {
+      try {
+        if(op===48)throw Object.assign(new Error('比赛重入功能尚未开放'),{code:503});
+        if(op===42&&Number(params.type)!==2)throw Object.assign(new Error('该报名支付方式尚未开放'),{code:400});
+        await matchRequest(runtime,params,op===43?'unregister':'register');
+        res.set('Cache-Control','no-store').json({msgCode:200,errMsg:null,data:[]});
+      } catch(error) {
+        res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null});
+      }
+      return;
+    }
     if (op === 71) {
       res.set("Cache-Control", "no-store").json(smartBet.smartBetResponse(params));
       return;
@@ -81,6 +115,10 @@ export async function createApp(runtime) {
     const userId = decode.num(params.userId ?? req.query.userId, 0);
     let data;
     try {
+      // Separate dev processes have separate in-memory buses. Production receives Redis snapshots.
+      if(runtime.env==='dev'&&[35,36].includes(op)&&params.userId&&(params.token||params.userToken)) {
+        try { await matchRequest(runtime,params); } catch(error) { runtime.log.error('dev match refresh failed',error.message); }
+      }
       data = await dispatch(op, params, userId, req);
     } catch (error) {
       if ((op === 38 || op === 45) && error.code) {
@@ -113,18 +151,20 @@ export async function createApp(runtime) {
       case 53:
         return loginInfo(params, userId);
       case 54:
-        return wallet(userId);
+        return wallet(userId,params);
       default:
         return [];
     }
   }
 
-  function listMatches(_params, userId) {
+  function listMatches(params, userId) {
     return runtime.matchStore.listMatches()
+      .filter(row=>Number(row.agent_id||(runtime.env==='dev'?1:0))===params._matchAgent)
       .filter((row) => toClient.isListedMatch(row))
       .sort((a, b) => decode.num(a.sort_index, 0) - decode.num(b.sort_index, 0) || decode.num(a.id, 0) - decode.num(b.id, 0))
       .map((row) => toClient.toClientMatch(row, {
         player: runtime.matchStore.getPlayer(row.id, userId),
+        players:runtime.matchStore.getPlayers(row.id),
         tables: runtime.matchStore.getTables(row.id),
         gameServer: runtime.config.game_server,
       }));
@@ -133,11 +173,12 @@ export async function createApp(runtime) {
   function matchDetail(params, userId) {
     const id = decode.num(params.championshipsConfigId ?? params.id, 0);
     const row = runtime.matchStore.getMatch(id);
-    if (!row) {
+    if (!row || Number(row.agent_id||(runtime.env==='dev'?1:0))!==params._matchAgent) {
       return [];
     }
     return toClient.toClientMatch(row, {
       player: runtime.matchStore.getPlayer(row.id, userId),
+      players:runtime.matchStore.getPlayers(row.id),
       tables: runtime.matchStore.getTables(row.id),
       gameServer: runtime.config.game_server,
     });
@@ -208,12 +249,14 @@ export async function createApp(runtime) {
     return payload;
   }
 
-  async function wallet(userId) {
+  async function wallet(userId,params={}) {
     let walletAmount = 0;
     let ticketNums = 0;
     if (userId) {
       try {
-        walletAmount = Number(await runtime.rpc.common.getBalance(userId)) || 0;
+        if(runtime.env==='dev' && runtime.config.game_server && (params.token||params.userToken)) {
+          walletAmount=Number((await roomPool.requestRoomPool(runtime,{...params,userId},'wallet')).walletAmount)||0;
+        }else walletAmount = Number(await runtime.rpc.common.getBalance(userId)) || 0;
       } catch (err) {
         runtime.log.error("wallet balance failed", err.message);
       }
@@ -239,7 +282,7 @@ export async function createApp(runtime) {
       const profile = await runtime.gateway.getLoginData(uid);
       userName = profile.userName || "";
     }
-    const w = await wallet(uid);
+    const w = await wallet(uid,params);
     return {
       userId: uid,
       uid,

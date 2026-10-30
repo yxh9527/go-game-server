@@ -1,29 +1,16 @@
 redis:
   host:
-    - "172.21.211.214:6379"
-  user: ""
-  pwd: ""
-mysql:
-  player:
-    host: "172.21.211.214"
-    user: "root"
-    port: 3306
-    password: "yxh2362023!@#"
-    database: "fg_player"
-  manager:
-    host: "172.21.211.214"
-    user: "root"
-    port: 3306
-    password: "yxh2362023!@#"
-    database: "fg_web_manager"
+    - 172.21.211.214:6379
+  user: ''
+  pwd: ''
 env: dev
-data_center: "127.0.0.1:50051"
-server_ip: "0.0.0.0"
+data_center: 127.0.0.1:50051
+server_ip: 0.0.0.0
 server_port: 11042
 client_web_port: 4000
-game_server: "127.0.0.1:11041"
-hundred_server: "127.0.0.1:11041"
-log: ""
+game_server: 127.0.0.1:11041
+hundred_server: 127.0.0.1:11041
+log: ''
 wallet:
   mode: local
   local_balance: 1000000

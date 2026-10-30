@@ -11,14 +11,18 @@ export function validateAwardJSON(raw) {
   if (!Array.isArray(ranks)) {
     throw new Error("award must be an array");
   }
+  const seen=new Set();
   for (const rank of ranks) {
-    if (!rank || rank.rank <= 0) {
+    if (!rank || !Number.isSafeInteger(Number(rank.rank)) || Number(rank.rank) <= 0) {
       throw new Error("invalid rank");
     }
+    if(seen.has(Number(rank.rank)))throw new Error('duplicate award rank');
+    seen.add(Number(rank.rank));
     if (!Array.isArray(rank.items)) {
       throw new Error("award items required");
     }
     for (const item of rank.items) {
+      if(!Number.isSafeInteger(Number(item.amount))||Number(item.amount)<=0)throw new Error('reward amount must be a positive integer');
       if (item.kind === "money") {
         if (!item.currency || !item.amount) {
           throw new Error("money reward requires currency and amount");

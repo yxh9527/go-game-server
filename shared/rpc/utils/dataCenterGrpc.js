@@ -18,6 +18,7 @@ function unary(client, method, req) {
 }
 
 let cached = null;
+export function closeDataCenterClient(){cached?.close();}
 
 export async function getDataCenterClient() {
   if (cached) {

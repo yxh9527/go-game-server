@@ -1,52 +1,32 @@
-import { applyCredit, applyDebit, WalletAdapter } from "./WalletAdapter.js";
+import { WalletAdapter } from './WalletAdapter.js';
+import { createRpcWallet } from './rpcWallet.js';
+import { rpcService } from '../../../shared/rpc/index.js';
 
 export class OnlineWallet extends WalletAdapter {
   constructor(options = {}) {
     super(options);
-    this.db = options.db;
+    this.rpc = options.rpc;
   }
 
   get mode() {
     return "online";
   }
 
-  async load(session) {
-    if (!this.db || !session?.userId) {
-      session.wallet = Number(session.wallet) || 0;
-      return session;
-    }
-    const [rows] = await this.db.query("SELECT score, nick_name FROM user_info WHERE user_id=? LIMIT 1", [session.userId]);
-    if (rows[0]) {
-      session.wallet = Number(rows[0].score || 0);
-      session.name = rows[0].nick_name || session.name;
-    } else {
-      session.wallet = 0;
-    }
-    return session;
+  #adapter() {
+    const rpc=this.rpc||rpcService;
+    if(!rpc?.common)throw new Error('Online wallet requires the data-center RPC adapter');
+    return createRpcWallet(rpc);
   }
-
-  debit(session, amount, _meta) {
-    const result = applyDebit(session, amount);
-    if (result.ok) {
-      this.#flush(session);
-    }
-    return result;
+  load(session) {
+    return this.#adapter().load(session);
   }
-
-  credit(session, amount, _meta) {
-    const result = applyCredit(session, amount);
-    this.#flush(session);
-    return result;
+  debit(session, amount) {
+    return this.#adapter().debit(session,amount);
   }
-
-  #flush(session) {
-    this.persist(session).catch((err) => this.log.error("online wallet persist failed", err.message));
+  credit(session, amount) {
+    return this.#adapter().credit(session,amount);
   }
-
-  async persist(session) {
-    if (!this.db || !session?.userId || session.userId >= 90000000) {
-      return;
-    }
-    await this.db.query("UPDATE user_info SET score=? WHERE user_id=?", [this.balance(session), session.userId]);
+  persist(session) {
+    return this.#adapter().persist(session);
   }
 }

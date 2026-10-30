@@ -18,6 +18,8 @@ export function initializeLifetime(table, now = Date.now()) {
 }
 
 export function isExpired(table, now = Date.now()) {
+  // Competition lifetime belongs to match, never to the eight-hour cash pool.
+  if (Number(table.roomType) === 101) return table.closing === true;
   initializeLifetime(table, now);
   return table.closing === true || now >= table.expiresAt;
 }

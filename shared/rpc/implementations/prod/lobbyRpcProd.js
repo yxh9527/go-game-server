@@ -1,12 +1,8 @@
-import { createMysqlStore } from "./mysqlStore.js";
-import { prodDeps } from "./prodDeps.js";
+import { createDataCenterStore } from './dataCenterStore.js';
 
 export class LobbyRpcProd {
   constructor() {
-    this.store = createMysqlStore({
-      manager: prodDeps.manager,
-      player: prodDeps.player,
-    });
+    this.store = createDataCenterStore();
   }
 
   listRooms() {

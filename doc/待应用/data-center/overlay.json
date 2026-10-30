@@ -1,0 +1,15 @@
+{
+  "Replace": {
+    "D:\\project\\gogames\\micro_service\\services\\gogame.pb.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\micro_service\\services\\gogame.pb.go",
+    "D:\\project\\gogames\\micro_service\\services\\gogame_grpc.pb.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\micro_service\\services\\gogame_grpc.pb.go",
+    "D:\\project\\gogames\\micro_service\\proto\\gogame.proto": "D:\\project\\gogame\\doc\\待应用\\data-center\\micro_service\\proto\\gogame.proto",
+    "D:\\project\\gogames\\data-center\\rpc\\server.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\data-center\\rpc\\server.go",
+    "D:\\project\\gogames\\data-center\\rpc\\service_gogame.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\data-center\\rpc\\service_gogame.go",
+    "D:\\project\\gogames\\data-center\\rpc\\service_gogame_test.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\data-center\\rpc\\service_gogame_test.go",
+    "D:\\project\\gogames\\data-center\\dao\\gogame.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\data-center\\dao\\gogame.go",
+    "D:\\project\\gogames\\data-center\\dao\\gogame_test.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\data-center\\dao\\gogame_test.go",
+    "D:\\project\\gogames\\app\\tables\\gogame\\match.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\app\\tables\\gogame\\match.go",
+    "D:\\project\\gogames\\app\\tables\\gogame\\seed.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\app\\tables\\gogame\\seed.go",
+    "D:\\project\\gogames\\app\\tables\\gogame\\tournament.go": "D:\\project\\gogame\\doc\\待应用\\data-center\\app\\tables\\gogame\\tournament.go"
+  }
+}

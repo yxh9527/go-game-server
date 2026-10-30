@@ -19,12 +19,13 @@ export function toClientMatch(row, opts = {}) {
   const startTime = asMs(row.start_time);
   const player = opts.player || null;
   const playerStatus = player ? num(player.status, 1) : 0;
+  const points=(opts.players||[]).filter(p=>[1,4].includes(Number(p.status))).map(p=>num(p.points,0));
   let championshipStatus = 1;
   let status = 1;
   if (state === MATCH_STATE_RUNNING) {
     championshipStatus = 2;
     status = 2;
-  } else if (state === MATCH_STATE_FINISHED) {
+  } else if (state === MATCH_STATE_FINISHED || state === MATCH_STATE_CANCELLED) {
     championshipStatus = 3;
     status = 3;
   }
@@ -70,9 +71,9 @@ export function toClientMatch(row, opts = {}) {
     bountyPot: num(row.bounty_pot, 0),
     maxPlayer: num(row.max_player, 0),
     minPlayer: num(row.min_player, 0),
-    maxPoint: 0,
-    minPoint: 0,
-    avgPoint: 0,
+    maxPoint: points.length?Math.max(...points):0,
+    minPoint: points.length?Math.min(...points):0,
+    avgPoint: points.length?Math.floor(points.reduce((n,p)=>n+p,0)/points.length):0,
     myRank: player ? num(player.rank, 0) : 0,
     nextUpBlindTime: 0,
     nextBlindLastTime: 0,

@@ -7,6 +7,7 @@ const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
 const { holdemRoomSettings, assertHoldemPlayable } = await rel(import.meta.url, "../../../../shared/holdem-room.js", v);
 const { initializeCritical } = await rel(import.meta.url, "./critical.js", v);
+const { blindAt } = await rel(import.meta.url, '../../core/tournament-blinds.js', v);
 
 export class HoldemGame extends SeatGame {
   constructor() {
@@ -26,6 +27,9 @@ export class HoldemGame extends SeatGame {
   }
 
   buildConf(table) {
+    if (table.mtt) return { ...engine.texasConf(table), ...engine.dzpkParams(table),
+      roomType: 19, isMtt: true, mttId: table.mtt.id, gameRoomConfigId: 0,
+      playMode: 0, allowCarryOut: false, hundredSwitch: false };
     return engine.texasConf(table);
   }
 
@@ -43,6 +47,10 @@ export class HoldemGame extends SeatGame {
   onLoginRoom(ctx) {
     ctx.send(PUSH.DZPK_PUSH_GAME_SETTING, { result: true, type: 0 });
     super.onLoginRoom(ctx);
+    if(ctx.table.mtt){
+      ctx.send(4110,{mttId:ctx.table.mtt.id,championshipName:ctx.table.mtt.config.name||'[]'});
+      ctx.send(20009,blindAt(ctx.table.mtt.config));
+    }
   }
 
   onPlayingSnapshot(ctx) {
@@ -86,6 +94,11 @@ export class HoldemGame extends SeatGame {
   }
 
   startRound(ctx) {
+    if(ctx.table.mtt){
+      const blind=blindAt(ctx.table.mtt.config);
+      Object.assign(ctx.table,{smallBlind:blind.smallBlind,bigBlind:blind.bigBlind,initialBet:blind.ante,ante:blind.ante});
+      ctx.table.mtt.level=blind.index;ctx.io.broadcast(20009,blind);
+    }
     engine.beginHand(ctx.io, ctx.table);
   }
 

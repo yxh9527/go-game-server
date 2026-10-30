@@ -2,6 +2,10 @@ import { rel } from "./rel.js";
 
 export async function createHandler(runtime) {
   const v = runtime.hotVersion;
+  if(runtime.env==='prod'){
+    const {refreshDataAccess}=await rel(import.meta.url,'../../shared/rpc/adapters/rpcAdapter.js',v);
+    await refreshDataAccess(runtime);
+  }
   if (runtime.env === "dev") {
     const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
     await localConfigs.refreshRoomConfigs(runtime);
@@ -21,6 +25,8 @@ export async function createHandler(runtime) {
   const seatView = await rel(import.meta.url, "./core/seat-view.js", v);
   const subscriptionsModule = await rel(import.meta.url, "./core/hundred-subscriptions.js", v);
   const subscriptions = subscriptionsModule.createHundredSubscriptions(runtime, gameOf, tableIo);
+  const { createTournamentControl } = await rel(import.meta.url, './core/tournament.js', v);
+  const tournament = await createTournamentControl(runtime, gameOf, tableIo);
   const localHttp = runtime.env === "dev"
     ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
     : null;
@@ -176,6 +182,8 @@ export async function createHandler(runtime) {
       if (table.agentId == null) table.agentId = Number(agentId) || 0;
       return table;
     }
+    // Only match can create tournament rooms; stale client joins cannot mint chips.
+    if (Number(roomType) === 101) return null;
     if (!game) {
       throw new Error(`no game for roomType=${roomType}`);
     }
@@ -230,6 +238,10 @@ export async function createHandler(runtime) {
       }
       const profile = await runtime.gateway.getLoginData(uid);
       const agentId = Number(profile?.agentId) || 0;
+      if (body.action === 'wallet' && runtime.env === 'dev') {
+        const account={userId:uid,agentId,wallet:0};await runtime.wallet.load(account);
+        respond({code:200,data:{walletAmount:account.wallet}});return;
+      }
       if (body.action === "hundred-list") {
         const { listHundredLobbyRooms } = await rel(import.meta.url, './core/hundred-lobby.js', v);
         respond({ code: 200, data: listHundredLobbyRooms(runtime, gameOf, agentId, body) });
@@ -331,10 +343,11 @@ export async function createHandler(runtime) {
   async function onMessage(ws, data) {
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (raw[0] === 0x7b) {
-      if (raw.length > 8192) return;
+      if (raw.length > 1024 * 1024) return;
       let body;
       try { body = JSON.parse(raw.toString("utf8")); } catch { return; }
-      if (body?.type === "room-pool") await internalRoomPool(ws, body);
+      if (body?.type === "room-pool" && raw.length <= 8192) await internalRoomPool(ws, body);
+      if (body?.type === 'tournament-control') await tournament.handle(ws, body);
       return;
     }
     const frame = codec.decodeFrame(data);
@@ -534,7 +547,7 @@ export async function createHandler(runtime) {
       game.onJoin(ctxOf(ws, session, table, body));
       const code = fair.currentFairCode(table, session.userId);
       if (code) send(ws, PUSH.DZPK_PUSH_BLOCKCHAIN_NOTIFY, code);
-      if (game.kind === "normal") {
+      if (game.kind === "normal" && Number(table.roomType)!==101) {
         pool.expand();
         pushPoint(ws, session);
         await persist(session);
@@ -616,12 +629,12 @@ export async function createHandler(runtime) {
       await game.afterRound?.(ctxOf(ws, session, table));
       session.inRoom = false;
       const cash = game.onLeave(ctxOf(ws, session, table));
-      if (table.kind !== 'slots') {
+      if (table.kind !== 'slots' && Number(table.roomType)!==101) {
         if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
         else session.wallet += Number(cash || 0);
       }
       pushPoint(ws, session);
-      if (table.kind !== 'slots') await persist(session);
+      if (table.kind !== 'slots' && Number(table.roomType)!==101) await persist(session);
       await game.afterRound?.(ctxOf(ws, session, table));
       // The original client returns to its hall only after receiving 2205
       // for its own uid/roomId. Spectators need the same receipt as players.

@@ -1,5 +1,5 @@
 import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
-import { prodDeps } from "./prodDeps.js";
+import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
 
 export class CommonRpcProd {
   async getBalance(userId) {
@@ -18,10 +18,10 @@ export class CommonRpcProd {
   }
 
   async persistScore(userId, score) {
-    const db = prodDeps.player;
-    if (!db || !userId || userId >= 90000000) {
+    if (!userId || userId >= 90000000) {
       return;
     }
-    await db.query("UPDATE user_info SET score=? WHERE user_id=?", [score, userId]);
+    const client=await getGogameStorageClient();
+    await client.call('persistScore',{userId:Number(userId),score});
   }
 }

@@ -21,7 +21,6 @@ export function createWallet(config = {}, deps = {}) {
   const mode = String(config.mode || config.wallet?.mode || "local").toLowerCase();
   if (mode === "online" || mode === "prod" || mode === "production") {
     return new OnlineWallet({
-      db: deps.db,
       log: deps.log,
     });
   }

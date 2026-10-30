@@ -2,12 +2,14 @@ export function createMatchStore() {
   const matches = new Map();
   const players = new Map();
   const tables = new Map();
+  const sequences = new Map();
 
   function playerKey(matchId, playerId) {
     return `${matchId}:${playerId}`;
   }
 
   return {
+    supportsTournamentSnapshots:true,
     replaceMatches(rows) {
       matches.clear();
       for (const row of rows || []) {
@@ -44,6 +46,9 @@ export function createMatchStore() {
     getPlayer(matchId, playerId) {
       return players.get(playerKey(matchId, playerId)) || null;
     },
+    getPlayers(matchId) {
+      return [...players.values()].filter(p=>Number(p.match_id)===Number(matchId));
+    },
     getTables(matchId) {
       return tables.get(Number(matchId)) || [];
     },
@@ -64,6 +69,15 @@ export function createMatchStore() {
         } catch {
           return;
         }
+      }
+      if (env.event === 'match_snapshot' && data?.match) {
+        const id=Number(data.match.id);
+        if(Number(data.sequence||0)<(sequences.get(id)||0))return;
+        sequences.set(id,Number(data.sequence||0));
+        this.upsertMatch(data.match);
+        for(const [key,row] of players)if(Number(row.match_id)===id)players.delete(key);
+        for(const row of data.players||[])players.set(playerKey(row.match_id,row.player_id),row);
+        tables.set(id,data.tables||[]);
       }
       if (env.event === "match_upsert" || env.event === "match_state") {
         this.upsertMatch(data);

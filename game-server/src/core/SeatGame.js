@@ -86,6 +86,7 @@ export class SeatGame extends GameBase {
       roomStart: this.seated(table).length >= this.minPeople(table),
       memberNum: table.members.length,
       ...this.extraRoomInfo(table),
+      ...(table.mtt?{isMtt:true,mttId:table.mtt.id,gameTime:99999,leftTime:99999}:{}),
     };
   }
 
@@ -342,7 +343,12 @@ export class SeatGame extends GameBase {
     if (table.admissionTask) return table.admissionTask;
     if (table.phase === "playing" || table.hand) return;
     // Tournament chips/elimination belong to match, not cash-table buy-ins.
-    if (Number(table.roomType) === 101) return;
+    if (Number(table.roomType) === 101) {
+      if(table.mtt&&!table.hand&&table.currentInning>(table.mtt.checkedInning||0)){
+        table.mtt.checkedInning=table.currentInning;table.mtt.paused=true;
+      }
+      return;
+    }
     lifecycle.syncActivity(table);
     const inning = table.roomFeatures?.settledInning || 0;
     if (!table.roundAdmission) {
@@ -486,6 +492,9 @@ export class SeatGame extends GameBase {
   }
 
   onMessage(ctx, msgid, payload) {
+    // Match owns competition seats and chips; no cash-table funding/standing.
+    if(ctx.table.mtt&&[SEND.SEND_SITDOWN,SEND.SEND_CARRYIN,SEND.SEND_CARRY_SCORE,
+      SEND.SEND_STANDUP,SEND.CARRY_OUT_REQ,SEND.SEND_NEXT_ROUND_STANDUP].includes(msgid))return true;
     if (features.handleRoomFeature(ctx, msgid, payload)) return true;
     ctx.body = payload || {};
     if (msgid === SEND.CARRY_OUT_REQ) return this.onCarryOut(ctx);
@@ -519,6 +528,13 @@ export class SeatGame extends GameBase {
 
   tick(ctx) {
     const table = ctx.table;
+    if(table.mtt){
+      if(table.mtt.finished||table.mtt.paused||table.mtt.closed)return;
+      const now=Date.now();
+      if(table.phase==='playing')this.playTick(ctx,now);
+      else if(this.seated(table).length>=this.minPeople(table)&&now>=table.startAt)this.startRound(ctx);
+      return;
+    }
     if (table.admissionTask || table.roundAdmission || table.partialCarryOut) return;
     const now = Date.now();
     this.expirePendingCarry(ctx, now);
@@ -552,6 +568,11 @@ export class SeatGame extends GameBase {
   onLeave(ctx) {
     const table = ctx.table;
     const uid = ctx.session.userId;
+    if(table.mtt){
+      table.observers=table.observers.filter(p=>p.uid!==uid);
+      // Offline competition players keep their seat/chips and use action timeouts.
+      return 0;
+    }
     const member = table.members.find((item) => item.uid === uid);
     const person = member || (table.observers || []).find((item) => item.uid === uid);
     const completedBeforeLeave = table.roomFeatures?.totalHands || 0;

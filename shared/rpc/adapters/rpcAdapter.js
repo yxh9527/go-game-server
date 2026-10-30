@@ -6,6 +6,23 @@ import { GatewayRpcProd } from "../implementations/prod/gatewayRpcProd.js";
 import { LobbyRpcProd } from "../implementations/prod/lobbyRpcProd.js";
 const require = createRequire(import.meta.url);
 
+// Existing business objects keep their RPC references across hot reloads.
+// Replace adapters in place so a previously loaded SQL store cannot survive.
+export async function refreshDataAccess(runtime) {
+  const rpc=runtime.rpc;
+  if(runtime.env!=='prod'||!rpc?.lobbyService||!rpc?.commonService)return;
+  const load=relative=>{
+    const url=new URL(relative,import.meta.url);url.searchParams.set('v',String(runtime.hotVersion||0));
+    return import(url.href);
+  };
+  const [lobby,common]=await Promise.all([load('../implementations/prod/lobbyRpcProd.js'),load('../implementations/prod/commonRpcProd.js')]);
+  rpc.lobbyService.store=new lobby.LobbyRpcProd().store;
+  const next=new common.CommonRpcProd();
+  for(const name of Object.getOwnPropertyNames(Object.getPrototypeOf(next))){
+    if(name!=='constructor')rpc.commonService[name]=next[name].bind(next);
+  }
+}
+
 /**
  * 统一 RPC 入口。
  * 业务代码只依赖 adapter，不再直接 new 某个 dev/prod 实现。
