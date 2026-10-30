@@ -1,3 +1,31 @@
+// Attach metadata in place: resident subscriptions and snapshot sequence checks
+// must survive upgrades from the previous store implementation.
+export function attachMatchMetadata(store) {
+  if (store.replaceMetadata) return store;
+  const awards = new Map(), blinds = new Map();
+  store.replaceMetadata = ({ awards: nextAwards, blinds: nextBlinds }) => {
+    for (const [map, rows] of [[awards, nextAwards], [blinds, nextBlinds]]) {
+      if (!rows) continue;
+      map.clear();
+      for (const row of rows) map.set(Number(row.id), row);
+    }
+  };
+  store.getAward = id => awards.get(Number(id));
+  store.getBlinds = id => blinds.get(Number(id));
+  const apply = store.applyEnvelope?.bind(store);
+  store.applyEnvelope = raw => {
+    let envelope, data;
+    try {
+      envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (envelope?.event !== 'match_metadata') return apply?.(raw);
+      data = typeof envelope.data === 'string' ? JSON.parse(envelope.data) : envelope.data;
+    } catch { return; }
+    const map = data?.kind === 'award' ? awards : data?.kind === 'blinds' ? blinds : null;
+    if (map && data.row?.id != null) map.set(Number(data.row.id), data.row);
+  };
+  return store;
+}
+
 export function createMatchStore() {
   const matches = new Map();
   const players = new Map();
@@ -8,7 +36,7 @@ export function createMatchStore() {
     return `${matchId}:${playerId}`;
   }
 
-  return {
+  return attachMatchMetadata({
     supportsTournamentSnapshots:true,
     replaceMatches(rows) {
       matches.clear();
@@ -91,7 +119,7 @@ export function createMatchStore() {
         }
       }
     },
-  };
+  });
 }
 
 export function createRoomStore() {

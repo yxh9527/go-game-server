@@ -44,6 +44,10 @@ test('native lobby registration charges the game wallet; deadline refunds retain
     const detail=await request(36,10001,{championshipsConfigId:free.id});
     assert.equal(detail.data.playerStatus,4);assert.equal(detail.data.currentLivePlayer,2);
     assert.equal(detail.data.MTTRoomInfos[0].playerNums,2);
+    assert.equal(detail.data.MTTRankPrices[0].price,50);
+    assert.deepEqual(detail.data.blindConfig,['1/5/10']);
+    assert.deepEqual(detail.data.MTTUserRanks.map(p=>p.userId),[10001,10002]);
+    assert.ok(detail.data.MTTUserRanks.every(p=>p.userName&&p.icon&&p.point===10000));
     const table=gameRuntime.registry.getTable(detail.data.MTTRoomInfos[0].roomId,1,'holdem');
     assert.equal(table.roomType,101);assert.equal(table.members.length,2);assert.equal(calls.debit,2);
     // Feed a completed, chip-conserving checkpoint into the real control/payment bridge.

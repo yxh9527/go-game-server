@@ -8,6 +8,7 @@ export async function matchRequest(runtime,params,action='snapshot') {
   });
   const body=await response.json();
   if(!response.ok||body.code!==0)throw Object.assign(new Error(body.msg||'比赛服务暂不可用'),{code:body.code||503});
+  if (runtime.env === 'dev' && body.metadata) runtime.matchStore.replaceMetadata?.(body.metadata);
   for(const item of body.data||[]) runtime.matchStore.applyEnvelope({event:'match_snapshot',data:item});
   return body.data;
 }

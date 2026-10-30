@@ -26,6 +26,14 @@ export async function createApp(runtime) {
     next.replacePlayers(await runtime.rpc?.lobby?.listMatchPlayers?.()||[]);
     Object.assign(runtime.matchStore,next);
   }
+  const { attachMatchMetadata } = await rel(import.meta.url, './store.js', v);
+  attachMatchMetadata(runtime.matchStore);
+  // Load through the RPC boundary once per business reload, never per player request.
+  for (const [kind, method] of [['awards', 'listAwards'], ['blinds', 'listBlinds']]) {
+    if (!runtime.rpc?.lobby?.[method]) continue;
+    try { runtime.matchStore.replaceMetadata({ [kind]: await runtime.rpc.lobby[method]() }); }
+    catch (error) { runtime.log.error('load tournament metadata failed', kind, error.message); }
+  }
   const roomPool = await rel(import.meta.url, "./room-pool.js", v);
   const populationMod = await rel(import.meta.url, "./room-population.js", v);
   const { assertHoldemPlayable } = await rel(import.meta.url, "../../shared/holdem-room.js", v);
@@ -166,6 +174,8 @@ export async function createApp(runtime) {
         player: runtime.matchStore.getPlayer(row.id, userId),
         players:runtime.matchStore.getPlayers(row.id),
         tables: runtime.matchStore.getTables(row.id),
+        award: runtime.matchStore.getAward(row.award_id),
+        blinds: runtime.matchStore.getBlinds(row.blinds_id),
         gameServer: runtime.config.game_server,
       }));
   }
@@ -180,6 +190,8 @@ export async function createApp(runtime) {
       player: runtime.matchStore.getPlayer(row.id, userId),
       players:runtime.matchStore.getPlayers(row.id),
       tables: runtime.matchStore.getTables(row.id),
+      award: runtime.matchStore.getAward(row.award_id),
+      blinds: runtime.matchStore.getBlinds(row.blinds_id),
       gameServer: runtime.config.game_server,
     });
   }

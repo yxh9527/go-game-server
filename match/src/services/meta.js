@@ -10,6 +10,10 @@ export async function createMetaService(runtime) {
   const { validateAwardJSON } = await rel(import.meta.url, "../award.js", v);
   const { DEFAULT_CURRENCY } = await rel(import.meta.url, "../constants.js", v);
   const store = runtime.store;
+  async function publishMetadata(kind, row) {
+    await runtime.bus?.publish('match', JSON.stringify({ event: 'match_metadata', data: JSON.stringify({ kind, row }) }));
+    return row;
+  }
 
   return {
     async listTickets() {
@@ -72,12 +76,12 @@ export async function createMetaService(runtime) {
         throw new AppError(400, err.message);
       }
       const ts = nowSec();
-      return store.insertAward({
+      return publishMetadata('award', await store.insertAward({
         name: body.name,
         detail: body.detail,
         create_time: ts,
         update_time: ts,
-      });
+      }));
     },
     async updateAward(id, body) {
       const old = await store.getAward(id);
@@ -90,23 +94,23 @@ export async function createMetaService(runtime) {
       } catch (err) {
         throw new AppError(400, err.message);
       }
-      return store.updateAward(id, {
+      return publishMetadata('award', await store.updateAward(id, {
         name: body.name ?? old.name,
         detail,
         update_time: nowSec(),
-      });
+      }));
     },
     async listBlinds() {
       return store.listBlinds();
     },
     async createBlinds(body) {
       const ts = nowSec();
-      return store.insertBlinds({
+      return publishMetadata('blinds', await store.insertBlinds({
         name: body.name,
         data: body.data,
         create_time: ts,
         update_time: ts,
-      });
+      }));
     },
     async updateBlinds(id, body) {
       const list = await store.listBlinds();
@@ -114,11 +118,11 @@ export async function createMetaService(runtime) {
       if (!old) {
         throw new AppError(404, "not found");
       }
-      return store.updateBlinds(id, {
+      return publishMetadata('blinds', await store.updateBlinds(id, {
         name: body.name ?? old.name,
         data: body.data ?? old.data,
         update_time: nowSec(),
-      });
+      }));
     },
   };
 }

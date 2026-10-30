@@ -1,4 +1,5 @@
 import { asMs, num, truthy } from "./decode.js";
+import { userInfoOf } from '../../game-server/src/core/member.js';
 
 export const MATCH_STATE_DRAFT = 0;
 export const MATCH_STATE_REGISTERING = 1;
@@ -11,6 +12,35 @@ export function isListedMatch(row) {
   return state === MATCH_STATE_REGISTERING || state === MATCH_STATE_RUNNING;
 }
 
+function configuredList(value) {
+  if (!value) return [];
+  const list = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!Array.isArray(list)) throw new Error('比赛展示配置必须是数组');
+  return list;
+}
+
+function rankPrices(row, award) {
+  return configuredList(row.award_json || award?.detail).map(entry => {
+    const items = entry.items || [];
+    const money = items.filter(item => item.kind === 'money' && item.currency === (row.currency || 'CNY'));
+    return {
+      rank: `${entry.rank}/${entry.rank}`, from: Number(entry.rank), to: Number(entry.rank),
+      price: money.reduce((sum, item) => sum + Number(item.amount), 0),
+      ticketNums: items.filter(item => item.kind === 'ticket').reduce((sum, item) => sum + Number(item.amount), 0),
+      currency: row.currency || 'CNY', items,
+    };
+  }).sort((a, b) => a.from - b.from);
+}
+
+function blindLevels(row, blinds) {
+  const levels = configuredList(row.blind_config ?? blinds?.data);
+  if (levels.length) return levels;
+  if (num(row.small_blind, 0) > 0 && num(row.big_blind, 0) >= num(row.small_blind, 0)) {
+    return [{ min: Number(row.small_blind), max: Number(row.big_blind), interval: 0 }];
+  }
+  return [];
+}
+
 export function toClientMatch(row, opts = {}) {
   if (!row) {
     return null;
@@ -20,6 +50,8 @@ export function toClientMatch(row, opts = {}) {
   const player = opts.player || null;
   const playerStatus = player ? num(player.status, 1) : 0;
   const points=(opts.players||[]).filter(p=>[1,4].includes(Number(p.status))).map(p=>num(p.points,0));
+  const levels = blindLevels(row, opts.blinds);
+  const currentLevel = Math.max(0, num(row.blind_level, 1) - 1);
   let championshipStatus = 1;
   let status = 1;
   if (state === MATCH_STATE_RUNNING) {
@@ -65,7 +97,7 @@ export function toClientMatch(row, opts = {}) {
     bonusPot: num(row.bonus_pot, 0),
     bigBlind: num(row.big_blind, 0),
     status,
-    increaseBindTime: num(row.increase_bind_time, 0),
+    increaseBindTime: levels[currentLevel]?.interval > 0 ? levels[currentLevel].interval / 60 : num(row.increase_bind_time, 0),
     registerTimeLimit: num(row.register_time_limit, 0),
     blindLevel: num(row.blind_level, 0),
     bountyPot: num(row.bounty_pot, 0),
@@ -85,6 +117,27 @@ export function toClientMatch(row, opts = {}) {
     domain,
     shield: row.shield || "",
     roomType: num(row.room_type, 101),
+    MTTRankPrices: rankPrices(row, opts.award),
+    blindConfig: levels.map((item, index) => `${index + 1}/${Number(item.min)}/${Number(item.max)}`),
+    MTTUserRanks: [...(opts.players || [])]
+      .sort((a, b) => {
+        const activeA = [1, 4].includes(Number(a.status)), activeB = [1, 4].includes(Number(b.status));
+        if (activeA !== activeB) return activeA ? -1 : 1;
+        const ar = num(a.rank, 0), br = num(b.rank, 0);
+        if (!activeA && (ar > 0 || br > 0)) return (ar || Infinity) - (br || Infinity);
+        return num(b.points, 0) - num(a.points, 0) || num(a.player_id, 0) - num(b.player_id, 0);
+      })
+      .map(item => {
+        const info = userInfoOf({ uid: item.player_id, name: item.name, icon: item.avatar });
+        return {
+          userId: num(item.player_id, 0),
+          userName: info.name,
+          icon: info.icon,
+          point: num(item.points, 0),
+          roomId: num(item.room_id, 0),
+          rank: num(item.rank, 0),
+        };
+      }),
     MTTRoomInfos: (opts.tables || []).map((item) => ({
       roomIndex: num(item.room_index, 0),
       roomId: num(item.room_id, 0),

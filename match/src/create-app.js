@@ -77,7 +77,13 @@ export async function createApp(runtime) {
     if(body.action==='register') await tournaments.register(body.matchId,user);
     else if(body.action==='unregister') await tournaments.unregister(body.matchId,user);
     else if(body.action!=='snapshot') throw Object.assign(new Error('unknown tournament action'),{status:400});
-    res.set('Cache-Control','no-store').json({code:0,msg:'ok',data:await tournaments.snapshot(user)});
+    const data = await tournaments.snapshot(user);
+    // Local services have separate memory buses. Production uses the existing
+    // match channel and hall cache instead of querying templates per player.
+    const metadata = runtime.env === 'dev' ? {
+      awards: await runtime.store.listAwards(), blinds: await runtime.store.listBlinds(),
+    } : undefined;
+    res.set('Cache-Control','no-store').json({code:0,msg:'ok',data,metadata});
   }));
 
   admin.get("/tickets", wrap(async (_req, res) => {
