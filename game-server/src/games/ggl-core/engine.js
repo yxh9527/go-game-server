@@ -19,6 +19,26 @@ export function scratchConf(table) {
       gameRoomConfigId: Number(table.cfg?.game_room_config_id || cfg.defaultConfigId),
       maxBet: Number(table.cfg?.hundred_max_bet || cfg.defaultMaxBet), roomIndex: table.roomIndex } };
 }
+export function multiRoomSnapshot(table) {
+  return { roomType: table.roomType, roomId: table.roomId, gameRoomId: table.gameRoomId,
+    playMode: 0, roomIndex: table.roomIndex, maintenance: Number(table.cfg?.state ?? 1) !== 1,
+    denominations: table.config.denominations.slice(), winMultipliers: table.config.winMultipliers.slice(),
+    gglParams: scratchConf(table).gglParams };
+}
+export async function multiBet(ctx, body = {}) {
+  const faceValue = body.faceValue;
+  const failure = code => ({ ...base(ctx.table, ctx.session), code, faceValue,
+    roomType: ctx.table.roomType, gglKind: kindOf(ctx.table).toUpperCase() });
+  // Native multi-bet sends exactly one immediate ticket. Other purchase modes
+  // stay on the independent scratch interface with its ownership checks.
+  if (Number(ctx.table.cfg?.state ?? 1) !== 1) return failure(95041);
+  if (body.revealMode !== 'RANDOM_BUY_REVEAL' || body.serialFull !== '' || body.kind !== kindOf(ctx.table)
+    || !Number.isSafeInteger(faceValue) || !ctx.table.config.denominations.includes(faceValue)
+    || faceValue > Number(ctx.table.cfg?.hundred_max_bet || ctx.table.config.defaultMaxBet)) return failure(ERROR.INVALID);
+  const result = await scratchRequest(ctx, 'reveal', body);
+  // Echo the denomination even on errors so the native BUYING row can unlock.
+  return { ...result, faceValue, roomType: ctx.table.roomType, gglKind: kindOf(ctx.table).toUpperCase() };
+}
 function service(ctx) {
   if (ctx.runtime?.scratchTickets) return ctx.runtime.scratchTickets;
   if (local && ctx.runtime?.env !== 'prod') {

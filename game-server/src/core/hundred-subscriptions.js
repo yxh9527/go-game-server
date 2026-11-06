@@ -45,11 +45,14 @@ export function createHundredSubscriptions(runtime, gameOf, ioFor) {
       if (subscriptions.has(id)) continue;
       const table = tableFor(session, previous);
       if (!table) continue;
-      gameOf(table.roomType).onLeave({ runtime, table, session, io: ioFor(table) });
-      ioFor(table).broadcast(6207, { roomType: table.roomType, roomId: id, playerNum: table.people });
+      if (table.kind === 'hundred') {
+        gameOf(table.roomType).onLeave({ runtime, table, session, io: ioFor(table) });
+        ioFor(table).broadcast(6207, { roomType: table.roomType, roomId: id, playerNum: table.people });
+      }
     }
     for (const [id, entry] of subscriptions) {
       const table = tableFor(session, entry);
+      if (table.kind !== 'hundred') continue;
       const added = !table.visitors?.has(Number(session.userId));
       gameOf(table.roomType).enter(table, session);
       if (added) ioFor(table).broadcast(6207, { roomType: table.roomType, roomId: id, playerNum: table.people });
@@ -57,7 +60,7 @@ export function createHundredSubscriptions(runtime, gameOf, ioFor) {
   }
   function rooms(session, request) {
     const game = gameOf(Number(request.roomType));
-    if (!game || game.kind !== 'hundred') return [];
+    if (!game || !(game.kind === 'hundred' || game.multiRoomSnapshot)) return [];
     const ids = Array.isArray(request.roomIds) ? new Set(request.roomIds.map(Number)) : null;
     return configuredHundredRooms(runtime, game, session).filter(t => !ids || ids.has(Number(t.roomId)));
   }

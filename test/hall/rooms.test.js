@@ -135,7 +135,7 @@ test("hundred rooms keep hundredDomain", () => {
 });
 
 test("ordinary games retain a separate hundred endpoint and fall back to the shared server", () => {
-  for (const roomType of [19, 25, 58, 61, 101]) {
+  for (const roomType of [19, 25, 58, 101]) {
     const row = { room_type: roomType, game_room_config_id: 70 };
     assert.equal(rooms.enterRoomPayload(row, {}, { game_server: "room.example:443",
       hundred_server: "hundred.example:443" }).hundredDomain, "hundred.example:443");

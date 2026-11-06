@@ -511,6 +511,19 @@ export const CLIENT_DEV_PATCH = `<script>
       var result = original.apply(this, arguments);
       if (module === "common" && event === "loading" && action === "over" &&
           options && options.module && options.scene && peekOpenGame()) {
+        // In-game field changes reuse this iframe and its original openGame.
+        // A different prepared scene owns a new load generation; do not let
+        // the initial sceneReady flag suppress all later game transitions.
+        var active = cc.director && cc.director.getScene();
+        if (sceneReady && (pendingGame && pendingGame.scene !== options.scene ||
+            active && active.name !== options.scene)) {
+          entryVersion += 1;
+          sceneReady = false;
+          loadingGame = false;
+          pendingGame = null;
+          postedLoaded = false;
+          loadedSends = 0;
+        }
         var version = entryVersion;
         setTimeout(function () {
           if (currentEntry(version)) loadGameScene(options);

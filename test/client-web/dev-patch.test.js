@@ -148,6 +148,40 @@ test('hundred entry uses the normal host room returned by hall', () => {
   assert.ok(page.loaded.some((message) => message.type === 'gameLoaded'));
 });
 
+test('in-game field changes load each newly prepared scene in the same iframe', () => {
+  const page = browser();
+  page.setLoader((name, _progress, done) => done(null, { name }));
+  page.open(700000, 19);
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
+  page.advance(200);
+  page.requestScene({ module: 'Zjh', scene: 'gameZjh' });
+  page.advance(200);
+  page.requestScene({ module: 'Qznn', scene: 'Qznn' });
+  page.advance(200);
+  assert.deepEqual(page.runs, ['gameHoldem', 'gameZjh', 'Qznn']);
+  page.requestScene({ module: 'Qznn', scene: 'Qznn' });
+  page.advance(200);
+  assert.equal(page.runs.length, 3, 'same scene notifications must not reset a live game');
+  page.setScene('webHallOb'); page.advance(200);
+  const count = page.runs.length;
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
+  page.advance(1000);
+  assert.equal(page.runs.length, count, 'retired field-switch callbacks cannot reopen a game');
+});
+
+test('field change also loads when the original client completed the first scene before the dev bridge', () => {
+  const page = browser();
+  page.setLoader((name, _progress, done) => done(null, { name }));
+  page.open(700000, 19);
+  page.setScene('gameHoldem');
+  page.requestScene({ module: 'Holdem', scene: 'gameHoldem' });
+  page.advance(200);
+  assert.deepEqual(page.runs, []);
+  page.requestScene({ module: 'Zjh', scene: 'gameZjh' });
+  page.advance(200);
+  assert.deepEqual(page.runs, ['gameZjh']);
+});
+
 test('a direct hundred room never forces an incompatible Holdem scene', () => {
   const page = browser();
   page.open(1000001, 50);

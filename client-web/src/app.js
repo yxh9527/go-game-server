@@ -9,6 +9,7 @@ const v = new URL(import.meta.url).searchParams.get("v") || "0";
 const CLIENT_DEV_PATCH = env.isDev
   ? (await rel(import.meta.url, "../../cache/client-web/dev-patch.js", v)).CLIENT_DEV_PATCH
   : "";
+const { adaptScratchMultiResponse } = await rel(import.meta.url, './scratch-multi-response.js', v);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");
@@ -48,6 +49,23 @@ export function createClientApp() {
   const version = clientVersion();
   const clientDir = path.join(staticRoot, "client", version);
 
+  // Local resource overrides (for example x-switch redirects) retain the
+  // original page's origin. These public assets need no cookies or credentials.
+  if (env.isDev) app.use((req, res, next) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    if (req.method === "OPTIONS") {
+      const headers = req.headers["access-control-request-headers"];
+      if (headers) {
+        res.set("Access-Control-Allow-Headers", headers);
+        res.vary("Access-Control-Request-Headers");
+      }
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.use("/avator", express.static(path.join(staticRoot, "avator")));
   app.get(["/", `/${version}`, `/${version}/`, `/${version}/index.html`], (_req, res) => {
     serveIndex(clientDir, res);
@@ -56,6 +74,20 @@ export function createClientApp() {
     res.set("Cache-Control", "no-store").type("application/javascript")
       .sendFile(path.join(clientDir, "js/webHallEarly.js"));
   });
+
+  const multiDir = path.join(clientDir, 'assets/MultyBet');
+  if (fs.existsSync(multiDir)) for (const name of fs.readdirSync(multiDir).filter(file => /^index\.[^.]+\.js$/.test(file))) {
+    const file = path.join(multiDir, name);
+    let modified = -1, adapted;
+    app.get([`/${version}/assets/MultyBet/${name}`, `/assets/MultyBet/${name}`], (_req, res) => {
+      const current = fs.statSync(file).mtimeMs;
+      if (current !== modified) {
+        adapted = adaptScratchMultiResponse(fs.readFileSync(file, 'utf8'));
+        modified = current;
+      }
+      res.set('Cache-Control', 'no-store').type('js').send(adapted);
+    });
+  }
 
   for (const name of LANG_MODULES) {
     const files = langModuleFiles(clientDir, name);

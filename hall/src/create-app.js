@@ -129,7 +129,7 @@ export async function createApp(runtime) {
       }
       data = await dispatch(op, params, userId, req);
     } catch (error) {
-      if ((op === 38 || op === 45) && error.code) {
+      if ([38, 45, 49, 53].includes(op) && error.code) {
         res.set("Cache-Control", "no-store").json({ msgCode: error.code, errMsg: error.message, data: null });
         return;
       }
@@ -155,7 +155,7 @@ export async function createApp(runtime) {
       case 45:
         return enterRoom(params, req);
       case 49:
-        return { clubId: 0, type: decode.num(params.type, 1), roomType: decode.num(params.roomType, 0), itemList: [] };
+        return clubInfo(params, userId);
       case 53:
         return loginInfo(params, userId);
       case 54:
@@ -285,6 +285,7 @@ export async function createApp(runtime) {
     const token = params.token || params.userToken || "";
     let uid = userId;
     let userName = "";
+    let clubId = decode.num(params.clubId, 0);
     if (runtime.gateway) {
       const auth = await runtime.gateway.authenticate(token, userId);
       if (!auth.success) {
@@ -293,6 +294,7 @@ export async function createApp(runtime) {
       uid = auth.userId || userId;
       const profile = await runtime.gateway.getLoginData(uid);
       userName = profile.userName || "";
+      clubId ||= Number(profile.clubId || profile.agentId) || 0;
     }
     const w = await wallet(uid,params);
     return {
@@ -301,11 +303,24 @@ export async function createApp(runtime) {
       name: userName,
       userToken: token || `dev-${uid}`,
       openId: params.openId || String(uid || ""),
-      clubId: decode.num(params.clubId, 0),
+      clubId: clubId || (runtime.env === 'dev' ? 1 : 0),
       hideGameMenus: null,
       walletAmount: w.walletAmount,
       ticketNums: w.ticketNums,
     };
+  }
+
+  async function clubInfo(params, userId) {
+    let clubId = decode.num(params.clubId, 0);
+    const gateway = runtime.gateway || runtime.rpc?.gateway;
+    if (gateway?.authenticate && gateway?.getLoginData) {
+      const auth = await gateway.authenticate(params.token || params.userToken || '', userId);
+      if (!auth.success || Number(auth.userId) !== userId) throw Object.assign(new Error('登录凭证无效'), { code: 401 });
+      const profile = await gateway.getLoginData(userId);
+      clubId ||= Number(profile.clubId || profile.agentId) || 0;
+    }
+    return { clubId: clubId || (runtime.env === 'dev' ? 1 : 0), type: decode.num(params.type, 1),
+      roomType: decode.num(params.roomType, 0), itemList: [] };
   }
 
   const wrap = (fn) => (req, res, next) => {

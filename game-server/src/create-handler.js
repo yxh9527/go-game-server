@@ -55,6 +55,10 @@ export async function createHandler(runtime) {
   function send(ws, msgid, payload) {
     if (ws.readyState === 1) {
       const session = runtime.registry.session(ws);
+      // The original scene must not consume the destination's snapshots while
+      // its bundle is preparing. Connection/exit acknowledgments remain valid.
+      if (session?.roomHydrating && ![PUSH.ROOM_TYPE_RESULT, PUSH.ROOM_LOGIN,
+        PUSH.USER_LEVEL_ROOM, PUSH.ROOM_DISSMISS, PUSH.PING, PUSH.ROOM_PING, 9999].includes(msgid)) return;
       const table = session?.inRoom !== false && session
         ? runtime.registry.getTable(session.roomId, session.agentId, session.gameId) : null;
       if (table) payload = seatView.projectSeatMessage(table, session, msgid, payload);
@@ -391,6 +395,7 @@ export async function createHandler(runtime) {
         if (runtime.gateway?.getLoginData) {
           const profile = await runtime.gateway.getLoginData(session.userId);
           session.agentId = Number(profile?.agentId) || 0;
+          session.clubId ||= Number(profile?.clubId || profile?.agentId) || 0;
           session.topAgentId = Number(profile?.topAgentId) || 0;
           if (profile?.userName) session.name = String(profile.userName);
           session.icon = profile?.icon ?? profile?.userIcon;
@@ -419,9 +424,11 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.authenticated === false) return;
+    if (session.roomJoinTask && msgid !== SEND.SEND_JOIN_ROOM) await session.roomJoinTask;
     // Inline shortcuts intentionally subscribe to OTHER games (60 -> 58, 62 -> 50).
     // Discovery and registration must follow the request, without changing the selected table.
-    if (msgid === SEND.GR_GET_ALL_ROOMS_REQ && gameOf(payload?.roomType)?.kind === 'hundred') {
+    if (msgid === SEND.GR_GET_ALL_ROOMS_REQ
+      && (gameOf(payload?.roomType)?.kind === 'hundred' || gameOf(payload?.roomType)?.multiBet)) {
       const tables = subscriptions.rooms(session, payload);
       send(ws, PUSH.GR_GET_ALL_ROOMS_RES, tables.map(t => gameOf(t.roomType).siblingRoomPayload(t)));
       return;
@@ -445,7 +452,7 @@ export async function createHandler(runtime) {
     }
     if (msgid === SEND.MB_ROOM_BET_REQ) {
       const body = payload || {}, table = subscriptions.target(session, body.roomId, body.roomType);
-      if (!table) {
+      if (!table || table.kind !== 'hundred') {
         send(ws, PUSH.MB_ROOM_BET_RES, { roomId: Number(body.roomId) || 0, roomType: Number(body.roomType) || 0,
           customData: Number(body.customData ?? 2), points: session.wallet, code: 95041 });
       } else {
@@ -453,6 +460,23 @@ export async function createHandler(runtime) {
         await gameOf(table.roomType).placeBet(ctxOf(ws, session, table, request), request, PUSH.MB_ROOM_BET_RES);
         sendWalletPoint(ws, session);
       }
+      return;
+    }
+    if (msgid === SEND.MB_GGLE_BET_REQ) {
+      const body = payload || {}, table = subscriptions.target(session, body.roomId, body.roomType);
+      const game = table && gameOf(table.roomType);
+      const enabled = table && runtime.configs.some(row => Number(row.state ?? 1) === 1
+        && Number(row.room_type) === table.roomType
+        && Number(row.game_room_config_id) === Number(table.cfg?.game_room_config_id)
+        && Number(row.room_index || 0) === table.roomIndex);
+      if (!game?.multiBet || !enabled) {
+        send(ws, PUSH.MB_GGLE_BET_RES, { code: 95041, roomId: Number(body.roomId) || 0,
+          faceValue: body.faceValue, walletAmount: Number(session.wallet) });
+        return;
+      }
+      const result = await game.multiBet(ctxOf(ws, session, table, body), body);
+      send(ws, PUSH.MB_GGLE_BET_RES, result);
+      sendWalletPoint(ws, session);
       return;
     }
     // The native Bairen overlay logs in independently, then sends 6105 without
@@ -468,6 +492,11 @@ export async function createHandler(runtime) {
       if (table && payload?.roomType != null && Number(payload.roomType) !== Number(table.roomType)) return;
       if (table) {
         if (entering) {
+          if (session.gameId === table.gameId && Number(session.roomId) === Number(table.roomId)) {
+            // Direct Hundred scenes announce readiness with 6105, not the
+            // seat games' 2111. Release their initial snapshot at that point.
+            session.roomHydrating = false;
+          }
           if (session.hundredInRoom && (session.hundredRoomId !== table.roomId || session.hundredGameId !== table.gameId)) {
             leaveHundred(ws, session);
           }
@@ -509,6 +538,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (msgid === SEND.LOGIN_ROOM) {
+      session.roomHydrating = false;
       const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
       const game = table ? gameOf(table.roomType) : null;
       if (table && game) await game.afterRound?.(ctxOf(ws, session, table));
@@ -524,34 +554,48 @@ export async function createHandler(runtime) {
       return;
     }
     if (msgid === SEND.SEND_JOIN_ROOM) {
-      const body = payload || {};
-      const roomId = Number(body.roomId || session.roomId);
-      const roomType = Number(body.roomType || 0);
-      session.openHundredGame = Boolean(body.openHundredGame ?? session.openHundredGame);
-      session.roomId = roomId;
-      const table = ensureTable(roomId, roomType, session.agentId);
-      if (!table) {
-        send(ws, PUSH.ROOM_DISSMISS, { roomId });
-        return;
-      }
-      await gameOf(table.roomType)?.afterRound?.(ctxOf(ws, session, table));
-      if (table.kind === "normal" && lifecycle.isExpired(table)) {
-        await expireRoom(table);
-        send(ws, PUSH.ROOM_DISSMISS, { roomId: table.roomId });
-        return;
-      }
-      session.gameId = table.gameId;
-      session.inRoom = true;
-      table.standby = false;
-      const game = gameOf(table.roomType);
-      game.onJoin(ctxOf(ws, session, table, body));
-      const code = fair.currentFairCode(table, session.userId);
-      if (code) send(ws, PUSH.DZPK_PUSH_BLOCKCHAIN_NOTIFY, code);
-      if (game.kind === "normal" && Number(table.roomType)!==101) {
-        pool.expand();
-        pushPoint(ws, session);
-        await persist(session);
-      }
+      while (session.roomJoinTask) await session.roomJoinTask;
+      const joining = (async () => {
+        const body = payload || {};
+        const roomId = Number(body.roomId || session.roomId);
+        const roomType = Number(body.roomType || 0);
+        const table = ensureTable(roomId, roomType, session.agentId);
+        if (!table) {
+          send(ws, PUSH.ROOM_DISSMISS, { roomId });
+          return;
+        }
+        await gameOf(table.roomType)?.afterRound?.(ctxOf(ws, session, table));
+        if (table.kind === "normal" && lifecycle.isExpired(table)) {
+          await expireRoom(table);
+          send(ws, PUSH.ROOM_DISSMISS, { roomId: table.roomId });
+          return;
+        }
+        if (session.leaveTask) await session.leaveTask;
+        if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
+        const previous = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
+        if (session.inRoom !== false && previous && previous !== table) {
+          await leaveTable(ws, session, previous, gameOf(previous.roomType));
+        }
+        session.openHundredGame = Boolean(body.openHundredGame ?? session.openHundredGame);
+        session.roomId = roomId;
+        session.gameId = table.gameId;
+        session.inRoom = true;
+        session.roomHydrating = Boolean(body.changeRoom);
+        table.standby = false;
+        const game = gameOf(table.roomType);
+        game.onJoin(ctxOf(ws, session, table, body));
+        const code = fair.currentFairCode(table, session.userId);
+        if (code) send(ws, PUSH.DZPK_PUSH_BLOCKCHAIN_NOTIFY, code);
+        if (game.kind === "normal" && Number(table.roomType)!==101) {
+          pool.expand();
+          pushPoint(ws, session);
+          await persist(session);
+        }
+      })();
+      session.roomJoinTask = joining;
+      const clear = () => { if (session.roomJoinTask === joining) delete session.roomJoinTask; };
+      joining.then(clear, clear);
+      await joining;
       return;
     }
     // An explicit exit is acknowledged directly, never via room broadcast:
@@ -559,6 +603,7 @@ export async function createHandler(runtime) {
     // Also recover clients whose earlier exit completed without its receipt.
     if (msgid === SEND.SEND_LEVEL_OUT && session.inRoom === false) {
       if (session.leaveTask) await session.leaveTask;
+      else if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
       else sendLeaveResult(ws, session);
       return;
     }
@@ -567,6 +612,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.inRoom === false) return;
+    if (msgid === SEND.GGL_STATE) session.roomHydrating = false;
     const game = gameOf(table.roomType);
     await game.afterRound?.(ctxOf(ws, session, table));
     if (table.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
@@ -617,28 +663,43 @@ export async function createHandler(runtime) {
     }
   }
 
-  function sendLeaveResult(ws, session) {
-    send(ws, PUSH.USER_LEVEL_ROOM, { roomId: session.roomId, uid: session.userId, type: 1 });
+  function sendLeaveResult(ws, session, roomId = session.roomId) {
+    send(ws, PUSH.USER_LEVEL_ROOM, { roomId, uid: session.userId, type: 1 });
   }
 
   function leaveTable(ws, session, table, game) {
     if (session.leaveTask) return session.leaveTask;
+    const state = session.roomLeave ||= { table, detached: false, credited: false, persisted: false, cash: 0 };
     const task = (async () => {
-      if (table.kind !== "hundred") leaveHundred(ws, session);
-      await game.beforeLeave?.(ctxOf(ws, session, table));
-      await game.afterRound?.(ctxOf(ws, session, table));
-      session.inRoom = false;
-      const cash = game.onLeave(ctxOf(ws, session, table));
-      if (table.kind !== 'slots' && Number(table.roomType)!==101) {
-        if (runtime.wallet.credit) await runtime.wallet.credit(session, Number(cash || 0));
-        else session.wallet += Number(cash || 0);
+      if (!state.detached) {
+        if (table.kind !== "hundred") leaveHundred(ws, session);
+        await game.beforeLeave?.(ctxOf(ws, session, table));
+        await game.afterRound?.(ctxOf(ws, session, table));
+        session.inRoom = false;
+        state.cash = Number(game.onLeave(ctxOf(ws, session, table)) || 0);
+        state.detached = true;
       }
-      pushPoint(ws, session);
-      if (table.kind !== 'slots' && Number(table.roomType)!==101) await persist(session);
+      if (table.kind !== 'slots' && Number(table.roomType) !== 101) {
+        if (!state.credited) {
+          if (state.cash > 0) {
+            if (runtime.wallet.credit) {
+              const result = await runtime.wallet.credit(session, state.cash);
+              if (result?.ok === false) throw new Error('Room cash-out rejected');
+            } else session.wallet += state.cash;
+          }
+          state.credited = true;
+        }
+        if (!state.persisted) {
+          await runtime.wallet.persist(session);
+          state.persisted = true;
+        }
+      }
       await game.afterRound?.(ctxOf(ws, session, table));
+      pushPoint(ws, session);
       // The original client returns to its hall only after receiving 2205
       // for its own uid/roomId. Spectators need the same receipt as players.
-      sendLeaveResult(ws, session);
+      sendLeaveResult(ws, session, table.roomId);
+      delete session.roomLeave;
     })();
     // Keep the in-flight operation on the resident session across hot reloads.
     session.leaveTask = task;
@@ -649,6 +710,13 @@ export async function createHandler(runtime) {
 
   function tick() {
     const closing = [];
+    for (const [ws, session] of runtime.registry.sessions) {
+      if (!session.roomLeave || session.leaveTask) continue;
+      const table = session.roomLeave.table;
+      closing.push(leaveTable(ws, session, table, gameOf(table.roomType)).then(() => {
+        if (ws.readyState !== 1) runtime.registry.drop(ws);
+      }).catch(error => runtime.log.error('room cash-out failed; will retry', error.message)));
+    }
     for (const table of [...runtime.registry.tables.values()]) {
       const game = gameOf(table.roomType);
       const context = { runtime, io: tableIo(table), table };
@@ -685,6 +753,9 @@ export async function createHandler(runtime) {
       runtime.registry.drop(ws);
       return;
     }
+    if (session.roomJoinTask) await session.roomJoinTask;
+    if (session.leaveTask) await session.leaveTask;
+    if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
     leaveHundred(ws, session);
     const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
     const game = table ? gameOf(table.roomType) : null;

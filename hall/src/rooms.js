@@ -12,7 +12,10 @@ export function createRoomLogic(decode) {
     const roomType = params.roomType === undefined || params.roomType === ''
       ? (gameType === 1000 ? { 1: 50, 2: 51, 3: 52, 4: 60, 5: 62 }[subGameType] : undefined)
       : num(params.roomType, undefined);
-    const playMode = params.playMode === undefined || params.playMode === "" ? undefined : num(params.playMode, 0);
+    // Native roomListInside serializes an omitted optional mode as the literal
+    // string "undefined". The all-modes tab must not become classic mode 0.
+    const playMode = params.playMode == null || ['', 'undefined', 'null'].includes(params.playMode)
+      ? undefined : num(params.playMode, 0);
     const forceShowCard = params.forceShowCard === undefined || params.forceShowCard === ""
       ? undefined
       : truthy(params.forceShowCard);
@@ -170,10 +173,16 @@ export function createRoomLogic(decode) {
           : roomType === 24 ? [24, playMode, roomAnte(row), roomSeeCardNo(row), roomClassification(row), num(row.carry_min, 0)].join('/')
             : `${roomType}/${smallBlind}/${bigBlind}`,
       domain: config.game_server || "",
+      // Web sockets use domain; the native in-game switch flow additionally
+      // requires a nonempty shield before it begins its leave/join sequence.
+      shield: row.shield || config.game_shield || config.game_server || "",
       // Ordinary games also load the shared Bairen panel and unsubscribe on
       // exit. Its original socket selector requires this endpoint even when
       // no hundred-player room was entered; a shared server reuses domain.
-      hundredDomain: config.hundred_server || config.game_server || "",
+      // Scratch opens MultyBet on its existing main socket, without connecting
+      // a hundred overlay, so that endpoint must be the main domain.
+      hundredDomain: [61, 63].includes(roomType) ? config.game_server || ""
+        : config.hundred_server || config.game_server || "",
     };
   }
 

@@ -6,6 +6,9 @@ const { SEND, PUSH } = await rel(import.meta.url, '../../messages.js', v);
 export class GglGame extends SlotsGame {
   createTable(roomId, roomType, row) { return engine.createScratchTable(roomId, roomType, row, this.config); }
   buildConf(table) { return engine.scratchConf(table); }
+  multiRoomSnapshot(table) { return engine.multiRoomSnapshot(table); }
+  siblingRoomPayload(table) { return this.multiRoomSnapshot(table); }
+  multiBet(ctx, body) { return engine.multiBet(ctx, body); }
   beforeLeave(ctx) {
     ctx.session.inRoom = false;
     // Queue behind any purchase/reveal already accepted on this connection.

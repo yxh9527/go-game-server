@@ -32,6 +32,41 @@ test("client app serves local avatar files by avatar ID", async () => {
   }
 });
 
+test("local overrides serve scripts, assets and cache validations with CORS", async () => {
+  const server = http.createServer(createClientApp());
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const url = base + "/2.0.1279/assets/main/index.88f4e.js";
+    const script = await fetch(url, { headers: { Origin: "https://www.boyuee.top" } });
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get("content-type"), /javascript/);
+    assert.equal(script.headers.get("access-control-allow-origin"), "*");
+    await script.arrayBuffer();
+    const cached = await new Promise((resolve, reject) => {
+      http.get(url, { headers: { Origin: "null", "If-None-Match": script.headers.get("etag") } }, response => {
+        response.resume();
+        response.on("end", () => resolve(response));
+      }).on("error", reject);
+    });
+    assert.equal(cached.statusCode, 304);
+    assert.equal(cached.headers["access-control-allow-origin"], "*");
+    const options = await fetch(url, { method: "OPTIONS", headers: {
+      Origin: "https://www.boyuee.top", "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "x-requested-with",
+    } });
+    assert.equal(options.status, 204);
+    assert.equal(options.headers.get("access-control-allow-origin"), "*");
+    assert.match(options.headers.get("access-control-allow-headers"), /x-requested-with/);
+    const image = await fetch(base + "/avator/90007.png", { headers: { Origin: "https://www.boyuee.top" } });
+    assert.equal(image.headers.get("access-control-allow-origin"), "*");
+    await image.arrayBuffer();
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+  }
+});
+
 test("client app injects runtime fixes into the served game page", async () => {
   const server = http.createServer(createClientApp());
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

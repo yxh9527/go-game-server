@@ -39,6 +39,9 @@ export class GameBase {
     ctx.send(PUSH.ROOM_TYPE_RESULT, {
       roomId: ctx.table.roomId,
       roomType: ctx.table.roomType,
+      clubId: ctx.session.clubId || 0,
+      playerClubId: ctx.session.clubId || 0,
+      exchangeRate: 1,
       conf: this.buildConf(ctx.table),
     });
   }
