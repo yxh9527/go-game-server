@@ -164,7 +164,8 @@ export function tick(io, table, now) {
         bet(io, table, p.uid, 1, h.deadline - 1);
       } else if ((p.bot || p.member.pendingDeparture || p.member.tuoGuanState) && now >= p.actionAt) {
         bet(io, table, p.uid, robot.chooseMultiple({ cards: p.hole.slice(0, 2),
-          maxMultiple: maxMultiple(table, p), point: p.member.point, ante: rules(table).ante }), now);
+          maxMultiple: maxMultiple(table, p), point: p.member.point, ante: rules(table).ante,
+          context: p.bot ? robot.decisionContext(table, p) : null }), now);
       }
     }
     if (h.players.every(p => p.bet !== null)) reveal(io, table, now);

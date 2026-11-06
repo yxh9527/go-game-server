@@ -51,27 +51,125 @@ function preflopStrength(hole) {
   const suited = Math.floor(hole[0] / 13) === Math.floor(hole[1] / 13);
   return clamp(0.12 + (high - 2) * 0.025 + (low - 2) * 0.015
     + (suited ? 0.08 : 0) + (gap === 1 ? 0.07 : gap === 2 ? 0.04 : gap >= 5 ? -0.06 : 0)
-    + (high === 14 ? 0.04 : 0) + (low >= 10 ? 0.08 : 0), 0, 1);
+    + (high === 14 ? 0.04 : 0) + (low >= 10 ? 0.08 : 0)
+    + (suited && high === 14 && low <= 5 ? 0.05 : 0), 0, 1);
+}
+
+// A made hand's name alone is misleading: a pair on the board is not a pair
+// in our hole cards, and four suited board cards can make an overpair fragile.
+export function assessHand(hole, board) {
+  if (!board.length) return { preflop: preflopStrength(hole) };
+  const known = [...hole, ...board];
+  const made = evaluate7(known);
+  const boardRanks = board.map(rankValue);
+  const holeRanks = hole.map(rankValue);
+  const suits = Array.from({ length: 4 }, (_, suit) => board.filter((card) => Math.floor(card / 13) === suit).length);
+  const boardValues = new Set(boardRanks);
+  if (boardValues.has(14)) boardValues.add(1);
+  let connected = 0;
+  for (let low = 1; low <= 10; low += 1) {
+    connected = Math.max(connected, Array.from({ length: 5 }, (_, i) => low + i)
+      .filter((value) => boardValues.has(value)).length);
+  }
+  const playsBoard = board.length === 5 && compareRank(made, evaluate7(board)) === 0;
+  let quality = "air";
+  if (made.cardTypeId >= 5) quality = "strong";
+  else if (made.cardTypeId === 4) quality = "trips";
+  else if (made.cardTypeId === 3) quality = "two-pair";
+  else if (made.cardTypeId === 2) {
+    const pair = made.key[0];
+    if (!holeRanks.includes(pair)) quality = "air";
+    else if (holeRanks[0] === holeRanks[1] && pair > Math.max(...boardRanks)) quality = "overpair";
+    else if (pair === Math.max(...boardRanks)) quality = "top-pair";
+    else quality = "weak-pair";
+  }
+  // Board pairs/trips must not turn a low pocket pair or a kicker into value.
+  if (board.length >= 3) {
+    const counts = boardRanks.map((rank) => boardRanks.filter((other) => other === rank).length);
+    if (made.cardTypeId === 4 && counts.includes(3)) quality = "weak-pair";
+    if (made.cardTypeId === 3 && !holeRanks.some((rank) => boardRanks.includes(rank))) quality = "weak-pair";
+  }
+  if (playsBoard) quality = "board";
+
+  const flushOuts = new Set();
+  const straightOuts = new Set();
+  if (board.length < 5) {
+    const values = new Set(known.map(rankValue));
+    if (values.has(14)) values.add(1);
+    for (const card of makeDeck()) {
+      if (known.includes(card)) continue;
+      const suit = Math.floor(card / 13);
+      if (made.cardTypeId < 6 && known.filter((c) => Math.floor(c / 13) === suit).length === 4
+        && hole.some((c) => Math.floor(c / 13) === suit)) flushOuts.add(card);
+      if (made.cardTypeId >= 5) continue;
+      const rank = rankValue(card);
+      for (let low = 1; low <= 10; low += 1) {
+        const window = Array.from({ length: 5 }, (_, i) => low + i);
+        if (window.every((v) => values.has(v) || v === rank || (v === 1 && rank === 14))
+          && window.some((v) => holeRanks.includes(v === 1 ? 14 : v) && !boardValues.has(v))) {
+          straightOuts.add(card);
+        }
+      }
+    }
+  }
+  return {
+    made: made.name, quality, playsBoard,
+    // These are potential improvement cards, not guaranteed winning outs.
+    flushDraw: flushOuts.size > 0, straightDraw: straightOuts.size > 0,
+    drawOuts: new Set([...flushOuts, ...straightOuts]).size,
+    wet: Math.max(...suits) >= 2 || connected >= 3,
+    dangerous: Math.max(...suits) >= 4 || connected >= 4,
+  };
+}
+
+function participants(table) {
+  return table.hand.participants || table.members;
 }
 
 function publicOpponents(table, actor) {
-  // Contributions/all-in status are public. Do not inspect other players' holes,
-  // even their length: unfunded or newly seated players are not in this hand.
-  return table.members.filter((member) => member.uid !== actor.uid && !member.folded
+  // Select this hand's live opponents before looking at any cards. Empty seats,
+  // folded players and players joining mid-hand are not decision inputs.
+  return participants(table).filter((member) => member.uid !== actor.uid && !member.folded
     && (member.totalBet > 0 || member.streetBet > 0 || member.allIn));
 }
 
-function equity(hand, actor, board, opponents) {
-  const key = [...actor.hole, ...board, opponents].join(",");
+function latePosition(table, actor, rivals, preflop) {
+  const active = [actor, ...rivals.filter((member) => !member.allIn && member.point > 0)]
+    .sort((a, b) => a.pos - b.pos);
+  const anchorUid = preflop ? table.hand.bigBlindId : table.hand.bankerId;
+  const order = participants(table).slice().sort((a, b) => a.pos - b.pos);
+  const anchor = order.findIndex((member) => member.uid === anchorUid);
+  if (anchor < 0) return rivals.every((member) => member.allIn || table.hand.acted?.has(member.uid));
+  const distance = (member) => (order.findIndex((p) => p.uid === member.uid) - anchor - 1 + order.length) % order.length;
+  const behind = active.filter((member) => distance(member) > distance(actor)).length;
+  return preflop ? behind <= Math.floor((active.length - 1) / 3) : behind === 0;
+}
+
+function equity(hand, actor, board, rivals) {
+  const known = new Set([...actor.hole, ...board]);
+  const holdings = rivals.map((rival) => {
+    // Explicit Holdem policy: human holes are available to robot decisions.
+    // Other robots' holes and the engine's deck remain outside this policy.
+    if (rival.bot) return null;
+    const hole = rival.hole;
+    if (!Array.isArray(hole) || hole.length !== 2 || hole[0] === hole[1]
+      || !hole.every((card) => Number.isInteger(card) && card >= 0 && card < 52 && !known.has(card))) return null;
+    hole.forEach((card) => known.add(card));
+    return hole.slice();
+  });
+  const allKnown = holdings.length > 0 && holdings.every(Boolean);
+  const knownHumans = holdings.some(Boolean);
+  if (!board.length && !knownHumans) return { allKnown, knownHumans, exact: false };
+  const exact = board.length === 5 && allKnown;
+  const key = knownHumans ? JSON.stringify([actor.hole, board, holdings])
+    : [...actor.hole, ...board, Math.max(1, holdings.length)].join(",");
   let cache = estimates.get(hand);
   if (!cache) estimates.set(hand, cache = new Map());
   const cached = cache.get(actor.uid);
   if (cached?.key === key) return cached.value;
 
-  // Sample only unknown cards from a fresh deck, never the engine's shuffled
-  // deck, undealt board or opponents' actual hole cards. One estimate per public
-  // state keeps repeat raises inexpensive and avoids random opinion changes.
-  const known = new Set([...actor.hole, ...board]);
+  // Human holes are fixed in every trial and excluded from future runouts.
+  // Future board cards and unknown bot holes come from an independent deck.
   const unknown = makeDeck().filter((card) => !known.has(card));
   let seed = 2166136261;
   for (const ch of key) seed = Math.imul(seed ^ ch.charCodeAt(0), 16777619) >>> 0;
@@ -80,7 +178,9 @@ function equity(hand, actor, board, opponents) {
     return seed / 4294967296;
   };
   let won = 0;
-  for (let trial = 0; trial < EQUITY_SAMPLES; trial += 1) {
+  let outright = 0;
+  const samples = exact ? 1 : EQUITY_SAMPLES;
+  for (let trial = 0; trial < samples; trial += 1) {
     const pool = unknown.slice();
     let next = 0;
     const draw = () => {
@@ -93,14 +193,19 @@ function equity(hand, actor, board, opponents) {
     const own = evaluate7([...actor.hole, ...runout]);
     let ties = 1;
     let beaten = false;
-    for (let rival = 0; rival < opponents; rival += 1) {
-      const result = compareRank(own, evaluate7([draw(), draw(), ...runout]));
+    for (const holding of holdings.length ? holdings : [null]) {
+      const result = compareRank(own, evaluate7([...(holding || [draw(), draw()]), ...runout]));
       if (result < 0) { beaten = true; break; }
       if (result === 0) ties += 1;
     }
-    if (!beaten) won += 1 / ties;
+    if (!beaten) {
+      won += 1 / ties;
+      if (ties === 1) outright += 1;
+    }
   }
-  const value = won / EQUITY_SAMPLES;
+  const value = { share: won / samples, win: outright / samples, allKnown, knownHumans, exact,
+    weakRivals: board.length >= 3 && allKnown && holdings.every((hole) =>
+      ["air", "weak-pair"].includes(assessHand(hole, board).quality)) };
   cache.set(actor.uid, { key, value });
   return value;
 }
@@ -123,41 +228,53 @@ export function botChoose(table, actor, rng = Math.random) {
   const style = styles[Math.abs(Math.trunc(finite(actor.uid))) % styles.length];
   const bb = Math.max(1, finite(table.bigBlind, gameConfig.defaultBigBlind));
   const preflop = board.length === 0;
-  const strength = preflop ? preflopStrength(hole) : 0;
-  const estimatedEquity = preflop
+  const holding = assessHand(hole, board);
+  const strength = holding.preflop || 0;
+  const estimate = equity(hand, actor, board, rivals);
+  const estimatedEquity = preflop && !estimate.knownHumans
     ? Math.pow(0.27 + strength * 0.6, 1 + (opponents - 1) * 0.65)
-    : equity(hand, actor, board, opponents);
+    : estimate.share;
   const call = Math.min(toCall, stack);
   // A short stack cannot win portions of side pots above its own contribution.
-  const eligiblePot = table.members.reduce((sum, member) =>
+  const eligiblePot = participants(table).reduce((sum, member) =>
     sum + Math.min(Math.max(0, finite(member.totalBet)), finite(actor.totalBet) + call), 0);
   const pot = Math.max(bb, Math.min(finite(hand.pot, bb), eligiblePot || finite(hand.pot, bb)));
   const price = call / (pot + call);
-  // The sample is against unknown holdings, while a player committing chips
-  // represents a stronger range. Apply a price-sensitive discount rather than
-  // treating an ace-high draw like a made hand against a large bet.
-  const rangeDiscount = !preflop && toCall > 0 ? 0.04 + 0.12 * price : 0;
+  // A range discount applies only when some opponents' holdings are unknown.
+  const marginal = ["air", "weak-pair", "top-pair", "overpair", "board"].includes(holding.quality);
+  const rangeDiscount = !estimate.allKnown && !preflop && toCall > 0
+    ? 0.04 + 0.12 * price + (holding.dangerous && marginal ? 0.1 : 0) : 0;
   const winChance = Math.max(0, estimatedEquity - rangeDiscount);
-  const late = actor.dealer || rivals.every((member) => member.allIn || hand.acted?.has(member.uid));
+  const late = latePosition(table, actor, rivals, preflop);
   const margin = 0.025 + 0.1 * (call / stack) + 0.07 * Math.min(1, toCall / pot);
   const adjusted = winChance + style.looseness + (preflop && late ? 0.025 : 0);
-  if (toCall > 0 && adjusted + (rng() - 0.5) * 0.025 < price + margin) return action(OP.ABANDON);
+  // A royal flush on the board guarantees a split. Risk premiums must never
+  // make us surrender a guaranteed share of the eligible pot.
+  const guaranteedShare = estimate.exact && estimate.share > 0
+    || holding.playsBoard && holding.made === "ROYAL_FLUSH";
+  if (toCall > 0 && !guaranteedShare
+    && (estimate.exact || adjusted + (rng() - 0.5) * 0.025 < price + margin)) return action(OP.ABANDON);
 
   const minRaise = Math.max(bb, finite(hand.minRaise, bb));
   const contestable = Math.max(currentBet, ...rivals.filter((member) => !member.allIn)
     .map((member) => finite(member.streetBet) + finite(member.point)));
   const maxTarget = Math.min(streetBet + stack, contestable);
   const canRaise = stack > toCall && maxTarget >= currentBet + minRaise;
-  const valueRaise = preflop
-    ? strength >= (currentBet > 4 * bb ? 0.86 : 0.7)
-    : winChance >= Math.max(0.55, 1 / (opponents + 1) + 0.22);
-  const semiBluff = !preflop && board.length < 5 && winChance > 0.25;
-  const bluffChance = toCall === 0 && opponents <= 2 && late
-    ? style.bluff + (semiBluff ? 0.08 : 0) : 0;
+  const valueRaise = estimate.allKnown ? estimate.win >= 0.6 : preflop
+    ? strength >= (currentBet > 4 * bb ? 0.86 : currentBet <= bb && late ? 0.6 : 0.7)
+    : !holding.playsBoard && !["air", "weak-pair"].includes(holding.quality)
+      && estimate.win >= 0.45 && winChance >= (holding.dangerous && marginal ? 0.75 : 0.55);
+  const semiBluff = !preflop && holding.drawOuts >= 8 && winChance > 0.25;
+  const foldable = rivals.every((member) => !member.allIn);
+  const bluffChance = opponents <= 2 && late && foldable && !holding.playsBoard
+    && (!estimate.allKnown || estimate.weakRivals)
+    ? (toCall === 0 ? style.bluff + (semiBluff ? 0.12 : 0)
+      : semiBluff && toCall <= pot * 0.2 ? 0.12 : 0) : 0;
   if (canRaise && rng() < (valueRaise ? style.aggression : bluffChance)) {
+    const fraction = holding.wet && valueRaise ? 0.65 : marginal && valueRaise ? 0.33 : 0.45;
     const increment = preflop
       ? (currentBet <= bb ? bb * (2 + rng()) : currentBet * (1 + 0.4 * rng()))
-      : (pot + call) * (0.4 + rng() * 0.35);
+      : (pot + call) * (fraction + rng() * 0.2);
     const target = Math.min(maxTarget, Math.max(currentBet + minRaise, Math.round(currentBet + increment)));
     // Avoid gambling most of a deep stack with a marginal made hand/draw.
     if (target - streetBet <= stack * 0.5 || winChance >= 0.72) {

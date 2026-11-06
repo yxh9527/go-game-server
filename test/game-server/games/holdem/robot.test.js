@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { botChoose, ensureBots, scheduleTurn, tickBot } from "../../../../game-server/src/games/holdem/robot.js";
+import { assessHand, botChoose, ensureBots, scheduleTurn, tickBot } from "../../../../game-server/src/games/holdem/robot.js";
 import { beginHand, createTexasTable, onTexasAction, tickPlaying } from "../../../../game-server/src/games/holdem/engine.js";
 import { OP } from "../../../../game-server/src/games/holdem/op.js";
 import { PUSH } from "../../../../game-server/src/messages.js";
@@ -54,13 +54,73 @@ test("flush draw continues at a cheap price but can fold to an expensive call", 
   assert.equal(botChoose(expensive.table, expensive.actor, () => 0.9).operation, OP.ABANDON);
 });
 
-test("robot only reads its own holes and public information", () => {
+test("robot reads human holes but never another bot's holes or the future deck", () => {
   const { table, actor, rival } = fixture({ hole: [0, 12], board: [9, 10, 11], bet: 200, pot: 300 });
   const forbidden = { get() { throw new Error("private cards accessed"); } };
   Object.defineProperty(table.hand, "deck", forbidden);
   Object.defineProperty(table.hand, "deckPos", forbidden);
+  rival.bot = true;
   Object.defineProperty(rival, "hole", forbidden);
   assert.notEqual(botChoose(table, actor, () => 0.9).operation, OP.ABANDON);
+});
+
+test("hand assessment distinguishes own pairs, board pairs and real draws", () => {
+  assert.equal(assessHand([0, 12], [13, 20, 42]).quality, "top-pair");
+  assert.equal(assessHand([0, 13], [12, 20, 42]).quality, "overpair");
+  assert.equal(assessHand([1, 14], [12, 20, 42]).quality, "weak-pair");
+  assert.equal(assessHand([0, 12], [7, 20, 42]).quality, "air");
+  assert.equal(assessHand([0, 11], [2, 8, 25]).flushDraw, true);
+  assert.equal(assessHand([7, 21], [9, 36, 1]).drawOuts, 8);
+  assert.equal(assessHand([0, 16], [1, 28, 47]).drawOuts, 4);
+  assert.equal(assessHand([0, 11], [2, 8, 25, 31, 45]).drawOuts, 0);
+  assert.equal(assessHand([13, 26], [1, 4, 7, 11]).dangerous, true);
+});
+
+test("the same river hand folds to a better human hand and value bets a worse one", () => {
+  const { table, actor, rival } = fixture({ hole: [0, 12], board: [13, 20, 42, 34, 48], bet: 200, pot: 300 });
+  Object.defineProperty(table.hand, "deck", { get() { throw new Error("future deck accessed"); } });
+  rival.hole = [7, 33]; // Set of eights beats top pair.
+  assert.equal(botChoose(table, actor, () => 0.1).operation, OP.ABANDON);
+  rival.hole = [24, 38]; // KQ loses to top pair; same hand object must invalidate the cache.
+  assert.equal(botChoose(table, actor, () => 0.1).operation, OP.ADD);
+  assert.equal(botChoose(table, actor, () => 0.99).operation, OP.FOLLOW);
+});
+
+test("known human holes affect preflop decisions and missing holes use unknown holdings", () => {
+  const { table, actor, rival } = fixture({ hole: [12, 25], bet: 1500, stack: 2000, pot: 1600 });
+  rival.hole = [0, 13]; // KK versus AA.
+  assert.equal(botChoose(table, actor, () => 0.9).operation, OP.ABANDON);
+  rival.hole = [11, 24]; // KK versus QQ.
+  assert.notEqual(botChoose(table, actor, () => 0.9).operation, OP.ABANDON);
+  rival.hole = [-1, -1];
+  assert.doesNotThrow(() => botChoose(table, actor, () => 0.9));
+});
+
+test("known split pots are called without a risk discount and never value raised", () => {
+  const { table, actor, rival } = fixture({ hole: [13, 25], board: [0, 22, 33, 42, 27], bet: 2000, stack: 2000, pot: 2100 });
+  rival.hole = [26, 38]; // Both players have aces and kings with the same kicker.
+  assert.equal(botChoose(table, actor, () => 0).operation, OP.ALL_IN);
+  actor.point = 4000;
+  assert.equal(botChoose(table, actor, () => 0).operation, OP.FOLLOW);
+});
+
+test("folded, newly seated and bot holes are excluded from human hand knowledge", () => {
+  const { table, actor, rival } = fixture({ hole: [0, 12], board: [13, 20, 42, 34, 48], bet: 200 });
+  rival.hole = [24, 38];
+  const forbidden = { get() { throw new Error("excluded holes accessed"); } };
+  const folded = { uid: 3, pos: 2, folded: true, totalBet: 100 };
+  const joined = { uid: 4, pos: 3, totalBet: 0, streetBet: 0, point: 2000 };
+  Object.defineProperty(folded, "hole", forbidden);
+  Object.defineProperty(joined, "hole", forbidden);
+  table.hand.participants = [actor, rival, folded];
+  table.members.push(folded, joined);
+  assert.equal(botChoose(table, actor, () => 0.99).operation, OP.FOLLOW);
+  // A human's fold must remove its formerly winning cards from the estimate.
+  const stronger = { uid: 5, pos: 4, totalBet: 200, streetBet: 200, point: 2000, hole: [7, 33] };
+  table.hand.participants.push(stronger);
+  assert.equal(botChoose(table, actor, () => 0.99).operation, OP.ABANDON);
+  stronger.folded = true;
+  assert.equal(botChoose(table, actor, () => 0.99).operation, OP.FOLLOW);
 });
 
 test("value bets use normal action units and the shared engine applies that target", () => {
@@ -169,6 +229,35 @@ test("seeded robot tables reach later streets, settle and conserve chips", (t) =
   assert.ok(reached.BET_RIVER >= 8, "a meaningful sample must play the river");
   for (const op of [OP.ABANDON, OP.FOLLOW, OP.PASS, OP.ADD, OP.BET]) assert.ok(operations.has(op));
   t.diagnostic(JSON.stringify({ hands: 80, reached, operations: [...operations].sort((a, b) => a - b) }));
+});
+
+test("mixed human and robot hands settle through shared actions and conserve chips", (t) => {
+  t.mock.method(Math, "random", seeded(20261106));
+  for (let index = 0; index < 24; index += 1) {
+    const table = createTexasTable(790000 + index, 19, { small_blind: 10, big_blind: 20, carry_min: 500 });
+    ensureBots(table, 2 + index % 6);
+    table.members[0].bot = false;
+    if (index % 2 && table.members.length > 2) table.members[1].bot = false;
+    const initial = table.members.reduce((sum, member) => sum + member.point, 0);
+    const messages = [];
+    const io = ioFor(messages);
+    beginHand(io, table);
+    let turns = 0;
+    while (table.phase === "playing" && turns++ < 200) {
+      const actor = table.members.find((member) => member.uid === table.hand.actorUid);
+      assert.ok(actor);
+      if (actor.bot) tickPlaying(io, table, Number.MAX_SAFE_INTEGER);
+      else onTexasAction(io, table, { userId: actor.uid }, { uid: actor.uid,
+        operation: table.hand.currentBet > actor.streetBet ? OP.FOLLOW : OP.PASS });
+    }
+    assert.ok(turns < 200, "mixed hand must settle without a stuck action");
+    assert.equal(table.members.reduce((sum, member) => sum + member.point, 0), initial);
+    assert.ok(table.members.every((member) => Number.isFinite(member.point) && member.point >= 0));
+    const result = messages.find((message) => message.msgid === PUSH.DZPK_INNING_RESULT_PUSH);
+    assert.ok(result);
+    assert.equal(result.payload.reduce((sum, player) => sum + player.score, 0), 0);
+    assert.equal(table.history.length, 1);
+  }
 });
 
 test("new engine versions load new robot functions without restarting", async () => {

@@ -275,9 +275,11 @@ export function tick(io, table, now) {
       const policy = auto?.status ? { grab: special ? auto.specialGrabBank : auto.tenGrabBank,
         multiple: special ? auto.specialMultiple : auto.tenMultiple } : null;
       if (hand.stage === 'grab' && p.grab === null) grab(io, table, p.uid,
-        robot.choose({ cards: visible, grabMax: grabMax(table, p), phase: 'grab', auto: policy }));
+        robot.choose({ cards: visible, grabMax: grabMax(table, p), phase: 'grab', auto: policy,
+          context: p.bot && !policy ? robot.decisionContext(table, p) : null }));
       if (hand.stage === 'bet' && p.bet === null && p.uid !== hand.bankerUid) bet(io, table, p.uid,
-        robot.choose({ cards: visible, multiples: betOptions(table, p), phase: 'bet', auto: policy }));
+        robot.choose({ cards: visible, multiples: betOptions(table, p), phase: 'bet', auto: policy,
+          context: p.bot && !policy ? robot.decisionContext(table, p) : null }));
       if (hand.stage === 'show') show(io, table, p.uid);
     }
     hand.botActAt = now + 700;

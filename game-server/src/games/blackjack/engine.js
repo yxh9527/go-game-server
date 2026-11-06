@@ -328,7 +328,8 @@ export function tick(io, table, now) {
     } else checkDealer(io, table, now);
   } else if (h.state === STATE.INSURANCE) {
     for (const p of h.players) if (!p.insuranceOperated && (now >= h.deadline || (p.bot || p.member.pendingDeparture) && now >= p.actAt))
-      act(io, table, p.uid, SEND.INSURANCE, { buyInsurance: false }, now, true);
+      act(io, table, p.uid, SEND.INSURANCE, { buyInsurance: p.bot && now < h.deadline
+        && actions(table, p).includes('INSURANCE_BUY') && robot.buyInsurance(robot.decisionContext(table, p)) }, now, true);
     if (h.players.every(p => p.insuranceOperated)) checkDealer(io, table, now);
   } else if (h.state === STATE.CHECK && now >= h.deadline) {
     if (cards.evaluate(h.dealer).handType === 5) {
@@ -339,7 +340,7 @@ export function tick(io, table, now) {
     const p = current(table);
     if (now >= h.deadline || (p.bot || p.member.pendingDeparture) && now >= p.actAt) {
       const decision = now >= h.deadline || p.member.pendingDeparture ? 'STAND'
-        : robot.choose(p.hands[p.currentHandIndex].cards, h.dealer[0], actions(table, p));
+        : robot.choose(p.hands[p.currentHandIndex].cards, h.dealer[0], actions(table, p), robot.decisionContext(table, p));
       act(io, table, p.uid, SEND[decision], {}, now, true);
     }
   } else if (h.state === STATE.DEALER && now >= h.deadline) {

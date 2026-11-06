@@ -716,17 +716,21 @@ export function tick(io, table, now = Date.now()) {
     if (h.stage === 'exchange' && !p.exchange) exchange(io, table, p.uid, robot.chooseExchange(p.handCards), at);
     else if (h.stage === 'que' && !p.queType) chooseQue(io, table, p.uid, robot.chooseQue(p.handCards), at);
     else if (['gang', 'sea'].includes(h.stage) && h.actorUid === p.uid) {
-      const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family }) : { type: OP.PASS };
+      const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family,
+        context: p.bot ? robot.decisionContext(table, p) : null }) : { type: OP.PASS };
       action(io, table, p.uid, chosen, at);
     }
     else if ((h.stage === 'response' || h.stage === 'first') && h.offers[p.uid] && !h.responses[p.uid]) {
-      const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family }) : { type: OP.PASS };
+      const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family,
+        context: p.bot ? robot.decisionContext(table, p) : null }) : { type: OP.PASS };
       action(io, table, p.uid, { ...chosen, isAuto: true }, at);
     } else if (h.stage === 'turn' && h.actorUid === p.uid) {
       const chosen = lockedHand && (due || autoDiscard) && p.handCards.includes(p.drawn)
         ? { type: OP.DISCARD, card: p.drawn }
         : robot.chooseAction({ cards: p.handCards.slice(), options: due ? [] : [...options(table, p), { type: OP.DISCARD }],
         family: h.rules.family, queType: p.queType, ting: p.ting, drawn: p.drawn,
+        context: p.bot ? robot.decisionContext(table, p) : null,
+        waitsByDiscard: p.bot ? tingMap(table, p) : {},
         publicCards: h.players.flatMap(p => p.playCards.concat(p.groupCards.flatMap(g => g.type === 4 ? [] : g.cards))) });
       // Declaration buttons in Jsmj require the actual discard, not the
       // entire list of candidate discards returned with the hint.

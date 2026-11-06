@@ -5,6 +5,7 @@ const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH } = await rel(import.meta.url, './messages.js', v);
 const handLogic = await rel(import.meta.url, './hand.js', v);
 const robot = await rel(import.meta.url, './robot.js', v);
+const { pair } = await rel(import.meta.url, './scoring.js', v);
 const features = await rel(import.meta.url, '../../core/room-features.js', v);
 const fair = await rel(import.meta.url, '../../core/fair-code.js', v);
 const { publicSeat } = await rel(import.meta.url, '../../core/member.js', v);
@@ -61,7 +62,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     const hole = deck.slice(index * 13, index * 13 + 13);
     member.state = 4; member.totalBet = 0;
     return { uid: member.uid, pos: member.pos, name: member.name, icon: member.icon, member, bot: member.bot, hole,
-      openingPoint: member.point, options: handLogic.arrange(hole), result: null,
+      openingPoint: member.point, options: handLogic.arrange(hole, member.bot ? 12 : 3), result: null,
       deadline: table.hand.deadline, extensionsLeft: rules(table).arrangeExtendCount,
       actAt: now + robot.thinkTime() };
   });
@@ -92,34 +93,6 @@ export function addTime(io, table, uid, now = Date.now()) {
   hand.deadline = Math.max(hand.deadline, p.deadline);
   io.broadcast(PUSH.TIME, { uid: p.uid, arrangedLastTime: p.deadline - now, arrangedCount: p.extensionsLeft });
   return true;
-}
-function pair(a, b) {
-  const ar = a.result, br = b.result;
-  const water = [0, 0, 0];
-  let specialWater = 0;
-  const horse = ar.hasHorseCard || br.hasHorseCard;
-  if (ar.isWater || br.isWater) {
-    if (ar.isWater !== br.isWater) {
-      const winner = ar.isWater ? br : ar, sign = ar.isWater ? -1 : 1;
-      if (winner.hasSpecialType) specialWater = sign * winner.specialType.water;
-      else ['frontHand', 'middleHand', 'backHand'].forEach((k, i) => water[i] = sign * winner[k].water);
-    }
-  } else if (ar.hasSpecialType || br.hasSpecialType) {
-    const x = ar.specialType, y = br.specialType;
-    const cmp = x && y ? Math.sign(x.strength - y.strength) : x ? 1 : -1;
-    specialWater = cmp * (cmp > 0 ? x.water : cmp < 0 ? y.water : 0);
-  } else {
-    ['frontHand', 'middleHand', 'backHand'].forEach((k, i) => {
-      const cmp = handLogic.compareKey(ar[k].key, br[k].key);
-      water[i] = cmp > 0 ? ar[k].water : cmp < 0 ? -br[k].water : 0;
-    });
-  }
-  // Ties count towards a scoop, but at least one pile must actually win.
-  const oneScoop = !specialWater && !ar.isWater && !br.isWater && !ar.hasSpecialType && !br.hasSpecialType
-    && water.every(n => n >= 0) && water.some(n => n > 0);
-  const twoScoop = !specialWater && !ar.isWater && !br.isWater && !ar.hasSpecialType && !br.hasSpecialType
-    && water.every(n => n <= 0) && water.some(n => n < 0);
-  return { a, b, water, specialWater, horse, oneScoop, twoScoop };
 }
 export function comparison(table) {
   const players = table.hand.players, pairs = [];
@@ -218,7 +191,7 @@ export function tick(io, table, now) {
   }
   for (const p of hand.players) if (!p.result && (now >= (p.deadline ?? hand.deadline)
     || ((p.bot || p.member.pendingDeparture) && now >= p.actAt))) {
-    const option = robot.choose(p.options);
+    const option = robot.choose(p.options, Math.random, p.bot ? robot.decisionContext(table, p) : null);
     if (option) arrange(io, table, p.uid, option);
   }
   if (now >= hand.earliest && hand.players.every(p => p.result)) settle(io, table, now);
