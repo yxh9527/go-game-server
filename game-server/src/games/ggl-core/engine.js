@@ -37,7 +37,7 @@ export async function multiBet(ctx, body = {}) {
   if (body.revealMode !== 'RANDOM_BUY_REVEAL' || body.serialFull !== '' || body.kind !== kindOf(ctx.table)
     || !Number.isSafeInteger(faceValue) || !ctx.table.config.denominations.includes(faceValue)
     || faceValue > Number(ctx.table.cfg?.hundred_max_bet || ctx.table.config.defaultMaxBet)) return failure(ERROR.INVALID);
-  const result = await scratchRequest(ctx, 'reveal', body);
+  const result = await scratchRequest({ ...ctx, multiBet: true }, 'reveal', body);
   // Echo the denomination even on errors so the native BUYING row can unlock.
   return { ...result, faceValue, roomType: ctx.table.roomType, gglKind: kindOf(ctx.table).toUpperCase() };
 }
@@ -61,6 +61,10 @@ export async function scratchRequest(ctx, method, body = {}) {
     if (body.kind !== undefined && body.kind !== kindOf(table)) throw Object.assign(new Error('Wrong ticket kind'), { code: ERROR.INVALID });
     const buying = method === 'purchase' || method === 'reveal' && body.revealMode === 'RANDOM_BUY_REVEAL';
     if (buying) {
+      if (table.closing || table.retired || Number(table.cfg?.state ?? 1) !== 1
+        || session.roomClosing || session.roomHydrating || session.inRoom === false && !ctx.multiBet) {
+        throw Object.assign(new Error('Scratch purchase window is closed'), { code: ERROR.STORAGE });
+      }
       const value = body.faceValue;
       if (!Number.isSafeInteger(value) || value <= 0 || !table.config.denominations.includes(value)
         || value > Number(table.cfg?.hundred_max_bet || table.config.defaultMaxBet)) {
@@ -79,6 +83,11 @@ export async function scratchRequest(ctx, method, body = {}) {
     }
     const result = await service(ctx)[method](ctx, body);
     if (!result || typeof result !== 'object' || !Number.isInteger(result.code)) throw new Error('Scratch service returned no valid result');
+    if(method==='reveal'&&result.code===0&&typeof result.serialFull==='string'&&result.serialFull.length>0&&Number.isSafeInteger(result.faceValue)&&result.faceValue>0&&Number.isSafeInteger(result.winAmount)){
+      table.recordUserCenter?.([{uid:session.userId,score:result.winAmount-result.faceValue,xiaZhuData:result.faceValue,walletAmount:result.walletAmount}],
+        {key:result.serialFull,inning:1,publicResult:{serialFull:result.serialFull,faceValue:result.faceValue,winAmount:result.winAmount,huMask:result.huMask||[],huCount:result.huCount,multiplier:result.multiplier,
+          winInfo:{serialNo:result.serialFull,faceValue:result.faceValue,amount:result.winAmount-result.faceValue,huMask:result.huMask||[],huCount:result.huCount,multiplier:result.multiplier}}});
+    }
     return { ...base(table, session), ...result };
   } catch (err) {
     ctx.runtime?.log?.error?.('scratch ' + method + ' failed', err?.message || String(err));

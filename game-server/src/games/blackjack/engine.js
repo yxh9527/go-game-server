@@ -2,6 +2,7 @@ import { rel } from '../../rel.js';
 import { shuffle } from '../holdem/cards.js';
 import { env } from '../../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { beforeWagerDeadline } = await rel(import.meta.url, '../../core/wager.js', v);
 const { SEND, PUSH, STATE, ACTION } = await rel(import.meta.url, './messages.js', v);
 const cards = await rel(import.meta.url, './hand.js', v);
 const robot = await rel(import.meta.url, './robot.js', v);
@@ -158,7 +159,7 @@ export function joinBettingHand(io, table, uid, now = Date.now()) {
 }
 export function casinoBetError(table, uid, body = {}, now = Date.now(), automatic = false) {
   const h = table.hand;
-  if (!h || h.settled || h.state !== STATE.BET || !automatic && now >= h.deadline) return 'ILLEGAL_OPERATION';
+  if (!h || table.phase !== 'playing' || table.closing || h.settled || h.state !== STATE.BET || !automatic && !beforeWagerDeadline(h.deadline, now)) return 'ILLEGAL_OPERATION';
   const p = player(table, uid), m = table.members.find(m => m.uid === Number(uid));
   if (!m || m.carryDeadline || banker.isActive(table, uid) || !automatic && m.pendingDeparture || p && p.member !== m
     || body.targetPos !== undefined && body.targetPos !== casino.displaySeat(m.pos)
@@ -219,7 +220,7 @@ export function act(io, table, uid, id, body = {}, now = Date.now(), automatic =
     if (!player(table, uid)) joinBettingHand(io, table, uid, now);
   }
   const p = player(table, uid);
-  if (!h || h.settled || !p || (!automatic && (p.member.pendingDeparture || now >= h.deadline))) return false;
+  if (!h || table.phase !== 'playing' || table.closing || h.settled || !p || (!automatic && (p.member.pendingDeparture || !beforeWagerDeadline(h.deadline, now)))) return false;
   const autoAction = automatic && (!p.bot || now >= h.deadline || p.member.pendingDeparture);
   if (id === SEND.BET) {
     const amount = body.betAmount;

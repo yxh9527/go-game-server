@@ -2,7 +2,7 @@ import { rel } from '../rel.js';
 import { env } from '../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { credit, debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', v);
-const { scoreAmount, validWager, checkedTotal } = await rel(import.meta.url, './wager.js', v);
+const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel(import.meta.url, './wager.js', v);
 const { PUSH } = await rel(import.meta.url, '../messages.js', v);
 const { hundredWalletContext } = await rel(import.meta.url, './robot.js', v);
 const history = env.isDev ? await rel(import.meta.url, '../../../cache/game-server/hundred-history.js', v) : null;
@@ -105,7 +105,8 @@ export function createBairenEngine(adapter) {
         betAreaIds: current.map(row => row.areaId) };
       io.sendUser?.(session.userId, responseId, payload);
     };
-    if (table.hand?.cancelTask || table.hand?.pendingCancel || table.hand?.settling || table.hand?.settled
+    if (table.closing || !beforeWagerDeadline(table.phaseEndsAt)
+      || table.hand?.cancelTask || table.hand?.pendingCancel || table.hand?.settling || table.hand?.settled
       || table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
       || (body.roomId != null && Number(body.roomId) !== Number(table.roomId))) {
       result(1);
@@ -251,6 +252,11 @@ export function createBairenEngine(adapter) {
       }
       table.hundredSettledInning = table.inning;
       hand.settled = true;
+      table.recordUserCenter?.([...settlements].map(([uid,r])=>({uid,score:r.realScore,
+        xiaZhuData:(table.playerBets.get(uid)||[]).reduce((sum,b)=>sum+b.total,0)})),
+        {inning:table.inning,publicResult:{showdownPokers:cards,showdownTypes:rankTypes,...outcome(hand),...extraResult},
+          details:Object.fromEntries([...settlements].map(([uid,r])=>[uid,{areaWinningScores:r.areaWinningScores,
+            betDetailTableMap:Object.fromEntries((table.playerBets.get(uid)||[]).map(b=>[b.areaId,{areaId:b.areaId,betScore:b.total,realScore:r.areaWinningScores[b.areaId]}]))}]))});
       const viewers = new Map();
       io.forEachPlayer?.(session => viewers.set(Number(session.userId), session));
       for (const [uid, session] of table.playerSessions) viewers.set(Number(uid), session);

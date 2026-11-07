@@ -1,6 +1,13 @@
 import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
+import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
 
 export class GatewayRpcProd {
+  async getUserCenter(query) {
+    return (await getGogameStorageClient()).call('userCenter',query);
+  }
+  async writeUserCenter(records) {
+    return (await getGogameStorageClient()).call('userCenterWrite',{records});
+  }
   async authenticate(token, userId) {
     const client = await getDataCenterClient();
     const resp = await client.authenticate({
@@ -23,6 +30,7 @@ export class GatewayRpcProd {
     return {
       userId: Number(profile.userId || userId || 0),
       userName: profile.userName || "",
+      userIcon: profile.userIcon,
       agentId: Number(profile.agentId || 0),
       topAgentId: Number(profile.topAgentId || 0),
       currency: profile.currency,

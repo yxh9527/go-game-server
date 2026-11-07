@@ -1,8 +1,8 @@
 import { shuffle } from '../holdem/cards.js';
 import { rel } from '../../rel.js';
 import { env } from '../../../../shared/rpc/env.js';
-import { validWager } from '../../core/wager.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { validWager, beforeWagerDeadline } = await rel(import.meta.url, '../../core/wager.js', v);
 const { PUSH: MSG } = await rel(import.meta.url, './messages.js', v);
 const { evaluate, cardTypeInfo } = await rel(import.meta.url, './hand.js', v);
 const { payouts } = await rel(import.meta.url, './scoring.js', v);
@@ -94,9 +94,10 @@ function openBetting(io, table, now) {
   io.broadcast(3263, 'XIAN_RAISE');
   io.forEachPlayer?.(session => io.send(session.ws, MSG.OPERATION, operation(table, session.userId, now)));
 }
-export function bet(io, table, uid, multiple, now = Date.now()) {
+export function bet(io, table, uid, multiple, now = Date.now(), automatic = false) {
   const p = owner(table, uid), h = table.hand;
-  if (!p || h.stage !== 'bet' || h.settled || p.bet !== null || now >= h.deadline
+  if (!p || table.phase !== 'playing' || table.closing || !automatic && p.member.pendingDeparture
+      || h.stage !== 'bet' || h.settled || p.bet !== null || !beforeWagerDeadline(h.deadline, now)
       || !Number.isInteger(multiple) || multiple < 1 || multiple > maxMultiple(table, p)) return false;
   const score = rules(table).ante * multiple;
   if (!validWager(score, p.member.point) || !Number.isSafeInteger(h.pot + score)) return false;
@@ -163,11 +164,11 @@ export function tick(io, table, now) {
       if (p.bet !== null) continue;
       if (now >= h.deadline) {
         // Expiry has a single default action through the same validated path.
-        bet(io, table, p.uid, 1, h.deadline - 1);
+        bet(io, table, p.uid, 1, h.deadline - 1, true);
       } else if ((p.bot || p.member.pendingDeparture || p.member.tuoGuanState) && now >= p.actionAt) {
         bet(io, table, p.uid, robot.chooseMultiple({ cards: p.hole.slice(0, 2),
           maxMultiple: maxMultiple(table, p), point: p.member.point, ante: rules(table).ante,
-          context: p.bot ? robot.decisionContext(table, p) : null }), now);
+          context: p.bot ? robot.decisionContext(table, p) : null }), now, true);
       }
     }
     if (h.players.every(p => p.bet !== null)) reveal(io, table, now);

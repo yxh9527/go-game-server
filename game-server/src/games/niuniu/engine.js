@@ -2,6 +2,7 @@ import { shuffle } from '../holdem/cards.js';
 import { rel } from '../../rel.js';
 import { env } from '../../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
+const { beforeWagerDeadline } = await rel(import.meta.url, '../../core/wager.js', v);
 const { PUSH: MSG } = await rel(import.meta.url, './messages.js', v);
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
 const { evaluate, compareHands, logicalCards, rank } = await rel(import.meta.url, './hand.js', v);
@@ -126,9 +127,11 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   })));
 }
 
-export function grab(io, table, uid, count) {
+export function grab(io, table, uid, count, now = Date.now(), automatic = false) {
   const p = owner(table, uid), hand = table.hand;
-  if (!p || hand.stage !== 'grab' || p.grab !== null || !Number.isSafeInteger(count) || count < 0 || count > grabMax(table, p)) return false;
+  if (!p || table.phase !== 'playing' || table.closing || hand.settled || !automatic && p.member.pendingDeparture
+    || hand.stage !== 'grab' || !beforeWagerDeadline(hand.deadline, now)
+    || p.grab !== null || !Number.isSafeInteger(count) || count < 0 || count > grabMax(table, p)) return false;
   p.grab = count;
   io.broadcast(MSG.GRAB, [{ playerId: p.uid, count }]);
   return true;
@@ -157,9 +160,10 @@ function openBetting(io, table, now) {
   // controls on the separate 3263 phase event.
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, 'XIAN_RAISE');
 }
-export function bet(io, table, uid, multiple) {
+export function bet(io, table, uid, multiple, now = Date.now(), automatic = false) {
   const p = owner(table, uid), hand = table.hand;
-  if (!p || hand.stage !== 'bet' || p.uid === hand.bankerUid || p.bet !== null
+  if (!p || table.phase !== 'playing' || table.closing || hand.settled || !automatic && p.member.pendingDeparture
+    || hand.stage !== 'bet' || !beforeWagerDeadline(hand.deadline, now) || p.uid === hand.bankerUid || p.bet !== null
     || !Number.isSafeInteger(multiple) || multiple <= 0 || !betOptions(table, p).includes(multiple)
     || !Number.isSafeInteger(table.ante * hand.bankerMultiple * multiple)
     || table.ante * hand.bankerMultiple * multiple <= 0
@@ -280,21 +284,21 @@ export function tick(io, table, now) {
         multiple: special ? auto.specialMultiple : auto.tenMultiple } : null;
       if (hand.stage === 'grab' && p.grab === null) grab(io, table, p.uid,
         robot.choose({ cards: visible, grabMax: grabMax(table, p), phase: 'grab', auto: policy,
-          context: p.bot && !policy ? robot.decisionContext(table, p) : null }));
+          context: p.bot && !policy ? robot.decisionContext(table, p) : null }), now, true);
       if (hand.stage === 'bet' && p.bet === null && p.uid !== hand.bankerUid) bet(io, table, p.uid,
         robot.choose({ cards: visible, multiples: betOptions(table, p), phase: 'bet', auto: policy,
-          context: p.bot && !policy ? robot.decisionContext(table, p) : null }));
+          context: p.bot && !policy ? robot.decisionContext(table, p) : null }), now, true);
       if (hand.stage === 'show') show(io, table, p.uid);
     }
     hand.botActAt = now + 700;
   }
   const expired = now >= hand.deadline;
   if (hand.stage === 'grab') {
-    if (expired) for (const p of hand.players) if (p.grab === null) grab(io, table, p.uid, 0);
+    if (expired) for (const p of hand.players) if (p.grab === null) grab(io, table, p.uid, 0, hand.deadline - 1, true);
     if (now >= hand.earliest && hand.players.every(p => p.grab !== null)) selectBanker(io, table, now);
   } else if (hand.stage === 'banker' && expired) openBetting(io, table, now);
   else if (hand.stage === 'bet') {
-    if (expired) for (const p of hand.players) if (p.uid !== hand.bankerUid && p.bet === null) bet(io, table, p.uid, betOptions(table,p)[0]);
+    if (expired) for (const p of hand.players) if (p.uid !== hand.bankerUid && p.bet === null) bet(io, table, p.uid, betOptions(table,p)[0], hand.deadline - 1, true);
     if (now >= hand.earliest && hand.players.every(p => p.uid === hand.bankerUid || p.bet !== null)) reveal(io, table, now);
   } else if (hand.stage === 'show') {
     if (expired) for (const p of hand.players) show(io, table, p.uid);

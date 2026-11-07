@@ -40,6 +40,9 @@ export async function createHandler(runtime) {
   const pool = poolModule.createRoomPool(runtime, gameOf);
   const { walletOf, hasCarry } = await rel(import.meta.url, './wallet/index.js', v);
   const cashWallet = walletOf({ wallet: runtime.wallet });
+  const { installUserCenter } = await rel(import.meta.url, './core/user-center.js', v);
+  const legacyCenter = runtime.env==='dev' ? await rel(import.meta.url, '../../cache/game-server/user-center.js', v) : null;
+  const userCenter = installUserCenter(runtime,legacyCenter?.legacyUserCenterRecords);
   for (const table of runtime.registry.tables.values()) {
     if (table.kind === 'slots') table.config = gameOf(table.roomType).config;
     if (["zjh", "niuniu", "sss", "blackjack", "sgay", "mahjong"].includes(table.gameId)) {
@@ -262,6 +265,15 @@ export async function createHandler(runtime) {
         const { listHundredLobbyRooms } = await rel(import.meta.url, './core/hundred-lobby.js', v);
         respond({ code: 200, data: listHundredLobbyRooms(runtime, gameOf, agentId, body) });
         return;
+      }
+      if (body.action === 'user-center' && runtime.env === 'dev') {
+        const query={kind:body.kind,page:Number(body.page),size:Number(body.size),startTime:Number(body.startTime),endTime:Number(body.endTime),
+          roomType:Number(body.roomType)||0,roomId:Number(body.roomId)||0,inning:Number(body.inning)||0,sortDesc:body.sortDesc!==false,
+          userId:uid,agentId,currency:profile.currency?.symbol||'CNY'};
+        if(!['funds','tickets','battles','hands','round','room','matches','match'].includes(query.kind)||!Number.isSafeInteger(query.page)||query.page<1
+          ||!Number.isSafeInteger(query.size)||query.size<1||query.size>100||!Number.isFinite(query.startTime)||!Number.isFinite(query.endTime)
+          ||query.startTime>query.endTime||query.endTime-query.startTime>31*86400000){respond({code:400,error:'Invalid user-center query'});return;}
+        respond({code:200,data:userCenter.query(query)});return;
       }
       if (body.action === "list") {
         respond({ code: 200, data: pool.list(agentId) });
@@ -779,6 +791,7 @@ export async function createHandler(runtime) {
   }
 
   function tick(onlyTable) {
+    void userCenter.flush();
     if (runtime.wallet.authoritative && !runtime.wallet.managed()) {
       return Promise.allSettled([...runtime.registry.tables.values()].map(table =>
         runtime.wallet.run(() => tick(table), runtime).catch(error => { runtime.log.error('cash tick failed', error.message); throw error; })));

@@ -74,6 +74,9 @@ export async function createApp(runtime) {
   admin.get('/matches/:id/runtime', wrap(async (req,res) => res.json({code:0,msg:'ok',data:await tournaments.inspect(Number(req.params.id))})));
   app.post('/internal/v1/tournament', wrap(async (req,res) => {
     const body=req.body||{}, user=await tournaments.identify(body);
+    if(body.action==='history'){
+      res.set('Cache-Control','no-store').json({code:0,msg:'ok',data:await tournaments.history(user,body.query)});return;
+    }
     if(body.action==='register') await tournaments.register(body.matchId,user);
     else if(body.action==='unregister') await tournaments.unregister(body.matchId,user);
     else if(body.action!=='snapshot') throw Object.assign(new Error('unknown tournament action'),{status:400});

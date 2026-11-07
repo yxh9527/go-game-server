@@ -71,7 +71,9 @@ export function finishHandStats(table, results) {
   data.totalHands += 1;
   data.totalStream += stream;
   data.totalPot += number(table.hand?.pot);
+  data.maxPot = Math.max(data.maxPot || 0, number(table.hand?.pot));
   data.settledInning = inning;
+  table.recordUserCenter?.(results);
 }
 
 export function observerList(table) {

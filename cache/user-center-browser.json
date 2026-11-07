@@ -1,0 +1,687 @@
+{
+  "localURL": "http://lobby.localhost:52588/user-center",
+  "failures": [
+    {
+      "url": "http://lobby.localhost:52588/l01/img/user-center/record/5.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/user-center/record/6.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/user-center/record/7.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/statistics-icon.webp",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/i1.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/i2.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/i3.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/i4.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/1.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/mvp.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/room-info/3.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/check.svg",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/hand-card/arrow-down.svg",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/hand-card/i1.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/record/hand-card/copy.png",
+      "status": 404
+    },
+    {
+      "url": "http://lobby.localhost:52588/l01/img/fund-details/point_0.png",
+      "status": 404
+    }
+  ],
+  "errors": [],
+  "responses": [
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "playerId": 101,
+        "name": "p101",
+        "imageUrl": "/avator/90015.png",
+        "clubId": 7
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": [
+        {
+          "gameType": 21,
+          "roomClassifications": [],
+          "roomInfoData": [
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2501,
+              "totalPeople": 59,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 100,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/10/2/100",
+              "ante": 10,
+              "initialBet": 10,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 90,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386701
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 16,
+              "totalPeople": 45,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 17,
+              "totalPeople": 32,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 5000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/500/4/5000",
+              "ante": 500,
+              "initialBet": 500,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 4500,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 125,
+              "totalPeople": 22,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 50000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/2000/4/50000",
+              "ante": 2000,
+              "initialBet": 2000,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 48000,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 134,
+              "totalPeople": 45,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 73,
+              "totalPeople": 32,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 5000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/500/2/5000",
+              "ante": 500,
+              "initialBet": 500,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 4500,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 74,
+              "totalPeople": 22,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 50000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/2000/4/50000",
+              "ante": 2000,
+              "initialBet": 2000,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 48000,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2503,
+              "totalPeople": 59,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 100,
+              "playMode": 5,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/5/10/2/100",
+              "ante": 10,
+              "initialBet": 10,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 90,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386702
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2502,
+              "totalPeople": 45,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 5,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/5/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040386702
+            }
+          ],
+          "maintenanceInfoMsg": "{\"endDate\":\"\",\"isWhite\":false,\"itemList\":[]}",
+          "privateRoomOpen": false,
+          "hundredDomain": null,
+          "hundredShield": null,
+          "classifications": null
+        }
+      ]
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "walletAmount": 1000030,
+        "ticketNums": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "userId": 101,
+        "uid": 101,
+        "name": "p101",
+        "userToken": "valid",
+        "openId": "101",
+        "clubId": 7,
+        "hideGameMenus": null,
+        "walletAmount": 1000030,
+        "ticketNums": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "playerId": 101,
+        "name": "p101",
+        "imageUrl": "/avator/90015.png",
+        "clubId": 7
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "mttExploitsMsgs": [],
+        "totalScore": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "infoList": [
+          {
+            "ante": 0,
+            "smallBlind": 10,
+            "bigBlind": 20,
+            "initialBet": 20,
+            "createdAt": 1794040386276,
+            "maxPeople": 7,
+            "forceShowCard": true,
+            "maxBottomPool": 70,
+            "totalTakeIn": 1000,
+            "roomResults": [
+              {
+                "uid": 101,
+                "score": 30,
+                "takeIn": 500,
+                "totalInningNum": 1,
+                "userInfo": {
+                  "uid": 101,
+                  "name": "p101",
+                  "icon": "/avator/90015.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 102,
+                "score": -30,
+                "takeIn": 500,
+                "totalInningNum": 1,
+                "userInfo": {
+                  "uid": 102,
+                  "name": "p102",
+                  "icon": "/avator/90016.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              }
+            ],
+            "id": 700000,
+            "gameRoomId": 700000,
+            "roomType": 19,
+            "playMode": 1,
+            "createTime": 1794040386276,
+            "endTime": 1794040386307,
+            "currentScore": 30,
+            "ownScore": 30,
+            "totalHands": 1,
+            "totalInningNum": 1,
+            "manualBetNum": 1,
+            "walksNum": 0,
+            "totalStream": 40,
+            "gameTime": 0,
+            "roomTypeName": "dzpk",
+            "privateRoom": false,
+            "currentActivePoint": 0
+          }
+        ],
+        "totalSize": 1,
+        "totalScore": 30,
+        "ownScore": 30,
+        "pageNum": 1,
+        "privateRoomOpen": false
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "infoList": [
+          {
+            "ownCards": [
+              32,
+              45
+            ],
+            "commonCards": [],
+            "winCards": [
+              32,
+              45
+            ],
+            "winScore": 30,
+            "gameRoomId": 700000,
+            "currInning": 1,
+            "firstGameList": [
+              {
+                "xiaZhuData": 40,
+                "cardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "isWin": true,
+                "uid": 101,
+                "score": 30,
+                "point": 530,
+                "handPais": [
+                  32,
+                  45
+                ],
+                "showCards": [
+                  32,
+                  45
+                ],
+                "pos": 0,
+                "userName": "p101",
+                "userIcon": "",
+                "operateList": [
+                  {
+                    "replayOrder": 0,
+                    "uid": 101,
+                    "operate": 1,
+                    "operationType": 1,
+                    "bet": 20,
+                    "currentBetScore": 20,
+                    "totalBetScore": 20,
+                    "pot": 20,
+                    "gameState": 1
+                  },
+                  {
+                    "replayOrder": 3,
+                    "uid": 101,
+                    "operate": 2,
+                    "operationType": 2,
+                    "bet": 20,
+                    "currentBetScore": 20,
+                    "totalBetScore": 40,
+                    "pot": 70,
+                    "gameState": 2
+                  },
+                  {
+                    "gameState": 3,
+                    "operate": 0,
+                    "cards": [
+                      32,
+                      45
+                    ]
+                  }
+                ],
+                "userInfo": {
+                  "uid": 101,
+                  "name": "p101",
+                  "icon": ""
+                },
+                "commonPoker": [],
+                "cardTypePokers": [],
+                "posName": 3
+              },
+              {
+                "xiaZhuData": 30,
+                "cardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "isWin": false,
+                "uid": 102,
+                "score": -30,
+                "point": 470,
+                "handPais": [
+                  12,
+                  14
+                ],
+                "showCards": [
+                  12,
+                  14
+                ],
+                "pos": 1,
+                "userName": "p102",
+                "userIcon": "",
+                "operateList": [
+                  {
+                    "replayOrder": 1,
+                    "uid": 102,
+                    "operate": 1,
+                    "operationType": 1,
+                    "bet": 20,
+                    "currentBetScore": 20,
+                    "totalBetScore": 20,
+                    "pot": 40,
+                    "gameState": 1
+                  },
+                  {
+                    "replayOrder": 2,
+                    "uid": 102,
+                    "operate": 2,
+                    "operationType": 2,
+                    "bet": 10,
+                    "currentBetScore": 10,
+                    "totalBetScore": 30,
+                    "pot": 50,
+                    "gameState": 2
+                  },
+                  {
+                    "replayOrder": 4,
+                    "uid": 102,
+                    "operate": 6,
+                    "operationType": 6,
+                    "bet": 0,
+                    "currentBetScore": 0,
+                    "totalBetScore": 30,
+                    "pot": 70,
+                    "gameState": 4
+                  },
+                  {
+                    "gameState": 3,
+                    "operate": 0,
+                    "cards": [
+                      12,
+                      14
+                    ]
+                  }
+                ],
+                "userInfo": {
+                  "uid": 102,
+                  "name": "p102",
+                  "icon": ""
+                },
+                "commonPoker": [],
+                "cardTypePokers": [],
+                "posName": 1
+              }
+            ],
+            "innerPlayerList": [
+              {
+                "uid": 101,
+                "name": "p101",
+                "icon": ""
+              },
+              {
+                "uid": 102,
+                "name": "p102",
+                "icon": ""
+              }
+            ],
+            "gameEndData": "{\"playerList\":[{\"xiaZhuData\":40,\"cardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"isWin\":true,\"uid\":101,\"score\":30,\"point\":530,\"handPais\":[32,45],\"showCards\":[32,45],\"pos\":0,\"userName\":\"p101\",\"userIcon\":\"\",\"operateList\":[{\"replayOrder\":0,\"uid\":101,\"operate\":1,\"operationType\":1,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":20,\"pot\":20,\"gameState\":1},{\"replayOrder\":3,\"uid\":101,\"operate\":2,\"operationType\":2,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":40,\"pot\":70,\"gameState\":2},{\"gameState\":3,\"operate\":0,\"cards\":[32,45]}],\"userInfo\":{\"uid\":101,\"name\":\"p101\",\"icon\":\"\"},\"commonPoker\":[],\"cardTypePokers\":[],\"posName\":3},{\"xiaZhuData\":30,\"cardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"isWin\":false,\"uid\":102,\"score\":-30,\"point\":470,\"handPais\":[12,14],\"showCards\":[12,14],\"pos\":1,\"userName\":\"p102\",\"userIcon\":\"\",\"operateList\":[{\"replayOrder\":1,\"uid\":102,\"operate\":1,\"operationType\":1,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":20,\"pot\":40,\"gameState\":1},{\"replayOrder\":2,\"uid\":102,\"operate\":2,\"operationType\":2,\"bet\":10,\"currentBetScore\":10,\"totalBetScore\":30,\"pot\":50,\"gameState\":2},{\"replayOrder\":4,\"uid\":102,\"operate\":6,\"operationType\":6,\"bet\":0,\"currentBetScore\":0,\"totalBetScore\":30,\"pot\":70,\"gameState\":4},{\"gameState\":3,\"operate\":0,\"cards\":[12,14]}],\"userInfo\":{\"uid\":102,\"name\":\"p102\",\"icon\":\"\"},\"commonPoker\":[],\"cardTypePokers\":[],\"posName\":1}],\"resultList\":[{\"xiaZhuData\":40,\"cardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"isWin\":true,\"uid\":101,\"score\":30,\"point\":530,\"handPais\":[32,45],\"showCards\":[32,45],\"pos\":0,\"userName\":\"p101\",\"userIcon\":\"\",\"operateList\":[{\"replayOrder\":0,\"uid\":101,\"operate\":1,\"operationType\":1,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":20,\"pot\":20,\"gameState\":1},{\"replayOrder\":3,\"uid\":101,\"operate\":2,\"operationType\":2,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":40,\"pot\":70,\"gameState\":2},{\"gameState\":3,\"operate\":0,\"cards\":[32,45]}],\"userInfo\":{\"uid\":101,\"name\":\"p101\",\"icon\":\"\"},\"commonPoker\":[],\"cardTypePokers\":[],\"posName\":3},{\"xiaZhuData\":30,\"cardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"isWin\":false,\"uid\":102,\"score\":-30,\"point\":470,\"handPais\":[12,14],\"showCards\":[12,14],\"pos\":1,\"userName\":\"p102\",\"userIcon\":\"\",\"operateList\":[{\"replayOrder\":1,\"uid\":102,\"operate\":1,\"operationType\":1,\"bet\":20,\"currentBetScore\":20,\"totalBetScore\":20,\"pot\":40,\"gameState\":1},{\"replayOrder\":2,\"uid\":102,\"operate\":2,\"operationType\":2,\"bet\":10,\"currentBetScore\":10,\"totalBetScore\":30,\"pot\":50,\"gameState\":2},{\"replayOrder\":4,\"uid\":102,\"operate\":6,\"operationType\":6,\"bet\":0,\"currentBetScore\":0,\"totalBetScore\":30,\"pot\":70,\"gameState\":4},{\"gameState\":3,\"operate\":0,\"cards\":[12,14]}],\"userInfo\":{\"uid\":102,\"name\":\"p102\",\"icon\":\"\"},\"commonPoker\":[],\"cardTypePokers\":[],\"posName\":1}]}",
+            "currentInningJoin": true,
+            "reportMsg": {
+              "currentInningJoin": true,
+              "innerReport": false,
+              "reportFree": 0,
+              "playerList": []
+            },
+            "currentInningNum": 1,
+            "endTime": 1794040386307,
+            "innerEndTime": 1794040386307,
+            "ownScore": 30,
+            "effectiveBet": 40,
+            "roomType": 19,
+            "playMode": 1
+          }
+        ],
+        "totalInning": 1,
+        "ownJoinInning": 1,
+        "ownScore": 30,
+        "roomTypeName": "dzpk",
+        "blind": "{\"ante\":0,\"smallBlind\":10,\"bigBlind\":20,\"initialBet\":20,\"createdAt\":1794040386276,\"maxPeople\":7,\"forceShowCard\":true,\"maxBottomPool\":70,\"totalTakeIn\":1000,\"roomResults\":[{\"uid\":101,\"score\":30,\"takeIn\":500,\"totalInningNum\":1,\"userInfo\":{\"uid\":101,\"name\":\"p101\",\"icon\":\"/avator/90015.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":102,\"score\":-30,\"takeIn\":500,\"totalInningNum\":1,\"userInfo\":{\"uid\":102,\"name\":\"p102\",\"icon\":\"/avator/90016.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}}]}"
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "count": 1,
+        "pageNum": 1,
+        "logs": [
+          {
+            "id": "7:holdem:700000:1794040386276:1:101",
+            "createTime": 1794040386307,
+            "sourceType": 2,
+            "sourceId": 700000,
+            "point": 30,
+            "lastPoint": 1000030,
+            "roomType": 19
+          }
+        ]
+      }
+    }
+  ]
+}

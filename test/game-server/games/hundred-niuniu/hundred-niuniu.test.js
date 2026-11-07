@@ -53,7 +53,8 @@ test('ordinary same-type hands compare highest rank then diamond-club-heart-spad
   assert.equal(cards.payoutMultiple({niuType:0}),1);
 });
 for (const [mode, count] of [[1,3],[2,4],[3,2],[4,1],[5,0]]) {
-  test('Niuniu mode '+mode+' masks cards, reserves risk, settles once and renders authorized history', async () => {
+  test('Niuniu mode '+mode+' masks cards, reserves risk, settles once and renders authorized history', async (t) => {
+    t.mock.method(Date, 'now', () => 2000);
     const f=fixture(mode); engine.beginRound(f.io,f.table,1000,()=>0.43);
     assert.equal(new Set(f.table.hand.dealt).size,20);
     const snapshot=engine.roomSnapshot(f.table,f.session);

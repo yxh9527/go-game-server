@@ -24,3 +24,8 @@ export function checkedTotal(amounts) {
   }
   return total;
 }
+
+export function beforeWagerDeadline(deadline, now = Date.now()) {
+  // Older resident tables may not have a deadline until their first tick.
+  return deadline == null || Number.isFinite(deadline) && now < deadline;
+}

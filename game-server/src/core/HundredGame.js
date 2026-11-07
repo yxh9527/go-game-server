@@ -2,7 +2,7 @@ import { rel } from '../rel.js';
 const version = new URL(import.meta.url).searchParams.get('v') || '0';
 const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', version);
 const { debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', version);
-const { scoreAmount, validWager, checkedTotal } = await rel(import.meta.url, './wager.js', version);
+const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel(import.meta.url, './wager.js', version);
 const { GameBase } = await rel(import.meta.url, './GameBase.js', version);
 const robots = await rel(import.meta.url, './robot.js', version);
 
@@ -94,8 +94,8 @@ export class HundredGame extends GameBase {
     body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const { table, session, send } = ctx;
     const customData = Number(body?.customData ?? 2);
-    if (table.hundredCycleTask || table.hundredBankers?.task || table.state !== this.betState()
-      || table.phaseEndsAt && Date.now() >= table.phaseEndsAt) {
+    if (table.closing || table.hundredCycleTask || table.hundredBankers?.task || table.state !== this.betState()
+      || !beforeWagerDeadline(table.phaseEndsAt)) {
       send(responseId, { customData,
         points: session.wallet,
         roomType: table.roomType,

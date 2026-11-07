@@ -71,5 +71,10 @@ async function payCardBets(io, table, adapter, result) {
   bankers.settle(io, table, result, adapter.bankerAreas);
   adapter.record(table, result, participants, io);
   result.settled = true;
+  table.recordUserCenter?.([...result.settlements].map(([uid,p])=>({uid,score:p.realScore,walletAmount:participants.get(uid)?.wallet,
+    xiaZhuData:(table.playerBets.get(uid)||[]).reduce((sum,b)=>sum+b.total,0)})),
+    {inning:table.inning,publicResult:{...adapter.resultPayload(table,result),winningAreas:result.areas},
+      details:Object.fromEntries([...result.settlements].map(([uid,p])=>[uid,{areaWinningScores:p.areaWinningScores,
+        betDetailTableMap:Object.fromEntries((table.playerBets.get(uid)||[]).map(b=>[b.areaId,{areaId:b.areaId,betScore:b.total,realScore:p.areaWinningScores[b.areaId]}]))}]))});
   table.hundredSettledInning = table.inning;
 }

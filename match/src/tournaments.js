@@ -6,6 +6,11 @@ export async function createTournaments(runtime, matches) {
   const { scheduleSlot } = await rel(import.meta.url,'./schedule.js',version);
   const {tournamentSnapshot,isTournamentParticipant:participant}=await rel(import.meta.url,'../../shared/tournament-snapshot.js',version);
   const repo = tournamentStore(runtime);
+  if(runtime.env==='dev'){
+    const {createDevTournamentStore}=await rel(import.meta.url,'../../cache/match/store.js',version);
+    Object.assign(repo,createDevTournamentStore(runtime));
+  }
+  const { userCenterMatch } = await rel(import.meta.url,'../../shared/user-center-matches.js',version);
   const local = runtime.env === 'dev' ? await rel(import.meta.url,'../../cache/match/payments.js',version) : null;
   const payments = runtime.matchPayments || local?.createDevMatchPayments(runtime);
   const now = () => runtime.clock ? runtime.clock() : Date.now();
@@ -308,6 +313,19 @@ export async function createTournaments(runtime, matches) {
       }catch(error){runtime.log.error('tournament tick failed',row.id,error.message);}
     }
   }
-  return {identify,snapshot,register,unregister,cancel,start,tick,poll,saveSchedule,update,openRegistration,awards,
+  async function history(user,query){
+    if(!query||!['matches','match'].includes(query.kind)||!Number.isFinite(query.startTime)||!Number.isFinite(query.endTime)
+      ||query.startTime>query.endTime||query.endTime-query.startTime>31*86400000)throw fail(400,'Invalid tournament history query');
+    const profile=await runtime.rpc.gateway.getLoginData(user.userId);
+    const scope={...query,userId:user.userId,agentId:user.agentId,currency:profile.currency?.symbol||'CNY'},records=[];
+    if(runtime.env!=='dev')return runtime.rpc.gateway.getUserCenter(scope);
+    for(const row of await runtime.store.listMatches()){
+      if(Number(row.agent_id)!==user.agentId)continue;
+      const saved=await repo.readMatch(row.id),record=saved&&userCenterMatch(saved.row,saved.state,scope);if(record)records.push(record);
+    }
+    records.sort((a,b)=>b.startDate-a.startDate||b.id-a.id);
+    return query.kind==='match'?{match:records[0]||null}:{matches:records,totalScore:records.reduce((n,r)=>n+r.net,0)};
+  }
+  return {identify,snapshot,history,register,unregister,cancel,start,tick,poll,saveSchedule,update,openRegistration,awards,
     listSchedules:()=>repo.listSchedules(),inspect:id=>withMatch(id,(row,state)=>({row,state})),flush};
 }

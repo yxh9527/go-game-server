@@ -17,6 +17,7 @@ export async function createApp(runtime) {
   const web = await rel(import.meta.url, "./web.js", v);
   const fairCode = await rel(import.meta.url, "./fair-code.js", v);
   const smartBet = await rel(import.meta.url, "./smart-bet.js", v);
+  const userCenter = await rel(import.meta.url, './user-center.js', v);
   const { matchRequest } = await rel(import.meta.url, './match-client.js', v);
   if(!runtime.matchStore.supportsTournamentSnapshots||!runtime.matchStore.getPlayers){
     // Existing listeners retain this object; upgrade methods in place on hot reload.
@@ -109,6 +110,14 @@ export async function createApp(runtime) {
     }
     if (op === 29) {
       res.set("Cache-Control", "no-store").json(await fairCode.requestFairCode(runtime, params));
+      return;
+    }
+    if ([27,28,30,31,39,40,51,52].includes(op)) {
+      res.set('Cache-Control','no-store').json(await userCenter.userCenterResponse(runtime,op,params));
+      return;
+    }
+    if (op === 8165) {
+      res.set('Cache-Control','no-store').json(await userCenter.userCenterProfileResponse(runtime,params));
       return;
     }
     if (op === 46 && runtime.env === "dev") {

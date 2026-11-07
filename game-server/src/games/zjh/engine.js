@@ -1,9 +1,9 @@
 import { makeDeck, shuffle } from "../holdem/cards.js";
 import { rel } from "../../rel.js";
 import { env } from "../../../../shared/rpc/env.js";
-import { scoreAmount, validWager } from '../../core/wager.js';
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const { scoreAmount, validWager, beforeWagerDeadline } = await rel(import.meta.url, '../../core/wager.js', version);
 const { default: gameConfig, roomRules } = await rel(import.meta.url, "./config.js", version);
 const { compareWithSuit: compare3, evaluate3 } = await rel(import.meta.url, "./hand.js", version);
 const { ZJH_OP: OP, ZJH_PUSH: MSG } = await rel(import.meta.url, "./messages.js", version);
@@ -199,6 +199,7 @@ function discard(io, table, player, operation) {
 }
 
 export function onZjhAction(io, table, session, body) {
+  if (table.closing || table.hand?.settled || !beforeWagerDeadline(table.hand?.deadline)) return false;
   const uid = Number(session.userId);
   if (body.uid != null && Number(body.uid) !== uid) return;
   return applyAction(io, table, uid, Number(body.operation), body.operationData, body.targetUid);

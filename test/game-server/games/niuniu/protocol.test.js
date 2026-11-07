@@ -26,10 +26,10 @@ function fixture(mode=3,see=4) {
   return {game,table,messages,io,sessions};
 }
 function finish(f) {
-  for(const p of f.table.hand.players) engine.grab(f.io,f.table,p.uid,p.uid===1?2:0);
+  for(const p of f.table.hand.players) engine.grab(f.io,f.table,p.uid,p.uid===1?2:0,1001,Boolean(p.member.pendingDeparture));
   engine.tick(f.io,f.table,2200);
   engine.tick(f.io,f.table,6000);
-  for(const p of f.table.hand.players) if(p.uid!==1) engine.bet(f.io,f.table,p.uid,engine.betOptions(f.table,p)[0]);
+  for(const p of f.table.hand.players) if(p.uid!==1) engine.bet(f.io,f.table,p.uid,engine.betOptions(f.table,p)[0],6001,Boolean(p.member.pendingDeparture));
   engine.tick(f.io,f.table,6800);
   for(const p of f.table.hand.players) engine.show(f.io,f.table,p.uid);
   engine.tick(f.io,f.table,9000);

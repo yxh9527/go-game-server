@@ -32,8 +32,8 @@ test('all ordinary, blind and wild robot tables settle without exceeding legal m
     let now = 1000, turns = 0;
     while (table.hand && turns++ < 60) {
       const human = h.players[0];
-      if (h.stage === 'grab' && human.grab === null) assert.ok(engine.grab(io, table, human.uid, 1));
-      if (h.stage === 'bet' && human.bet === null && human.uid !== h.bankerUid) assert.ok(engine.bet(io, table, human.uid, engine.betOptions(table, human)[0]));
+      if (h.stage === 'grab' && human.grab === null) assert.ok(engine.grab(io, table, human.uid, 1, now));
+      if (h.stage === 'bet' && human.bet === null && human.uid !== h.bankerUid) assert.ok(engine.bet(io, table, human.uid, engine.betOptions(table, human)[0], now));
       if (h.stage === 'show' && !human.shown) engine.show(io, table, human.uid);
       now += 1000; engine.tick(io, table, now);
       for (const p of h.players) {

@@ -36,6 +36,20 @@ test('concurrent native registrations reserve one place and charge only once',as
   assert.equal(f.balances.get(10001),890);
   assert.equal((await f.t.inspect(m.id)).row.current_player,1);
 });
+
+test('dev user-center history reads only existing memory and never creates participation or charges',async()=>{
+  const f=await fixture(),m=await f.create();
+  const query={kind:'matches',startTime:m.start_time-3600000,endTime:m.start_time+3600000,currency:'CNY'};
+  const before=f.runtime.tournamentMemory.docs.size;
+  assert.deepEqual(await f.t.history(user(99999),query),{matches:[],totalScore:0});
+  assert.equal(f.runtime.tournamentMemory.docs.size,before);
+  assert.equal(f.charges.length,0);
+  await f.t.register(m.id,user());const paid=f.balances.get(10001),charges=f.charges.length;
+  const own=await f.t.history(user(),query);assert.equal(own.matches.length,1);assert.equal(own.matches[0].id,m.id);assert.equal(own.totalScore,-110);
+  const detail=await f.t.history(user(),{...query,kind:'match',roomId:m.id});assert.equal(detail.match.id,m.id);
+  assert.equal(f.charges.length,charges);assert.equal(f.balances.get(10001),paid);
+  assert.deepEqual(await f.t.history(user(10001,2),query),{matches:[],totalScore:0});
+});
 test('insufficient players cancel at the deadline and refund entry fee only, once',async()=>{
   const f=await fixture(),m=await f.create();
   await f.t.register(m.id,user());

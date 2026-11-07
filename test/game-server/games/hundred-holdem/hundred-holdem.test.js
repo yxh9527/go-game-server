@@ -372,6 +372,7 @@ test('bets validate atomically, debit once, and reject bets outside state 2', as
   const f = fixture();
   engine.beginRound(f.io, f.table, 1000, () => 0.5);
   f.table.state = engine.PHASE.BETTING;
+  f.table.phaseEndsAt = Date.now() + 60000;
   assert.equal(engine.acceptBet(f.ctx, { roomType: 50, roomId: f.table.roomId,
     params: [{ areaId: 1, total: 100 }, { areaId: 8, total: 100 }] }), false);
   assert.equal(f.session.wallet, 10000);
@@ -395,6 +396,7 @@ test('exiting after a bet preserves its owner until the hand is settled', async 
   f.game.onMessage(f.ctx, SEND.ENTER, {});
   engine.beginRound(f.io, f.table, 1000, () => 0.5);
   f.table.state = engine.PHASE.BETTING;
+  f.table.phaseEndsAt = Date.now() + 60000;
   f.table.hand.winningAreas = [1, 4];
   f.table.hand.winner = 'player';
   assert.equal(engine.acceptBet(f.ctx, { roomType: 50, params: [{ areaId: 1, total: 100 }] }), true);

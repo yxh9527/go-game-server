@@ -1,5 +1,4 @@
 import { debit } from "../../wallet/index.js";
-import { scoreAmount, validWager } from '../../core/wager.js';
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
@@ -9,6 +8,7 @@ import { REPLAY_GAME_STATE } from "./replay-state.js";
 import { emptyHistoryPayload } from "./history-response.js";
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
+const { scoreAmount, validWager, beforeWagerDeadline } = await rel(import.meta.url, '../../core/wager.js', version);
 const { memberListSeats, publicObserver, publicSeat } = await rel(import.meta.url, "../../core/member.js", version);
 const { PUSH } = await rel(import.meta.url, "../../messages.js", version);
 const robot = await rel(import.meta.url, "./robot.js", version);
@@ -254,6 +254,8 @@ export function onTexasAction(io, table, session, body) {
   if (table.phase !== "playing" || !table.hand) {
     return;
   }
+  if (table.closing || table.hand.settled || !['BET_PERFLOP', 'BET_FLOP', 'BET_TURN', 'BET_RIVER'].includes(table.hand.street)
+    || !beforeWagerDeadline(table.hand.deadline)) return;
   const uid = Number(session.userId);
   if (body?.uid != null && Number(body.uid) !== uid) return;
   applyAction(io, table, uid, Number(body?.operation), body?.operationData);
@@ -457,7 +459,7 @@ function canAct(m) {
 
 function applyAction(io, table, uid, operation, operationData) {
   const actor = currentActor(table);
-  if (!actor || actor.uid !== uid) {
+  if (!actor || actor.uid !== uid || !canAct(actor)) {
     return;
   }
   const hand = table.hand;

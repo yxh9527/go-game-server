@@ -1,0 +1,1324 @@
+{
+  "localURL": "http://lobby.localhost:11042/user-center",
+  "failures": [],
+  "errors": [],
+  "responses": [
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "playerId": 10001,
+        "name": "dev-10001",
+        "imageUrl": "/avator/90009.png",
+        "clubId": 1
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "walletAmount": 1001870,
+        "ticketNums": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": [
+        {
+          "gameType": 21,
+          "roomClassifications": [],
+          "roomInfoData": [
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2501,
+              "totalPeople": 62,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 100,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/10/2/100",
+              "ante": 10,
+              "initialBet": 10,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 90,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977510
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 16,
+              "totalPeople": 47,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 17,
+              "totalPeople": 34,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 5000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/500/4/5000",
+              "ante": 500,
+              "initialBet": 500,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 4500,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 125,
+              "totalPeople": 23,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 50000,
+              "playMode": 3,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/3/2000/4/50000",
+              "ante": 2000,
+              "initialBet": 2000,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 48000,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 134,
+              "totalPeople": 47,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 73,
+              "totalPeople": 34,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 5000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/500/2/5000",
+              "ante": 500,
+              "initialBet": 500,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 4500,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 74,
+              "totalPeople": 23,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 50000,
+              "playMode": 2,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/2/2000/4/50000",
+              "ante": 2000,
+              "initialBet": 2000,
+              "straddle": false,
+              "roomClassification": 4,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 48000,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "taxType": 2,
+              "taxPercent": 500,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2503,
+              "totalPeople": 62,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 100,
+              "playMode": 5,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/5/10/2/100",
+              "ante": 10,
+              "initialBet": 10,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 90,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977511
+            },
+            {
+              "roomType": 25,
+              "gameRoomConfigId": 2502,
+              "totalPeople": 47,
+              "smallBlind": 0,
+              "bigBlind": 0,
+              "carryMin": 1000,
+              "playMode": 5,
+              "roomIndex": 0,
+              "forceShowCard": true,
+              "hundredMinBet": 0,
+              "hundredMaxBet": 0,
+              "key": "25/5/100/2/1000",
+              "ante": 100,
+              "initialBet": 100,
+              "straddle": false,
+              "roomClassification": 2,
+              "seeCardNo": 0,
+              "aofBet": 0,
+              "maxPeople": 7,
+              "disusePoint": 900,
+              "randomSit": true,
+              "banTalk": true,
+              "banEmulator": false,
+              "serverNow": 1794040977511
+            }
+          ],
+          "maintenanceInfoMsg": "{\"endDate\":\"\",\"isWhite\":false,\"itemList\":[]}",
+          "privateRoomOpen": false,
+          "hundredDomain": "127.0.0.1:11041",
+          "hundredShield": null,
+          "classifications": null
+        }
+      ]
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "userId": 10001,
+        "uid": 10001,
+        "name": "dev-10001",
+        "userToken": "dev",
+        "openId": "10001",
+        "clubId": 1,
+        "hideGameMenus": null,
+        "walletAmount": 1001870,
+        "ticketNums": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "playerId": 10001,
+        "name": "dev-10001",
+        "imageUrl": "/avator/90009.png",
+        "clubId": 1
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "mttExploitsMsgs": [],
+        "totalScore": 0
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "infoList": [
+          {
+            "ante": 10,
+            "smallBlind": 0,
+            "bigBlind": 0,
+            "initialBet": 0,
+            "createdAt": 1794032442390,
+            "maxPeople": 7,
+            "forceShowCard": true,
+            "maxBottomPool": 1340,
+            "totalTakeIn": 7400,
+            "roomResults": [
+              {
+                "uid": 10001,
+                "score": 60,
+                "takeIn": 2400,
+                "totalInningNum": 4,
+                "userInfo": {
+                  "uid": 10001,
+                  "name": "dev-10001",
+                  "icon": "/avator/90009.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000001,
+                "score": 800,
+                "takeIn": 1000,
+                "totalInningNum": 8,
+                "userInfo": {
+                  "uid": 90000001,
+                  "name": "Bot1",
+                  "icon": "/avator/90017.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000002,
+                "score": -210,
+                "takeIn": 500,
+                "totalInningNum": 9,
+                "userInfo": {
+                  "uid": 90000002,
+                  "name": "Bot2",
+                  "icon": "/avator/90018.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000003,
+                "score": -230,
+                "takeIn": 1000,
+                "totalInningNum": 5,
+                "userInfo": {
+                  "uid": 90000003,
+                  "name": "Bot3",
+                  "icon": "/avator/90019.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000004,
+                "score": -10,
+                "takeIn": 500,
+                "totalInningNum": 8,
+                "userInfo": {
+                  "uid": 90000004,
+                  "name": "Bot4",
+                  "icon": "/avator/90020.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000005,
+                "score": -10,
+                "takeIn": 1000,
+                "totalInningNum": 3,
+                "userInfo": {
+                  "uid": 90000005,
+                  "name": "Bot5",
+                  "icon": "/avator/90021.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000006,
+                "score": -410,
+                "takeIn": 500,
+                "totalInningNum": 6,
+                "userInfo": {
+                  "uid": 90000006,
+                  "name": "Bot6",
+                  "icon": "/avator/90022.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              },
+              {
+                "uid": 90000007,
+                "score": 10,
+                "takeIn": 500,
+                "totalInningNum": 5,
+                "userInfo": {
+                  "uid": 90000007,
+                  "name": "Bot7",
+                  "icon": "/avator/90023.png",
+                  "sex": 0,
+                  "level": 0,
+                  "isOnLine": true,
+                  "coin": 0,
+                  "isGaming": true,
+                  "remarkName": "",
+                  "regionCode": "CN"
+                }
+              }
+            ],
+            "id": 25010000,
+            "gameRoomId": 25010000,
+            "roomType": 25,
+            "playMode": 3,
+            "createTime": 1794032442390,
+            "endTime": 1794037370928,
+            "currentScore": 60,
+            "ownScore": 60,
+            "totalHands": 4,
+            "totalInningNum": 4,
+            "manualBetNum": 4,
+            "walksNum": 0,
+            "totalStream": 60,
+            "gameTime": 4928,
+            "roomTypeName": "ctjh",
+            "privateRoom": false,
+            "currentActivePoint": 0
+          }
+        ],
+        "totalSize": 1,
+        "totalScore": 60,
+        "ownScore": 60,
+        "pageNum": 1,
+        "privateRoomOpen": false
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": []
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "infoList": [
+          {
+            "ownCards": [
+              19,
+              35,
+              11
+            ],
+            "commonCards": [],
+            "winCards": [
+              22,
+              46,
+              21
+            ],
+            "winScore": 690,
+            "gameRoomId": 25010000,
+            "currInning": 10,
+            "firstGameList": [
+              {
+                "uid": 90000004,
+                "name": "Bot4",
+                "icon": "/avator/90020.png",
+                "pos": 1,
+                "banker": false,
+                "xiaZhuData": 20,
+                "score": -20,
+                "point": 490,
+                "isWin": false,
+                "handPais": [
+                  6,
+                  23,
+                  1
+                ],
+                "showCards": [
+                  6,
+                  23,
+                  1
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot4",
+                "userIcon": "/avator/90020.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000004,
+                  "name": "Bot4",
+                  "icon": "/avator/90020.png"
+                }
+              },
+              {
+                "uid": 90000003,
+                "name": "Bot3",
+                "icon": "/avator/90019.png",
+                "pos": 2,
+                "banker": false,
+                "xiaZhuData": 20,
+                "score": -20,
+                "point": 440,
+                "isWin": false,
+                "handPais": [
+                  17,
+                  12,
+                  18
+                ],
+                "showCards": [
+                  17,
+                  12,
+                  18
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot3",
+                "userIcon": "/avator/90019.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000003,
+                  "name": "Bot3",
+                  "icon": "/avator/90019.png"
+                }
+              },
+              {
+                "uid": 90000002,
+                "name": "Bot2",
+                "icon": "/avator/90018.png",
+                "pos": 3,
+                "banker": false,
+                "xiaZhuData": 640,
+                "score": -640,
+                "point": 290,
+                "isWin": false,
+                "handPais": [
+                  16,
+                  25,
+                  44
+                ],
+                "showCards": [
+                  16,
+                  25,
+                  44
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 0,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot2",
+                "userIcon": "/avator/90018.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000002,
+                  "name": "Bot2",
+                  "icon": "/avator/90018.png"
+                }
+              },
+              {
+                "uid": 90000001,
+                "name": "Bot1",
+                "icon": "/avator/90017.png",
+                "pos": 5,
+                "banker": false,
+                "xiaZhuData": 650,
+                "score": 690,
+                "point": 1340,
+                "isWin": true,
+                "handPais": [
+                  22,
+                  46,
+                  21
+                ],
+                "showCards": [
+                  22,
+                  46,
+                  21
+                ],
+                "cardTypeId": 3,
+                "playerStatus": 0,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot1",
+                "userIcon": "/avator/90017.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000001,
+                  "name": "Bot1",
+                  "icon": "/avator/90017.png"
+                }
+              },
+              {
+                "uid": 10001,
+                "name": "dev-10001",
+                "icon": "/avator/90009.png",
+                "pos": 6,
+                "banker": true,
+                "xiaZhuData": 10,
+                "score": -10,
+                "point": 0,
+                "isWin": false,
+                "handPais": [
+                  19,
+                  35,
+                  11
+                ],
+                "showCards": [
+                  19,
+                  35,
+                  11
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "dev-10001",
+                "userIcon": "/avator/90009.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 10001,
+                  "name": "dev-10001",
+                  "icon": "/avator/90009.png"
+                }
+              }
+            ],
+            "innerPlayerList": [
+              {
+                "uid": 90000004,
+                "name": "Bot4",
+                "icon": "/avator/90020.png"
+              },
+              {
+                "uid": 90000003,
+                "name": "Bot3",
+                "icon": "/avator/90019.png"
+              },
+              {
+                "uid": 90000002,
+                "name": "Bot2",
+                "icon": "/avator/90018.png"
+              },
+              {
+                "uid": 90000001,
+                "name": "Bot1",
+                "icon": "/avator/90017.png"
+              },
+              {
+                "uid": 10001,
+                "name": "dev-10001",
+                "icon": "/avator/90009.png"
+              }
+            ],
+            "gameEndData": "{\"playerList\":[{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\",\"pos\":1,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":490,\"isWin\":false,\"handPais\":[6,23,1],\"showCards\":[6,23,1],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot4\",\"userIcon\":\"/avator/90020.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\"}},{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\",\"pos\":2,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":440,\"isWin\":false,\"handPais\":[17,12,18],\"showCards\":[17,12,18],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot3\",\"userIcon\":\"/avator/90019.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\"}},{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\",\"pos\":3,\"banker\":false,\"xiaZhuData\":640,\"score\":-640,\"point\":290,\"isWin\":false,\"handPais\":[16,25,44],\"showCards\":[16,25,44],\"cardTypeId\":1,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot2\",\"userIcon\":\"/avator/90018.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\"}},{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\",\"pos\":5,\"banker\":false,\"xiaZhuData\":650,\"score\":690,\"point\":1340,\"isWin\":true,\"handPais\":[22,46,21],\"showCards\":[22,46,21],\"cardTypeId\":3,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot1\",\"userIcon\":\"/avator/90017.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\"}},{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\",\"pos\":6,\"banker\":true,\"xiaZhuData\":10,\"score\":-10,\"point\":0,\"isWin\":false,\"handPais\":[19,35,11],\"showCards\":[19,35,11],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"dev-10001\",\"userIcon\":\"/avator/90009.png\",\"operateList\":[],\"userInfo\":{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\"}}],\"resultList\":[{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\",\"pos\":1,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":490,\"isWin\":false,\"handPais\":[6,23,1],\"showCards\":[6,23,1],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot4\",\"userIcon\":\"/avator/90020.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\"}},{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\",\"pos\":2,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":440,\"isWin\":false,\"handPais\":[17,12,18],\"showCards\":[17,12,18],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot3\",\"userIcon\":\"/avator/90019.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\"}},{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\",\"pos\":3,\"banker\":false,\"xiaZhuData\":640,\"score\":-640,\"point\":290,\"isWin\":false,\"handPais\":[16,25,44],\"showCards\":[16,25,44],\"cardTypeId\":1,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot2\",\"userIcon\":\"/avator/90018.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\"}},{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\",\"pos\":5,\"banker\":false,\"xiaZhuData\":650,\"score\":690,\"point\":1340,\"isWin\":true,\"handPais\":[22,46,21],\"showCards\":[22,46,21],\"cardTypeId\":3,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot1\",\"userIcon\":\"/avator/90017.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\"}},{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\",\"pos\":6,\"banker\":true,\"xiaZhuData\":10,\"score\":-10,\"point\":0,\"isWin\":false,\"handPais\":[19,35,11],\"showCards\":[19,35,11],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"dev-10001\",\"userIcon\":\"/avator/90009.png\",\"operateList\":[],\"userInfo\":{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\"}}]}",
+            "currentInningJoin": true,
+            "reportMsg": {
+              "currentInningJoin": true,
+              "innerReport": false,
+              "reportFree": 0,
+              "playerList": []
+            },
+            "currentInningNum": 10,
+            "endTime": 1794037370928,
+            "innerEndTime": 1794037370928,
+            "ownScore": -10,
+            "effectiveBet": 10,
+            "roomType": 25,
+            "playMode": 3
+          },
+          {
+            "ownCards": [
+              16,
+              4,
+              15
+            ],
+            "commonCards": [],
+            "winCards": [
+              16,
+              4,
+              15
+            ],
+            "winScore": 90,
+            "gameRoomId": 25010000,
+            "currInning": 9,
+            "firstGameList": [
+              {
+                "uid": 90000006,
+                "name": "Bot6",
+                "icon": "/avator/90022.png",
+                "pos": 0,
+                "banker": false,
+                "xiaZhuData": 10,
+                "score": -10,
+                "point": 90,
+                "isWin": false,
+                "handPais": [
+                  0,
+                  26,
+                  12
+                ],
+                "showCards": [
+                  0,
+                  26,
+                  12
+                ],
+                "cardTypeId": 2,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot6",
+                "userIcon": "/avator/90022.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000006,
+                  "name": "Bot6",
+                  "icon": "/avator/90022.png"
+                }
+              },
+              {
+                "uid": 90000004,
+                "name": "Bot4",
+                "icon": "/avator/90020.png",
+                "pos": 1,
+                "banker": false,
+                "xiaZhuData": 20,
+                "score": -20,
+                "point": 510,
+                "isWin": false,
+                "handPais": [
+                  46,
+                  28,
+                  40
+                ],
+                "showCards": [
+                  46,
+                  28,
+                  40
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot4",
+                "userIcon": "/avator/90020.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000004,
+                  "name": "Bot4",
+                  "icon": "/avator/90020.png"
+                }
+              },
+              {
+                "uid": 90000003,
+                "name": "Bot3",
+                "icon": "/avator/90019.png",
+                "pos": 2,
+                "banker": false,
+                "xiaZhuData": 20,
+                "score": -20,
+                "point": 460,
+                "isWin": false,
+                "handPais": [
+                  33,
+                  47,
+                  51
+                ],
+                "showCards": [
+                  33,
+                  47,
+                  51
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot3",
+                "userIcon": "/avator/90019.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000003,
+                  "name": "Bot3",
+                  "icon": "/avator/90019.png"
+                }
+              },
+              {
+                "uid": 90000002,
+                "name": "Bot2",
+                "icon": "/avator/90018.png",
+                "pos": 3,
+                "banker": false,
+                "xiaZhuData": 20,
+                "score": -20,
+                "point": 930,
+                "isWin": false,
+                "handPais": [
+                  19,
+                  50,
+                  37
+                ],
+                "showCards": [
+                  19,
+                  50,
+                  37
+                ],
+                "cardTypeId": 2,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot2",
+                "userIcon": "/avator/90018.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000002,
+                  "name": "Bot2",
+                  "icon": "/avator/90018.png"
+                }
+              },
+              {
+                "uid": 90000007,
+                "name": "Bot7",
+                "icon": "/avator/90023.png",
+                "pos": 4,
+                "banker": false,
+                "xiaZhuData": 10,
+                "score": -10,
+                "point": 510,
+                "isWin": false,
+                "handPais": [
+                  2,
+                  1,
+                  29
+                ],
+                "showCards": [
+                  2,
+                  1,
+                  29
+                ],
+                "cardTypeId": 3,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot7",
+                "userIcon": "/avator/90023.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000007,
+                  "name": "Bot7",
+                  "icon": "/avator/90023.png"
+                }
+              },
+              {
+                "uid": 90000001,
+                "name": "Bot1",
+                "icon": "/avator/90017.png",
+                "pos": 5,
+                "banker": true,
+                "xiaZhuData": 10,
+                "score": -10,
+                "point": 650,
+                "isWin": false,
+                "handPais": [
+                  18,
+                  35,
+                  24
+                ],
+                "showCards": [
+                  18,
+                  35,
+                  24
+                ],
+                "cardTypeId": 1,
+                "playerStatus": 2,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "Bot1",
+                "userIcon": "/avator/90017.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 90000001,
+                  "name": "Bot1",
+                  "icon": "/avator/90017.png"
+                }
+              },
+              {
+                "uid": 10001,
+                "name": "dev-10001",
+                "icon": "/avator/90009.png",
+                "pos": 6,
+                "banker": false,
+                "xiaZhuData": 30,
+                "score": 90,
+                "point": 1290,
+                "isWin": true,
+                "handPais": [
+                  16,
+                  4,
+                  15
+                ],
+                "showCards": [
+                  16,
+                  4,
+                  15
+                ],
+                "cardTypeId": 3,
+                "playerStatus": 0,
+                "secondCardTypeId": 0,
+                "insuranceBet": 0,
+                "insuranceProfit": 0,
+                "winInsurance": 0,
+                "raiseMultiple": 0,
+                "multipleAnte": 0,
+                "totalScore": 0,
+                "finallyScore": 0,
+                "take": 0,
+                "userName": "dev-10001",
+                "userIcon": "/avator/90009.png",
+                "operateList": [],
+                "userInfo": {
+                  "uid": 10001,
+                  "name": "dev-10001",
+                  "icon": "/avator/90009.png"
+                }
+              }
+            ],
+            "innerPlayerList": [
+              {
+                "uid": 90000006,
+                "name": "Bot6",
+                "icon": "/avator/90022.png"
+              },
+              {
+                "uid": 90000004,
+                "name": "Bot4",
+                "icon": "/avator/90020.png"
+              },
+              {
+                "uid": 90000003,
+                "name": "Bot3",
+                "icon": "/avator/90019.png"
+              },
+              {
+                "uid": 90000002,
+                "name": "Bot2",
+                "icon": "/avator/90018.png"
+              },
+              {
+                "uid": 90000007,
+                "name": "Bot7",
+                "icon": "/avator/90023.png"
+              },
+              {
+                "uid": 90000001,
+                "name": "Bot1",
+                "icon": "/avator/90017.png"
+              },
+              {
+                "uid": 10001,
+                "name": "dev-10001",
+                "icon": "/avator/90009.png"
+              }
+            ],
+            "gameEndData": "{\"playerList\":[{\"uid\":90000006,\"name\":\"Bot6\",\"icon\":\"/avator/90022.png\",\"pos\":0,\"banker\":false,\"xiaZhuData\":10,\"score\":-10,\"point\":90,\"isWin\":false,\"handPais\":[0,26,12],\"showCards\":[0,26,12],\"cardTypeId\":2,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot6\",\"userIcon\":\"/avator/90022.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000006,\"name\":\"Bot6\",\"icon\":\"/avator/90022.png\"}},{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\",\"pos\":1,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":510,\"isWin\":false,\"handPais\":[46,28,40],\"showCards\":[46,28,40],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot4\",\"userIcon\":\"/avator/90020.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\"}},{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\",\"pos\":2,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":460,\"isWin\":false,\"handPais\":[33,47,51],\"showCards\":[33,47,51],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot3\",\"userIcon\":\"/avator/90019.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\"}},{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\",\"pos\":3,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":930,\"isWin\":false,\"handPais\":[19,50,37],\"showCards\":[19,50,37],\"cardTypeId\":2,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot2\",\"userIcon\":\"/avator/90018.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\"}},{\"uid\":90000007,\"name\":\"Bot7\",\"icon\":\"/avator/90023.png\",\"pos\":4,\"banker\":false,\"xiaZhuData\":10,\"score\":-10,\"point\":510,\"isWin\":false,\"handPais\":[2,1,29],\"showCards\":[2,1,29],\"cardTypeId\":3,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot7\",\"userIcon\":\"/avator/90023.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000007,\"name\":\"Bot7\",\"icon\":\"/avator/90023.png\"}},{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\",\"pos\":5,\"banker\":true,\"xiaZhuData\":10,\"score\":-10,\"point\":650,\"isWin\":false,\"handPais\":[18,35,24],\"showCards\":[18,35,24],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot1\",\"userIcon\":\"/avator/90017.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\"}},{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\",\"pos\":6,\"banker\":false,\"xiaZhuData\":30,\"score\":90,\"point\":1290,\"isWin\":true,\"handPais\":[16,4,15],\"showCards\":[16,4,15],\"cardTypeId\":3,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"dev-10001\",\"userIcon\":\"/avator/90009.png\",\"operateList\":[],\"userInfo\":{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\"}}],\"resultList\":[{\"uid\":90000006,\"name\":\"Bot6\",\"icon\":\"/avator/90022.png\",\"pos\":0,\"banker\":false,\"xiaZhuData\":10,\"score\":-10,\"point\":90,\"isWin\":false,\"handPais\":[0,26,12],\"showCards\":[0,26,12],\"cardTypeId\":2,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot6\",\"userIcon\":\"/avator/90022.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000006,\"name\":\"Bot6\",\"icon\":\"/avator/90022.png\"}},{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\",\"pos\":1,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":510,\"isWin\":false,\"handPais\":[46,28,40],\"showCards\":[46,28,40],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot4\",\"userIcon\":\"/avator/90020.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\"}},{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\",\"pos\":2,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":460,\"isWin\":false,\"handPais\":[33,47,51],\"showCards\":[33,47,51],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot3\",\"userIcon\":\"/avator/90019.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\"}},{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\",\"pos\":3,\"banker\":false,\"xiaZhuData\":20,\"score\":-20,\"point\":930,\"isWin\":false,\"handPais\":[19,50,37],\"showCards\":[19,50,37],\"cardTypeId\":2,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot2\",\"userIcon\":\"/avator/90018.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\"}},{\"uid\":90000007,\"name\":\"Bot7\",\"icon\":\"/avator/90023.png\",\"pos\":4,\"banker\":false,\"xiaZhuData\":10,\"score\":-10,\"point\":510,\"isWin\":false,\"handPais\":[2,1,29],\"showCards\":[2,1,29],\"cardTypeId\":3,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot7\",\"userIcon\":\"/avator/90023.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000007,\"name\":\"Bot7\",\"icon\":\"/avator/90023.png\"}},{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\",\"pos\":5,\"banker\":true,\"xiaZhuData\":10,\"score\":-10,\"point\":650,\"isWin\":false,\"handPais\":[18,35,24],\"showCards\":[18,35,24],\"cardTypeId\":1,\"playerStatus\":2,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"Bot1\",\"userIcon\":\"/avator/90017.png\",\"operateList\":[],\"userInfo\":{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\"}},{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\",\"pos\":6,\"banker\":false,\"xiaZhuData\":30,\"score\":90,\"point\":1290,\"isWin\":true,\"handPais\":[16,4,15],\"showCards\":[16,4,15],\"cardTypeId\":3,\"playerStatus\":0,\"secondCardTypeId\":0,\"insuranceBet\":0,\"insuranceProfit\":0,\"winInsurance\":0,\"raiseMultiple\":0,\"multipleAnte\":0,\"totalScore\":0,\"finallyScore\":0,\"take\":0,\"userName\":\"dev-10001\",\"userIcon\":\"/avator/90009.png\",\"operateList\":[],\"userInfo\":{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\"}}]}",
+            "currentInningJoin": true,
+            "reportMsg": {
+              "currentInningJoin": true,
+              "innerReport": false,
+              "reportFree": 0,
+              "playerList": []
+            },
+            "currentInningNum": 9,
+            "endTime": 1794037302883,
+            "innerEndTime": 1794037302883,
+            "ownScore": 90,
+            "effectiveBet": 30,
+            "roomType": 25,
+            "playMode": 3
+          },
+          {
+            "ownCards": [
+              47,
+              5,
+              2
+            ],
+            "commonCards": [],
+            "winCards": [
+              4,
+              12,
+              51
+            ],
+            "winScore": 30,
+            "gameRoomId": 25010000,
+            "currInning": 2,
+            "firstGameList": [
+              {
+                "uid": 90000002,
+                "pos": 3,
+                "userName": "Bot2",
+                "userIcon": "/avator/90018.png",
+                "score": 30,
+                "isWin": true,
+                "cardTypeId": 2,
+                "cardTypePokers": [],
+                "handPais": [
+                  4,
+                  12,
+                  51
+                ],
+                "showCards": [
+                  4,
+                  12,
+                  51
+                ],
+                "commonPoker": [],
+                "operateList": []
+              },
+              {
+                "uid": 10001,
+                "pos": 4,
+                "userName": "dev-10001",
+                "userIcon": "/avator/90009.png",
+                "score": -10,
+                "isWin": false,
+                "cardTypeId": 1,
+                "cardTypePokers": [],
+                "handPais": [
+                  47,
+                  5,
+                  2
+                ],
+                "showCards": [
+                  47,
+                  5,
+                  2
+                ],
+                "commonPoker": [],
+                "operateList": []
+              },
+              {
+                "uid": 90000001,
+                "pos": 5,
+                "userName": "Bot1",
+                "userIcon": "/avator/90017.png",
+                "score": -20,
+                "isWin": false,
+                "cardTypeId": 1,
+                "cardTypePokers": [],
+                "handPais": [
+                  17,
+                  48,
+                  28
+                ],
+                "showCards": [
+                  17,
+                  48,
+                  28
+                ],
+                "commonPoker": [],
+                "operateList": []
+              }
+            ],
+            "currentInningNum": 2,
+            "endTime": 1794032512868,
+            "innerEndTime": 1794032512868,
+            "ownScore": -10,
+            "effectiveBet": 10,
+            "roomType": 25,
+            "playMode": 3
+          },
+          {
+            "ownCards": [
+              9,
+              37,
+              22
+            ],
+            "commonCards": [],
+            "winCards": [
+              7,
+              47,
+              27
+            ],
+            "winScore": 10,
+            "gameRoomId": 25010000,
+            "currInning": 1,
+            "firstGameList": [
+              {
+                "uid": 10001,
+                "pos": 4,
+                "userName": "dev-10001",
+                "userIcon": "/avator/90009.png",
+                "score": -10,
+                "isWin": false,
+                "cardTypeId": 2,
+                "cardTypePokers": [],
+                "handPais": [
+                  9,
+                  37,
+                  22
+                ],
+                "showCards": [
+                  9,
+                  37,
+                  22
+                ],
+                "commonPoker": [],
+                "operateList": []
+              },
+              {
+                "uid": 90000001,
+                "pos": 5,
+                "userName": "Bot1",
+                "userIcon": "/avator/90017.png",
+                "score": 10,
+                "isWin": true,
+                "cardTypeId": 1,
+                "cardTypePokers": [],
+                "handPais": [
+                  7,
+                  47,
+                  27
+                ],
+                "showCards": [
+                  7,
+                  47,
+                  27
+                ],
+                "commonPoker": [],
+                "operateList": []
+              }
+            ],
+            "currentInningNum": 1,
+            "endTime": 1794032482826,
+            "innerEndTime": 1794032482826,
+            "ownScore": -10,
+            "effectiveBet": 10,
+            "roomType": 25,
+            "playMode": 3
+          }
+        ],
+        "totalInning": 4,
+        "ownJoinInning": 4,
+        "ownScore": 60,
+        "roomTypeName": "ctjh",
+        "blind": "{\"ante\":10,\"smallBlind\":0,\"bigBlind\":0,\"initialBet\":0,\"createdAt\":1794032442390,\"maxPeople\":7,\"forceShowCard\":true,\"maxBottomPool\":1340,\"totalTakeIn\":7400,\"roomResults\":[{\"uid\":10001,\"score\":60,\"takeIn\":2400,\"totalInningNum\":4,\"userInfo\":{\"uid\":10001,\"name\":\"dev-10001\",\"icon\":\"/avator/90009.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000001,\"score\":800,\"takeIn\":1000,\"totalInningNum\":8,\"userInfo\":{\"uid\":90000001,\"name\":\"Bot1\",\"icon\":\"/avator/90017.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000002,\"score\":-210,\"takeIn\":500,\"totalInningNum\":9,\"userInfo\":{\"uid\":90000002,\"name\":\"Bot2\",\"icon\":\"/avator/90018.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000003,\"score\":-230,\"takeIn\":1000,\"totalInningNum\":5,\"userInfo\":{\"uid\":90000003,\"name\":\"Bot3\",\"icon\":\"/avator/90019.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000004,\"score\":-10,\"takeIn\":500,\"totalInningNum\":8,\"userInfo\":{\"uid\":90000004,\"name\":\"Bot4\",\"icon\":\"/avator/90020.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000005,\"score\":-10,\"takeIn\":1000,\"totalInningNum\":3,\"userInfo\":{\"uid\":90000005,\"name\":\"Bot5\",\"icon\":\"/avator/90021.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000006,\"score\":-410,\"takeIn\":500,\"totalInningNum\":6,\"userInfo\":{\"uid\":90000006,\"name\":\"Bot6\",\"icon\":\"/avator/90022.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}},{\"uid\":90000007,\"score\":10,\"takeIn\":500,\"totalInningNum\":5,\"userInfo\":{\"uid\":90000007,\"name\":\"Bot7\",\"icon\":\"/avator/90023.png\",\"sex\":0,\"level\":0,\"isOnLine\":true,\"coin\":0,\"isGaming\":true,\"remarkName\":\"\",\"regionCode\":\"CN\"}}]}"
+      }
+    },
+    {
+      "msgCode": 200,
+      "errMsg": null,
+      "data": {
+        "count": 1,
+        "pageNum": 1,
+        "logs": [
+          {
+            "id": "1:zjh:25010000:1794032442390:9:10001",
+            "createTime": 1794037302883,
+            "sourceType": 2,
+            "sourceId": 25010000,
+            "point": 90,
+            "lastPoint": 1001880,
+            "roomType": 25
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -8,6 +8,9 @@ export function createDevTournamentStore(runtime) {
     return task;
   }
   return {
+    async readMatch(id) {
+      return locked(async()=>{const row=await base.getMatch(Number(id));return row?{row,state:copy(resident.docs.get(Number(id))||{registrations:{},outbox:[]})}:null;});
+    },
     async listSchedules() { return [...resident.schedules.values()].map(copy); },
     async saveSchedule(id, row) {
       return locked(async()=>{

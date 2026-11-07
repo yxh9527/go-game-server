@@ -68,7 +68,8 @@ test('conditional pricing matches independent brute force and never uses the act
 });
 
 for(const [mode,redCount,blackCount] of [[1,1,1],[2,2,1],[3,2,2],[4,3,1],[5,0,0]]) {
-  test('mode '+mode+' supports masked cards, eight odds, wallet settlement, roads and private history', async () => {
+  test('mode '+mode+' supports masked cards, eight odds, wallet settlement, roads and private history', async (t) => {
+    t.mock.method(Date, 'now', () => 2000);
     const f=fixture(mode); engine.beginRound(f.io,f.table,1000,()=>0.5);
     assert.equal(new Set(f.table.hand.dealt).size,6);
     const snapshot=engine.roomSnapshot(f.table,f.session);
