@@ -103,7 +103,8 @@ export function createBairenEngine(adapter) {
         betAreaIds: current.map(row => row.areaId) };
       io.sendUser?.(session.userId, responseId, payload);
     };
-    if (table.hand?.cancelTask || table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
+    if (table.hand?.cancelTask || table.hand?.pendingCancel || table.hand?.settling || table.hand?.settled
+      || table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
       || (body.roomId != null && Number(body.roomId) !== Number(table.roomId))) {
       result(1);
       return false;
@@ -162,7 +163,7 @@ export function createBairenEngine(adapter) {
       myBets: table.playerBets.get(uid) || [], myTotalBets: table.playerBets.get(uid) || [],
       betAreaIds: (table.playerBets.get(uid) || []).map(b => b.areaId) });
     if (!hand || hand.cancelTask || hand.settling || table.state !== PHASE.BETTING
-      || Date.now() >= table.phaseEndsAt || Number(body.roomType) !== Number(table.roomType)
+      || (!hand.pendingCancel && Date.now() >= table.phaseEndsAt) || Number(body.roomType) !== Number(table.roomType)
       || body.roomId != null && Number(body.roomId) !== Number(table.roomId)
       || !Array.isArray(body.areaIds) || body.areaIds.some(id => !areaIds.includes(Number(id)))) {
       respond(100085); return true;
@@ -171,14 +172,21 @@ export function createBairenEngine(adapter) {
     const canceled = current.filter(b => ids.has(b.areaId));
     const refund = canceled.reduce((sum, bet) => sum + bet.total * (hand.betReserveFactor || 1), 0);
     if (!refund) { respond(0); return true; }
-    const serial = hand.cancelSerial = (hand.cancelSerial || 0) + 1;
+    const pending = hand.pendingCancel;
+    if (pending && (pending.uid !== uid || JSON.stringify([...ids].sort()) !== pending.areas)) {
+      respond(100085); return true;
+    }
+    const operation = hand.pendingCancel ||= { uid, areas: JSON.stringify([...ids].sort()),
+      serial: hand.cancelSerial = (hand.cancelSerial || 0) + 1, session,
+      request: { roomType: table.roomType, roomId: table.roomId, areaIds: [...ids] } };
     // Block phase advancement until wallet and aggregate bets agree.
     const task = Promise.resolve().then(async () => {
       const result = await credit(session, refund, hundredWalletContext(ctx, session),
-        { key: 'hundred-cancel:' + table.agentId + ':' + table.roomId + ':' + table.inning + ':' + uid + ':' + serial });
-      if (result?.ok === false) { respond(100085); return; }
+        { operation, key: 'hundred-cancel:' + table.agentId + ':' + table.roomId + ':' + table.inning + ':' + uid + ':' + operation.serial });
+      if (result?.ok === false) { delete hand.pendingCancel; respond(100085); return; }
       table.playerBets.set(uid, current.filter(b => !ids.has(b.areaId)));
       for (const bet of canceled) table.totalBetsByArea[bet.areaId] -= bet.total;
+      delete hand.pendingCancel;
       respond(0, canceled.map(b => b.areaId));
       io.broadcast(PUSH.BET_BROADCAST, { roomType: table.roomType, roomId: table.roomId,
         allPlayerBets: areaIds.map(areaId => ({ areaId, total: table.totalBetsByArea[areaId] })) });
@@ -205,7 +213,7 @@ export function createBairenEngine(adapter) {
 
   async function settleRound(ctx) {
     const { table, io } = ctx;
-    if (!table.hand || table.hand.cancelTask || table.hand.settled || table.hand.settling) return false;
+    if (!table.hand || table.hand.cancelTask || table.hand.pendingCancel || table.hand.settled || table.hand.settling) return false;
     const hand = table.hand;
     hand.settling = true;
     try {
@@ -276,6 +284,10 @@ export function createBairenEngine(adapter) {
 
   function tick(io, table, now = Date.now(), ctx = {}) {
     if (table.hand?.cancelTask) return;
+    const pendingCancel = table.hand?.pendingCancel;
+    if (pendingCancel) {
+      return cancelBets({ ...ctx, io, table, session: pendingCancel.session }, pendingCancel.request);
+    }
     if (PHASE.SHUFFLING != null && table.state === PHASE.SHUFFLING) {
       if (now < table.phaseEndsAt) return;
       table.state = PHASE.IDLE;

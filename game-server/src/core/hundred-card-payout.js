@@ -5,11 +5,20 @@ const { credit, walletOf } = await rel(import.meta.url, '../wallet/index.js', v)
 const { hundredWalletContext } = await rel(import.meta.url, './robot.js', v);
 const bankers = await rel(import.meta.url, './hundred-banker.js', v);
 
-export async function settleCardBets(io, table, adapter) {
+export function settleCardBets(io, table, adapter) {
   const result = table.lastResult;
   if (!result || result.settled) {
     return;
   }
+  if (result.cardPayoutTask) return result.cardPayoutTask;
+  const task = Promise.resolve().then(() => payCardBets(io, table, adapter, result));
+  result.cardPayoutTask = task;
+  const clear = () => { if (result.cardPayoutTask === task) delete result.cardPayoutTask; };
+  task.then(clear, clear);
+  return task;
+}
+
+async function payCardBets(io, table, adapter, result) {
   result.settlements ||= new Map();
   const participants = new Map(table.playerSessions || []);
   const peers = new Map();
@@ -27,7 +36,8 @@ export async function settleCardBets(io, table, adapter) {
       result.settlements.set(uid, payment);
     }
     if (!payment.credited) {
-      const receipt = payment.payout > 0 ? await credit(session, payment.payout, hundredWalletContext(io, session)) : { ok: true };
+      const receipt = payment.payout > 0 ? await credit(session, payment.payout, hundredWalletContext(io, session),
+        { operation: payment }) : { ok: true };
       if (receipt?.ok === false) throw new Error('Hundred-card payout rejected');
       payment.credited = true;
     }

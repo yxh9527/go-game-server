@@ -170,8 +170,9 @@ export class BairenGame extends HundredGame {
     // New rounds adopt current public game policy, while each hand keeps its
     // already accepted reserve factor and odds through settlement retries.
     table.config = this.config;
-    this.engine.tick(ctx.io, table, Date.now(), { ...ctx, gameConfig: this.config });
+    const ticking = this.engine.tick(ctx.io, table, Date.now(), { ...ctx, gameConfig: this.config });
     this.tickRobots(ctx);
+    return ticking;
   }
 
   pushState(ctx) {

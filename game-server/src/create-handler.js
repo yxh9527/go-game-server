@@ -31,6 +31,12 @@ export async function createHandler(runtime) {
     ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
     : null;
   const { SEND, PUSH } = messages;
+  const { createSessionControl } = await rel(import.meta.url, './session-control.js', v);
+  const sessions = createSessionControl(runtime, { send, close: onClose, kickId: PUSH.USER_LOGIN_KICKOUT });
+  if (runtime.rpc?.common && runtime.wallet) {
+    const { createRpcWallet } = await rel(import.meta.url, './wallet/rpcWallet.js', v);
+    Object.assign(runtime.wallet, createRpcWallet(runtime.rpc));
+  }
   const pool = poolModule.createRoomPool(runtime, gameOf);
   for (const table of runtime.registry.tables.values()) {
     if (table.kind === 'slots') table.config = gameOf(table.roomType).config;
@@ -84,7 +90,8 @@ export async function createHandler(runtime) {
       ? session?.hundredRoomIds?.has(Number(table.roomId))
         || (!session?.hundredRoomIds && Number(session?.roomId) === Number(table.roomId))
       : Number(session?.roomId) === Number(table.roomId);
-    const active = (session) => session && Number(session.agentId || 0) === Number(table.agentId || 0)
+    const active = (session) => session && !session.superseded && session.authenticated !== false
+      && Number(session.agentId || 0) === Number(table.agentId || 0)
       && subscribed(session) && (table.kind === "hundred"
         ? session.authenticated !== false && (session.hundredInRoom === true || session.inRoom !== false)
         : session.inRoom !== false && String(session.gameId || table.gameId) === String(table.gameId));
@@ -141,7 +148,8 @@ export async function createHandler(runtime) {
       forEachPlayer(fn) {
         for (const [ws, session] of runtime.registry.sessions) {
           if (active(session)) {
-            fn({ ...session, ws });
+            session.ws = ws;
+            fn(session);
           }
         }
       },
@@ -301,7 +309,7 @@ export async function createHandler(runtime) {
         }
         if (!payout.credited) {
           const result = runtime.wallet.credit
-            ? await runtime.wallet.credit(payout.session, payout.amount)
+            ? await runtime.wallet.credit(payout.session, payout.amount, { operation: payout })
             : (payout.session.wallet += payout.amount, { ok: true });
           if (result?.ok === false) throw new Error("Room refund rejected");
           payout.credited = true;
@@ -344,7 +352,23 @@ export async function createHandler(runtime) {
     return task;
   }
 
-  async function onMessage(ws, data) {
+  function onMessage(ws, data) {
+    const socket = sessions.socketState(ws);
+    if (socket.closed) return Promise.resolve();
+    const task = processMessage(ws, data);
+    // Closing waits for business actions that already passed authentication.
+    const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const login = raw.length >= 8 && raw[0] === 0xc0 && raw.readInt16BE(2) === SEND.ROOM_LOGIN;
+    if (!login) {
+      const tasks = socket.actions ||= new Set();
+      tasks.add(task);
+      const clear = () => tasks.delete(task);
+      task.then(clear, clear);
+    }
+    return task;
+  }
+
+  async function processMessage(ws, data) {
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (raw[0] === 0x7b) {
       if (raw.length > 1024 * 1024) return;
@@ -362,69 +386,81 @@ export async function createHandler(runtime) {
     const { msgid, payload } = frame;
     runtime.log.info?.(`[game-server] << ${msgid}`, payload && typeof payload === "object" ? Object.keys(payload) : payload);
     let session = runtime.registry.session(ws);
+    if (session?.superseded) return;
     if (session?.roomClosing) return;
     if (msgid === SEND.PING || msgid === SEND.ROOM_PING) {
       send(ws, msgid === SEND.ROOM_PING ? PUSH.ROOM_PING : PUSH.PING);
       return;
     }
     if (msgid === SEND.ROOM_LOGIN) {
-      const body = payload || {};
-      session = runtime.registry.bind(ws, {
-        userId: Number(body.userId || 0),
-        name: String(body.userId || "player"),
-        clubId: Number(body.clubId || 0),
-        roomId: Number(body.roomId || 0),
-        wallet: 0,
-        agentId: 0,
-        topAgentId: 0,
-        accumulatedWin: 0,
-        inRoom: false,
-        authenticated: false,
-        openHundredGame: Boolean(body.openHundredGame),
-        accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
-      });
-      try {
-        if (runtime.gateway?.validateToken) {
-          const ok = await runtime.gateway.validateToken(body.userToken || body.token, session.userId);
-          if (!ok) {
-            send(ws, PUSH.ROOM_LOGIN, { serverTime: Date.now(), clubId: 0, enableLog: false, opType: -1 });
-            return;
+      // Repeated 1105 on an authenticated socket cannot reset its room/money.
+      if (session?.authenticated !== false && session) return;
+      return sessions.begin(ws, async order => {
+        const body = payload || {};
+        session = {
+          userId: Number(body.userId || 0),
+          name: String(body.userId || "player"),
+          clubId: Number(body.clubId || 0),
+          roomId: Number(body.roomId || 0),
+          wallet: 0,
+          agentId: 0,
+          topAgentId: 0,
+          accumulatedWin: 0,
+          inRoom: false,
+          authenticated: false,
+          openHundredGame: Boolean(body.openHundredGame),
+          accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
+          loginIdentity: sessions.identity(body),
+          currency: String(body.currency || 'CNY'),
+        };
+        try {
+          if (!Number.isSafeInteger(session.userId) || session.userId <= 0) throw new Error('Invalid login user');
+          if (runtime.gateway?.validateToken) {
+            const ok = await runtime.gateway.validateToken(body.userToken || body.token, session.userId);
+            if (!ok) {
+              send(ws, PUSH.ROOM_LOGIN, { serverTime: Date.now(), clubId: 0, enableLog: false, opType: -1 });
+              return;
+            }
           }
+          if (runtime.gateway?.getLoginData) {
+            const profile = await runtime.gateway.getLoginData(session.userId);
+            session.agentId = Number(profile?.agentId) || 0;
+            session.clubId ||= Number(profile?.clubId || profile?.agentId) || 0;
+            session.topAgentId = Number(profile?.topAgentId) || 0;
+            if (profile?.userName) session.name = String(profile.userName);
+            session.icon = profile?.icon ?? profile?.userIcon;
+          }
+          await runtime.wallet.load(session);
+          session.authenticated = true;
+          if (!await sessions.accept(ws, session, order)) return;
+        } catch (err) {
+          runtime.log.error("login wallet query failed", err.message);
+          send(ws, PUSH.ROOM_LOGIN, { serverTime: Date.now(), clubId: 0, enableLog: false, opType: -1 });
+          return;
         }
-        await runtime.wallet.load(session);
-        if (runtime.gateway?.getLoginData) {
-          const profile = await runtime.gateway.getLoginData(session.userId);
-          session.agentId = Number(profile?.agentId) || 0;
-          session.clubId ||= Number(profile?.clubId || profile?.agentId) || 0;
-          session.topAgentId = Number(profile?.topAgentId) || 0;
-          if (profile?.userName) session.name = String(profile.userName);
-          session.icon = profile?.icon ?? profile?.userIcon;
-        }
-        session.authenticated = true;
-      } catch (err) {
-        runtime.log.error("login wallet query failed", err.message);
-        send(ws, PUSH.ROOM_LOGIN, { serverTime: Date.now(), clubId: 0, enableLog: false, opType: -1 });
+        send(ws, PUSH.ROOM_LOGIN, {
+          serverTime: Date.now(),
+          clubId: session.clubId,
+          roomId: session.roomId,
+          enableLog: false,
+          opType: 0,
+          exchangeRate: 1,
+          playerClubId: session.clubId,
+          isOpenQuickChange: false,
+          openHundredGame: Boolean(body.openHundredGame),
+        });
+        runtime.log.info?.(`[game-server] room login uid=${session.userId} roomId=${session.roomId}`);
         return;
-      }
-      send(ws, PUSH.ROOM_LOGIN, {
-        serverTime: Date.now(),
-        clubId: session.clubId,
-        roomId: session.roomId,
-        enableLog: false,
-        opType: 0,
-        exchangeRate: 1,
-        playerClubId: session.clubId,
-        isOpenQuickChange: false,
-        openHundredGame: Boolean(body.openHundredGame),
       });
-      runtime.log.info?.(`[game-server] room login uid=${session.userId} roomId=${session.roomId}`);
-      return;
     }
+    const pendingLogin = sessions.socketState(ws).loginTask;
+    if (pendingLogin) { await pendingLogin; session = runtime.registry.session(ws); }
     if (!session) {
       return;
     }
-    if (session.authenticated === false) return;
+    if (session.authenticated === false || session.superseded || sessions.socketState(ws).closed) return;
     if (session.roomJoinTask && msgid !== SEND.SEND_JOIN_ROOM) await session.roomJoinTask;
+    if (session.superseded) return;
     // Inline shortcuts intentionally subscribe to OTHER games (60 -> 58, 62 -> 50).
     // Discovery and registration must follow the request, without changing the selected table.
     if (msgid === SEND.GR_GET_ALL_ROOMS_REQ
@@ -554,6 +590,8 @@ export async function createHandler(runtime) {
       return;
     }
     if (msgid === SEND.SEND_JOIN_ROOM) {
+      await sessions.promote(ws, session);
+      if (session.superseded) return;
       while (session.roomJoinTask) await session.roomJoinTask;
       const joining = (async () => {
         const body = payload || {};
@@ -572,6 +610,7 @@ export async function createHandler(runtime) {
         }
         if (session.leaveTask) await session.leaveTask;
         if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
+        if (session.superseded) return;
         const previous = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
         if (session.inRoom !== false && previous && previous !== table) {
           await leaveTable(ws, session, previous, gameOf(previous.roomType));
@@ -683,7 +722,7 @@ export async function createHandler(runtime) {
         if (!state.credited) {
           if (state.cash > 0) {
             if (runtime.wallet.credit) {
-              const result = await runtime.wallet.credit(session, state.cash);
+              const result = await runtime.wallet.credit(session, state.cash, { operation: state });
               if (result?.ok === false) throw new Error('Room cash-out rejected');
             } else session.wallet += state.cash;
           }
@@ -747,7 +786,21 @@ export async function createHandler(runtime) {
     return Promise.allSettled(closing);
   }
 
-  async function onClose(ws) {
+  function onClose(ws) {
+    const socket = sessions.socketState(ws);
+    socket.closed = true;
+    if (socket.closeTask) return socket.closeTask;
+    const task = Promise.resolve().then(async () => {
+      await Promise.allSettled([...(socket.actions || [])]);
+      await closeSession(ws);
+    });
+    socket.closeTask = task;
+    const clear = () => { if (socket.closeTask === task) delete socket.closeTask; };
+    task.then(clear, clear);
+    return task;
+  }
+
+  async function closeSession(ws) {
     const session = runtime.registry.session(ws);
     if (!session) {
       runtime.registry.drop(ws);

@@ -20,11 +20,11 @@ export class OnlineWallet extends WalletAdapter {
   load(session) {
     return this.#adapter().load(session);
   }
-  debit(session, amount) {
-    return this.#adapter().debit(session,amount);
+  debit(session, amount, meta) {
+    return this.#adapter().debit(session,amount,meta);
   }
-  credit(session, amount) {
-    return this.#adapter().credit(session,amount);
+  credit(session, amount, meta) {
+    return this.#adapter().credit(session,amount,meta);
   }
   persist(session) {
     return this.#adapter().persist(session);

@@ -94,6 +94,32 @@ test('failed payout retries remaining wallets without paying completed wallets t
   await engine.settleRound(f.ctx);await engine.settleRound(f.ctx);
   assert.equal(f.session.wallet,1003500);assert.equal(attempts,2);
 });
+
+test('uncertain cancellation keeps the same refund key and retries after the betting deadline and hot update', async () => {
+  const f = fixture();
+  f.game.placeBet(f.ctx, { roomType: 53, params: [{ areaId: 1, total: 100 }] });
+  const receipts = new Map(), keys = [];
+  f.ctx.runtime.wallet.credit = (session, amount, meta) => {
+    keys.push(meta.key);
+    if (receipts.has(meta.key)) return receipts.get(meta.key);
+    session.wallet += amount;
+    receipts.set(meta.key, { ok: true });
+    throw new Error('refund acknowledgment lost');
+  };
+  await assert.rejects(f.game.onMessage(f.ctx, 6111, { roomType: 53, areaIds: [1] }), /acknowledgment lost/);
+  assert.equal(f.table.playerBets.get(9)[0].total, 100, 'retain the unresolved bet until refund is confirmed');
+  assert.equal(f.game.placeBet(f.ctx, { roomType: 53, params: [{ areaId: 1, total: 100 }] }), false);
+  assert.equal(await engine.settleRound(f.ctx), false);
+  f.table.phaseEndsAt = Date.now() - 1;
+  const updated = await import('../../../game-server/src/core/turntable-engine.js?v=refund-retry');
+  await updated.engine.tick(f.ctx.io, f.table, Date.now(), f.ctx);
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.equal(receipts.size, 1);
+  assert.equal(f.session.wallet, 1000000);
+  assert.deepEqual(f.table.playerBets.get(9), []);
+  assert.equal(f.table.hand.pendingCancel, undefined);
+});
 test('configuration rejects invalid tracks and odds instead of emitting NaN', () => {
   for(const value of [NaN,Infinity,-1,0.0001])assert.throws(()=>roomRules({room_type:53,payload:{betAreaOdds:{1:value}}}),/odds/);
   assert.throws(()=>roomRules({room_type:54,payload:{defaultInner:[1]}}),/track/);

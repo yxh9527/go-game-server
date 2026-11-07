@@ -1,10 +1,20 @@
 import { env } from "../../../shared/rpc/env.js";
-import { applyCredit, applyDebit } from "./WalletAdapter.js";
+import { bindBalance, unavailable, walletOperation } from './operations.js';
+
+const accountsKey = Symbol.for('gogame.wallet.accounts');
 
 /**
  * 游戏侧钱包门面。余额权威在 rpc.common，业务不要直接 new Dev/Prod。
  */
 export function createRpcWallet(rpc) {
+  const accounts = rpc.common[accountsKey] ||= new Map();
+  function attach(session, balance) {
+    const key = JSON.stringify([Number(session.agentId) || 0, Number(session.userId), session.currency || 'CNY']);
+    if (!accounts.has(key)) accounts.set(key, { balance: balance ?? (Number(session.wallet) || 0) });
+    const account = accounts.get(key);
+    bindBalance(session, account);
+    return account;
+  }
   return {
     mode: env.isDev ? "local" : "online",
     async load(session) {
@@ -12,40 +22,33 @@ export function createRpcWallet(rpc) {
         session.wallet = Number(session.wallet) || 0;
         return session;
       }
-      session.wallet = Number(await rpc.common.getBalance(session.userId)) || 0;
+      const account = attach(session);
+      const revision = account.revision || 0;
+      const balance = Number(await rpc.common.getBalance(session.userId));
+      if (!Number.isSafeInteger(balance) || balance < 0) throw new Error('Invalid wallet balance');
+      if (revision === (account.revision || 0)) account.balance = balance;
       return session;
     },
-    debit(session, amount) {
-      if (env.isDev && session?.userId) {
-        const paid = rpc.common.debit(session.userId, amount);
-        if (paid.ok) {
-          session.wallet = paid.balance;
-        }
+    debit(session, amount, meta) {
+      if (!env.isDev) throw unavailable();
+      const account = attach(session);
+      return walletOperation(rpc.common, session, amount, 'debit', meta, () => {
+        const paid = rpc.common.debit(session.userId, amount, meta);
+        if (paid.ok) { account.balance = paid.balance; account.revision = (account.revision || 0) + 1; }
         return paid;
-      }
-      const result = applyDebit(session, amount);
-      if (result.ok && session?.userId) {
-        rpc.common.debit(session.userId, amount);
-      }
-      return result;
+      });
     },
-    credit(session, amount) {
-      if (env.isDev && session?.userId) {
-        const paid = rpc.common.credit(session.userId, amount);
-        session.wallet = paid.balance;
+    credit(session, amount, meta) {
+      if (!env.isDev) throw unavailable();
+      const account = attach(session);
+      return walletOperation(rpc.common, session, amount, 'credit', meta, () => {
+        const paid = rpc.common.credit(session.userId, amount, meta);
+        if (paid.ok) { account.balance = paid.balance; account.revision = (account.revision || 0) + 1; }
         return paid;
-      }
-      const result = applyCredit(session, amount);
-      if (session?.userId) {
-        rpc.common.credit(session.userId, amount);
-      }
-      return result;
+      });
     },
     async persist(session) {
-      if (env.isDev || !session?.userId) {
-        return;
-      }
-      await rpc.common.persistScore?.(session.userId, session.wallet);
+      // A balance snapshot is never a money operation.
     },
   };
 }

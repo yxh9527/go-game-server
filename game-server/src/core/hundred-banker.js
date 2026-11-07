@@ -78,7 +78,7 @@ async function flushRefunds(ctx) {
   const s = state(ctx.table);
   for (const r of [...s.refunds]) {
     if (!r.credited) {
-      const receipt = r.amount > 0 ? await credit(r.e.session, r.amount, ctx) : { ok: true };
+      const receipt = r.amount > 0 ? await credit(r.e.session, r.amount, ctx, { operation: r }) : { ok: true };
       if (receipt?.ok === false) throw new Error('Hundred banker refund rejected');
       r.credited = true;
     }

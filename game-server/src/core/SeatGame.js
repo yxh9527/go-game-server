@@ -317,7 +317,7 @@ export class SeatGame extends GameBase {
     if (!payout) return;
     const task = (async () => {
       if (!payout.credited) {
-        const result = await credit(payout.session, payout.amount, ctx);
+        const result = await credit(payout.session, payout.amount, ctx, { operation: payout });
         if (result?.ok === false) throw new Error('Partial cash-out rejected');
         payout.credited = true;
         features.recordCarryOut(table, payout.member, payout.amount);
@@ -390,7 +390,7 @@ export class SeatGame extends GameBase {
         if (!payout.credited) {
           if (member.bot) payout.session.wallet += amount;
           else if (amount > 0) {
-            const result = await credit(payout.session, amount, ctx);
+            const result = await credit(payout.session, amount, ctx, { operation: payout });
             if (result?.ok === false) throw new Error("Post-hand cash-out rejected");
           }
           payout.credited = true;

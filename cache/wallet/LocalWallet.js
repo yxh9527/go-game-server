@@ -1,4 +1,5 @@
 import { applyCredit, applyDebit, WalletAdapter } from "../../game-server/src/wallet/WalletAdapter.js";
+import { bindBalance, walletOperation } from '../../game-server/src/wallet/operations.js';
 
 export class LocalWallet extends WalletAdapter {
   constructor(options = {}) {
@@ -15,44 +16,35 @@ export class LocalWallet extends WalletAdapter {
     if (!session) {
       return session;
     }
-    const uid = session.userId;
-    if (uid && this.store.has(uid)) {
-      session.wallet = this.store.get(uid);
-      return session;
-    }
-    if (session.wallet > 0) {
-      if (uid) {
-        this.store.set(uid, session.wallet);
-      }
-      return session;
-    }
-    session.wallet = this.localBalance;
-    if (uid) {
-      this.store.set(uid, session.wallet);
-    }
-    session.name = session.name || `local-${uid || "player"}`;
+    const key = this.#key(session);
+    if (!key) { session.wallet ??= this.localBalance; return session; }
+    if (!this.store.has(key)) this.store.set(key, { balance: session.wallet > 0 ? session.wallet : this.localBalance });
+    bindBalance(session, this.store.get(key));
+    session.name ||= `local-${session.userId}`;
     return session;
   }
 
-  debit(session, amount, _meta) {
-    const result = applyDebit(session, amount);
-    this.#sync(session);
-    return result;
+  debit(session, amount, meta) {
+    this.#attach(session);
+    return walletOperation(this, session, amount, 'debit', meta, () => applyDebit(session, amount));
   }
 
-  credit(session, amount, _meta) {
-    const result = applyCredit(session, amount);
-    this.#sync(session);
-    return result;
+  credit(session, amount, meta) {
+    this.#attach(session);
+    return walletOperation(this, session, amount, 'credit', meta, () => applyCredit(session, amount));
   }
 
   async persist(session) {
-    this.#sync(session);
+    // Persistence cannot write an old socket's snapshot over the account.
+    this.#attach(session);
   }
 
-  #sync(session) {
-    if (session?.userId) {
-      this.store.set(session.userId, this.balance(session));
-    }
+  #key(session) {
+    return session?.userId ? `${Number(session.agentId) || 0}:${Number(session.userId)}` : null;
+  }
+
+  #attach(session) {
+    const account = this.store.get(this.#key(session));
+    if (account) bindBalance(session, account);
   }
 }

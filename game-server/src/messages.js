@@ -42,6 +42,7 @@ export const SEND = {
 };
 
 export const PUSH = {
+  USER_LOGIN_KICKOUT: 1203,
   PING: 1200,
   ROOM_PING: 1204,
   ROOM_LOGIN: 1205,

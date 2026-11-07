@@ -1,5 +1,8 @@
 import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
-import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
+
+function unavailable() {
+  throw Object.assign(new Error('Authoritative wallet mutations are not configured'), { code: 'WALLET_UNAVAILABLE' });
+}
 
 export class CommonRpcProd {
   async getBalance(userId) {
@@ -10,18 +13,15 @@ export class CommonRpcProd {
   }
 
   debit(_userId, _amount) {
-    return { ok: true };
+    return unavailable();
   }
 
   credit(_userId, _amount) {
-    return { ok: true };
+    return unavailable();
   }
 
   async persistScore(userId, score) {
-    if (!userId || userId >= 90000000) {
-      return;
-    }
-    const client=await getGogameStorageClient();
-    await client.call('persistScore',{userId:Number(userId),score});
+    // Never overwrite the authoritative balance with a connection snapshot.
+    return unavailable();
   }
 }

@@ -92,7 +92,8 @@ export class HundredGame extends GameBase {
   placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
     const { table, session, send } = ctx;
     const customData = Number(body?.customData ?? 2);
-    if (table.state !== this.betState() || table.phaseEndsAt && Date.now() >= table.phaseEndsAt) {
+    if (table.hundredCycleTask || table.hundredBankers?.task || table.state !== this.betState()
+      || table.phaseEndsAt && Date.now() >= table.phaseEndsAt) {
       send(responseId, { customData,
         points: session.wallet,
         roomType: table.roomType,

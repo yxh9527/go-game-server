@@ -300,8 +300,9 @@ test("last-observer disconnect starts the allowance; no-hand idle time cannot co
   await f.handler.tick();
   assert.equal(f.table.suspendedAt, undefined, "three minutes without a settlement is not three hands");
   assert.equal(f.table.emptySinceHands, 0);
-  f.registry.bind(f.ws, f.session);
-  await f.join();
+  const reconnected = { ...f.ws };
+  f.registry.bind(reconnected, f.session);
+  await f.handler.onMessage(reconnected, encodeFrame(SEND.SEND_JOIN_ROOM, { roomId: f.table.roomId, roomType: 19 }));
   assert.equal(f.table.suspendedAt, undefined);
   assert.equal(f.table.emptySinceHands, undefined);
   assert.equal(f.table.members.length, 0);

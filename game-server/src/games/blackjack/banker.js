@@ -105,7 +105,7 @@ async function refunds(ctx) {
   const s = state(ctx.table);
   for (const r of [...(s.refunds || [])]) {
     if (!r.credited) {
-      const result = await credit(r.session, r.amount, ctx);
+      const result = await credit(r.session, r.amount, ctx, { operation: r });
       if (result?.ok === false) {
         if (r.purpose === 'reduce' && !r.failureNotified) {
           tip(ctx.io, r.entry.uid, 100114, '余额不足，带出失败'); r.failureNotified = true;

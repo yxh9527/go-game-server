@@ -12,8 +12,7 @@ export class WalletAdapter {
   }
 
   canDebit(session, amount) {
-    const n = Number(amount) || 0;
-    return n <= 0 || this.balance(session) >= n;
+    return Number.isSafeInteger(amount) && amount >= 0 && this.balance(session) >= amount;
   }
 
   async load(_session) {
@@ -32,7 +31,8 @@ export class WalletAdapter {
 }
 
 export function applyDebit(session, amount) {
-  const n = Number(amount) || 0;
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Invalid wallet amount');
+  const n = amount;
   if (n <= 0) {
     return { ok: true, balance: Number(session.wallet) || 0 };
   }
@@ -45,7 +45,9 @@ export function applyDebit(session, amount) {
 }
 
 export function applyCredit(session, amount) {
-  const n = Number(amount) || 0;
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Invalid wallet amount');
+  const n = amount;
+  if (!Number.isSafeInteger((Number(session.wallet) || 0) + n)) throw new Error('Invalid wallet balance');
   session.wallet = (Number(session.wallet) || 0) + n;
   return { ok: true, balance: session.wallet };
 }
