@@ -1,10 +1,15 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from 'node:crypto';
+import { createGameSessionStore, createInMemoryGameSessionBackend } from '../../shared/rpc/game-session-store.js';
+
+const gameSessionBackend=createInMemoryGameSessionBackend();
 
 export class BusRpcDev {
   constructor() {
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.cache = new Map();
+    this.gameSessions=createGameSessionStore({backend:gameSessionBackend,instanceId:randomUUID()});
   }
 
   async publish(channel, payload) {
@@ -31,5 +36,5 @@ export class BusRpcDev {
     this.events.on(channel, fn);
   }
 
-  async close() {}
+  async close() { await this.gameSessions.close(); }
 }

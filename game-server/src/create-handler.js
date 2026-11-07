@@ -1,4 +1,5 @@
 import { rel } from "./rel.js";
+import { randomUUID } from 'node:crypto';
 
 export async function createHandler(runtime) {
   const v = runtime.hotVersion;
@@ -31,6 +32,13 @@ export async function createHandler(runtime) {
     ? await rel(import.meta.url, "../../cache/game-server/http.js", v)
     : null;
   const { SEND, PUSH } = messages;
+  // The RPC adapter may predate this hot update; attach the coordination store
+  // to its resident bus without replacing the bus or restarting connections.
+  if(runtime.bus&&!runtime.bus.gameSessions){
+    const {createGameSessionStore}=await rel(import.meta.url,'../../shared/rpc/game-session-store.js',v);
+    runtime.bus.gameSessions=createGameSessionStore({redis:runtime.env==='prod'?runtime.bus.redis:null,
+      instanceId:randomUUID(),required:runtime.env==='prod'});
+  }
   const { createSessionControl } = await rel(import.meta.url, './session-control.js', v);
   const sessions = createSessionControl(runtime, { send, close: onClose, kickId: PUSH.USER_LOGIN_KICKOUT });
   if (runtime.rpc?.common && runtime.wallet) {
@@ -326,6 +334,7 @@ export async function createHandler(runtime) {
       }
     }
     const task = (async () => {
+      for(const [,session]of closure.sessions)await sessions.updateRoom(session,table);
       for (const payout of closure.payouts.values()) {
         if (!payout.session) {
           payout.session = closure.sessions.find(([, session]) => Number(session.userId) === payout.uid)?.[1]
@@ -385,9 +394,9 @@ export async function createHandler(runtime) {
   function onMessage(ws, data) {
     const socket = sessions.socketState(ws);
     if (socket.closed) return Promise.resolve();
-    const task = runtime.wallet.authoritative
-      ? runtime.wallet.run(() => processMessage(ws, data), runtime)
-      : processMessage(ws, data);
+    const action=()=>runtime.wallet.authoritative
+      ?runtime.wallet.run(()=>processMessage(ws,data),runtime):processMessage(ws,data);
+    const task=runtime.bus?.gameSessions?sessions.withSession(ws,action):action();
     // Closing waits for business actions that already passed authentication.
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const login = raw.length >= 8 && raw[0] === 0xc0 && raw.readInt16BE(2) === SEND.ROOM_LOGIN;
@@ -420,6 +429,7 @@ export async function createHandler(runtime) {
     let session = runtime.registry.session(ws);
     if (session?.superseded) return;
     if (session?.roomClosing) return;
+    if(session?.authenticated!==false&&!await sessions.verify(ws,session))return;
     if (msgid === SEND.PING || msgid === SEND.ROOM_PING) {
       send(ws, msgid === SEND.ROOM_PING ? PUSH.ROOM_PING : PUSH.PING);
       return;
@@ -443,10 +453,13 @@ export async function createHandler(runtime) {
           openHundredGame: Boolean(body.openHundredGame),
           accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
           loginIdentity: sessions.identity(body),
+          loginId: randomUUID(),
+          socketId: randomUUID(),
           currency: 'CNY',
         };
         try {
           if (!Number.isSafeInteger(session.userId) || session.userId <= 0) throw new Error('Invalid login user');
+          session.loginAttempt=await sessions.beginAttempt(session.userId);
           if (runtime.gateway?.validateToken) {
             const ok = await runtime.gateway.validateToken(body.userToken || body.token, session.userId);
             if (!ok) {
@@ -465,7 +478,7 @@ export async function createHandler(runtime) {
           }
           await runtime.wallet.load(session);
           session.authenticated = true;
-          if (!await sessions.accept(ws, session, order)) return;
+          if (!await sessions.accept(ws, session, order,body)) return;
         } catch (err) {
           runtime.log.error("login wallet query failed", err.message);
           send(ws, PUSH.ROOM_LOGIN, { serverTime: Date.now(), clubId: 0, enableLog: false, opType: -1 });
@@ -662,6 +675,9 @@ export async function createHandler(runtime) {
         table.standby = false;
         const game = gameOf(table.roomType);
         game.onJoin(ctxOf(ws, session, table, body));
+        if(!await sessions.updateRoom(session,table)){
+          session.superseded=true;send(ws,PUSH.USER_LOGIN_KICKOUT);ws.close?.(1000,'Game session lease lost');return;
+        }
         const code = fair.currentFairCode(table, session.userId);
         if (code) send(ws, PUSH.DZPK_PUSH_BLOCKCHAIN_NOTIFY, code);
         if (game.kind === "normal" && Number(table.roomType)!==101) {
@@ -758,6 +774,7 @@ export async function createHandler(runtime) {
         await game.beforeLeave?.(ctxOf(ws, session, table));
         await game.afterRound?.(ctxOf(ws, session, table));
         session.inRoom = false;
+        await sessions.updateRoom(session,table);
         state.cash = Number(game.onLeave(ctxOf(ws, session, table)) || 0);
         state.detached = true;
       }
@@ -792,6 +809,7 @@ export async function createHandler(runtime) {
 
   function tick(onlyTable) {
     void userCenter.flush();
+    if(runtime.bus?.gameSessions)void sessions.renewAll().catch(error=>runtime.log.error('game session lease renewal failed',error.message));
     if (runtime.wallet.authoritative && !runtime.wallet.managed()) {
       return Promise.allSettled([...runtime.registry.tables.values()].map(table =>
         runtime.wallet.run(() => tick(table), runtime).catch(error => { runtime.log.error('cash tick failed', error.message); throw error; })));
@@ -845,10 +863,10 @@ export async function createHandler(runtime) {
     const socket = sessions.socketState(ws);
     socket.closed = true;
     if (socket.closeTask) return socket.closeTask;
-    const task = Promise.resolve().then(async () => {
-      if (!runtime.wallet.authoritative) await Promise.allSettled([...(socket.actions || [])]);
-      if (runtime.wallet.authoritative) await runtime.wallet.run(() => closeSession(ws), runtime);
-      else await closeSession(ws);
+    const task = Promise.resolve().then(async()=>{
+      if(!runtime.wallet.authoritative)await Promise.allSettled([...(socket.actions||[])]);
+      return sessions.serialize(ws,()=>runtime.wallet.authoritative
+        ?runtime.wallet.run(()=>closeSession(ws),runtime):closeSession(ws));
     });
     socket.closeTask = task;
     const clear = () => { if (socket.closeTask === task) delete socket.closeTask; };
@@ -874,6 +892,7 @@ export async function createHandler(runtime) {
       await persist(session);
     }
     runtime.registry.drop(ws);
+    await sessions.release(session);
   }
 
   function getDevHoldemRecordDetail(roomId, inningNum, userId, agentId) {

@@ -6,6 +6,14 @@ import { createRegistry } from "../../game-server/src/registry.js";
 import { decodeFrame, encodeFrame } from "../../game-server/src/codec.js";
 import { PUSH, SEND } from "../../game-server/src/messages.js";
 
+test('game-server hot update installs distributed sessions on its resident RPC bus',async()=>{
+ const runtime={env:'dev',hotVersion:'distributed-session-bootstrap',registry:createRegistry(),configs:[],findConfig:()=>null,
+   bus:{},wallet:{},log:{info(){},error(){}}};
+ await createHandler(runtime);
+ assert.equal(typeof runtime.bus.gameSessions.claim,'function');
+ assert.equal(typeof runtime.bus.gameSessions.withSession,'function');
+});
+
 test("hundred unsubscribe requires login and works after leaving a room without creating one", async () => {
   const registry = createRegistry();
   const received = [];

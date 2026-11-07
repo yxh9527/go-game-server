@@ -1,10 +1,13 @@
 import { prodDeps } from "./prodDeps.js";
 import { createCashCarryStore } from '../../cash-carry-store.js';
+import { createGameSessionStore } from '../../game-session-store.js';
+import { randomUUID } from 'node:crypto';
 
 export class BusRpcProd {
   constructor() {
     this.redis = prodDeps.redis;
     this.cashCarry = createCashCarryStore(this.redis);
+    this.gameSessions = createGameSessionStore({ redis: this.redis, instanceId: randomUUID(), required: true });
     this.sub = this.redis?.duplicate?.();
     this.handlers = new Map();
     this.sub?.on("message", (channel, message) => {
@@ -40,6 +43,7 @@ export class BusRpcProd {
   }
 
   async close() {
+    await this.gameSessions.close();
     this.sub?.disconnect();
   }
 }

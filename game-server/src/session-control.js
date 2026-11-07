@@ -1,7 +1,9 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 export function createSessionControl(runtime, { send, close, kickId }) {
   const state = runtime.sessionControl ||= { sequence: 0, latest: new Map(), queues: new Map(), sockets: new WeakMap() };
+  const distributed=runtime.bus?.gameSessions||null;
+  state.instanceId ||= distributed?.instanceId || randomUUID();
   const accountKey = s => `${Number(s.agentId) || 0}:${Number(s.userId)}`;
   function socketState(ws) {
     if (!state.sockets.has(ws)) state.sockets.set(ws, {});
@@ -29,12 +31,23 @@ export function createSessionControl(runtime, { send, close, kickId }) {
     }
     await Promise.all(entries.map(([ws]) => close(ws)));
   }
+  function revokeLogin(loginId,reason='replaced'){
+    if(!loginId)return;
+    const entries=[...runtime.registry.sessions].filter(([,session])=>session.loginId===loginId);
+    if(entries.length)void evict(entries).catch(error=>runtime.log?.error?.('distributed session eviction failed',error.message));
+    runtime.log?.info?.(`[game-server] session revoked login=${loginId} reason=${reason}`);
+  }
+  if(distributed&&!state.unsubscribe)state.unsubscribe=distributed.subscribe(message=>{
+    try{const event=typeof message==='string'?JSON.parse(message):message;if(event?.event==='revoke')revokeLogin(event.loginId,event.reason);}
+    catch(error){runtime.log?.error?.('invalid distributed session event',error.message);}
+  });
   function peers(session, ws) {
     return [...runtime.registry.sessions].filter(([other, s]) => other !== ws
       && accountKey(s) === accountKey(session) && (s.authenticated !== false || s.superseded));
   }
   return {
     socketState,
+    beginAttempt(userId){return distributed?distributed.beginAttempt(userId):Promise.resolve(++state.sequence);},
     begin(ws, action) {
       const socket = socketState(ws);
       if (socket.closed) return Promise.resolve();
@@ -51,10 +64,13 @@ export function createSessionControl(runtime, { send, close, kickId }) {
       return createHash('sha256').update(JSON.stringify([String(body.userToken || body.token || ''),
         String(body.deviceId || '')])).digest('hex');
     },
-    accept(ws, session, order) {
+    accept(ws, session, order, credentials = {}) {
       return serialize(accountKey(session), async () => {
         const socket = socketState(ws), key = accountKey(session);
-        if (socket.closed || ws.readyState !== 1) return false;
+        if (socket.closed || ws.readyState !== 1) {
+          if(lease)await distributed.release(session);
+          return false;
+        }
         if ((state.latest.get(key) || 0) > order) {
           socket.closed = true;
           send(ws, kickId);
@@ -62,16 +78,27 @@ export function createSessionControl(runtime, { send, close, kickId }) {
           if (runtime.wallet?.deliver) runtime.wallet.deliver(disconnect); else disconnect();
           return false;
         }
+        let lease=null;
+        if(distributed){
+          lease=await distributed.claim(session,{identity:session.loginIdentity,allowPair:Boolean(credentials.openHundredGame),attempt:session.loginAttempt});
+          if(!lease?.ok)throw Object.assign(new Error('Game session claim failed'),{code:'SESSION_CLAIM_FAILED'});
+          session.loginId=lease.loginId;session.sessionGeneration=lease.generation;session.loginRole=lease.role;
+          if(socket.closed||ws.readyState!==1){await distributed.release(session);return false;}
+        }
         state.latest.set(key, order);
         const existing = peers(session, ws);
         const primary = existing.length === 1 && existing[0][1];
         const host = primary && runtime.registry.getTable(primary.roomId, primary.agentId, primary.gameId);
-        const paired = primary && !primary.superseded && primary.loginRole !== 'hundred' && host?.kind === 'normal'
+        const localPaired = primary && !primary.superseded && primary.loginRole !== 'hundred' && host?.kind === 'normal'
           && [19, 25, 24, 31, 26].includes(Number(host.roomType)) && primary.inRoom === true
           && primary.loginIdentity === session.loginIdentity && Number(primary.roomId) === Number(session.roomId);
+        const paired=lease?lease.role==='hundred':localPaired;
         session.loginRole = paired ? 'hundred' : 'primary';
-        session.loginGroup = paired ? primary.loginGroup : order;
-        if (!paired) await evict(existing);
+        session.loginGroup = paired ? (lease?.loginId||primary.loginGroup) : (lease?.loginId||order);
+        if (!paired) {
+          try{await evict(existing);}
+          catch(error){if(lease)await distributed.release(session);throw error;}
+        }
         if (socket.closed || ws.readyState !== 1) return false;
         runtime.registry.bind(ws, session);
         return true;
@@ -82,8 +109,47 @@ export function createSessionControl(runtime, { send, close, kickId }) {
     async promote(ws, session) {
       if (session.loginRole !== 'hundred') return;
       if (session.superseded) return;
+      if(distributed){
+        const oldLoginId=session.loginId;session.loginId=randomUUID();
+        try{
+          const lease=await distributed.claim(session,{identity:session.loginIdentity,allowPair:false,attempt:await this.beginAttempt(session.userId)});
+          if(!lease?.ok)throw Object.assign(new Error('Game session promotion failed'),{code:'SESSION_CLAIM_FAILED'});
+          session.loginId=lease.loginId;session.sessionGeneration=lease.generation;
+          session.loginRole='primary';session.loginGroup=lease.loginId;
+        }catch(error){session.loginId=oldLoginId;throw error;}
+        return;
+      }
       session.loginRole = 'primary';
       await evict(peers(session, ws));
     },
+    async verify(ws,session){
+      if(!distributed||!session?.loginId)return true;
+      const valid=await distributed.verify(session);
+      if(!valid){session.superseded=true;session.authenticated=false;send(ws,kickId);try{ws.close?.(1000,'Game session replaced');}catch{}}
+      return valid;
+    },
+    async withSession(ws,action){
+      const session=runtime.registry.session(ws);
+      if(!distributed||!session||session.authenticated===false||!session.loginId)return action();
+      return distributed.withSession(session,async()=>{
+        if(session.superseded)return false;
+        return action();
+      });
+    },
+    serialize(ws,action){
+      const session=runtime.registry.session(ws);
+      return !distributed||!session?action():distributed.serialize(session,action);
+    },
+    async renewAll(){
+      if(!distributed)return;
+      const current=[...runtime.registry.sessions].filter(([,session])=>session.authenticated!==false&&!session.superseded);
+      const results=await Promise.allSettled(current.map(([,session])=>distributed.renew(session)));
+      for(let i=0;i<results.length;i++)if(results[i].status==='fulfilled'&&!results[i].value){
+        const session=current[i][1];revokeLogin(session.loginId,'lease-lost');
+      }
+      const failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+    },
+    updateRoom(session,table){return !distributed||session.loginRole==='hundred'?Promise.resolve(true):distributed.updateRoom(session,table);},
+    release(session){return distributed&&session?.loginId?distributed.release(session):Promise.resolve(false);},
   };
 }

@@ -6,6 +6,8 @@ import { createWallet } from '../../game-server/src/wallet/index.js';
 import { encodeFrame, decodeFrame } from '../../game-server/src/codec.js';
 import { SEND, PUSH } from '../../game-server/src/messages.js';
 import { seedRooms } from '../../cache/rpc/seed.js';
+import { createGameSessionStore,createInMemoryGameSessionBackend } from '../../shared/rpc/game-session-store.js';
+import { createSessionControl } from '../../game-server/src/session-control.js';
 
 function deferred() {
   let resolve;
@@ -201,4 +203,36 @@ test('cash entry is exclusive while native hundred and multi-slot discovery reta
   assert.equal(session.wallet, 6000);
   assert.equal(session.carryAmount, 0);
   assert.equal(session.availableBalance, 6000);
+});
+
+test('separate game-server instances share session fencing, cross-instance eviction, and pair the hundred socket',async()=>{
+ const backend=createInMemoryGameSessionBackend();
+ function node(){
+  const runtime={registry:createRegistry(),bus:{gameSessions:createGameSessionStore({backend,instanceId:Math.random().toString(36)})},
+    log:{info(){},error(){}}};
+  const control=createSessionControl(runtime,{send:ws=>{ws.kicks++},close:async ws=>{runtime.registry.drop(ws);ws.close();},kickId:9000});
+  return{runtime,control,async login(ws,token,{identity=token,allowPair=false,roomId=700000}={}){
+    const session={userId:72,agentId:9,roomId,gameId:'holdem',roomType:19,inRoom:false,authenticated:true,
+      loginId:identity+'-'+ws.socketId,socketId:ws.socketId,loginIdentity:identity,loginAttempt:await this.control.beginAttempt(72)};
+    const order=await this.control.begin(ws,order=>this.control.accept(ws,session,order,{openHundredGame:allowPair}));
+    return runtime.registry.session(ws)||null;
+  }};
+ }
+ const a=node(),b=node();
+ const primarySocket={readyState:1,kicks:0,close(){this.readyState=3;}};primarySocket.socketId='primary';
+ const primary=await a.login(primarySocket,'same-token',{identity:'same'});primary.roomType=19;primary.inRoom=true;primary.roomId=700001;
+ await a.control.updateRoom(primary,{roomType:19});
+ const overlaySocket={readyState:1,kicks:0,close(){this.readyState=3;}};overlaySocket.socketId='overlay';
+ const overlay=await b.login(overlaySocket,'same-token',{identity:'same',allowPair:true,roomId:700001});
+ assert.equal(overlay.loginRole,'hundred');assert.equal(primarySocket.readyState,1);assert.equal(await a.control.verify(primarySocket,primary),true);
+ await b.control.promote(overlaySocket,overlay);
+ assert.equal(overlay.loginRole,'primary');assert.equal(overlaySocket.readyState,1);assert.equal(primarySocket.readyState,3);
+ assert.equal(await b.control.verify(overlaySocket,overlay),true,'promoting the hundred socket transfers the distributed lease');
+ const replacement={readyState:1,kicks:0,close(){this.readyState=3;}};replacement.socketId='replacement';
+ const replacementSession=await b.login(replacement,'token-b',{identity:'different',roomId:700002});
+ assert.ok(replacementSession);assert.equal(primarySocket.readyState,3);assert.equal(overlaySocket.readyState,3);
+ assert.equal(primarySocket.kicks,1);assert.equal(overlaySocket.kicks,1);
+ assert.equal(await a.control.verify(primarySocket,primary),false);
+ await a.control.release(primary);
+ assert.equal(await b.control.verify(replacement,replacementSession),true,'late old close cannot release the replacement lease');
 });
