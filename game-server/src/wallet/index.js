@@ -3,15 +3,18 @@ import { createRequire } from "node:module";
 import { env } from "../../../shared/rpc/env.js";
 import { OnlineWallet } from "./OnlineWallet.js";
 import { createRpcWallet } from "./rpcWallet.js";
+import { enableCarry } from './carry.js';
+export { hasCarry, cashTableKey, CARRY_TTL_MS, CARRY_RENEW_MS } from './carry.js';
 
 export { OnlineWallet, createRpcWallet };
 
 const require = createRequire(import.meta.url);
 let sessionOnly;
+const tableWallet = Symbol.for('gogame.test.table.wallet');
 function localWallet(options) {
   if (!env.isDev) throw new Error("Local wallet is only available in dev; configure a production wallet");
   const { LocalWallet } = require("../../../cache/wallet/LocalWallet.js");
-  return new LocalWallet(options);
+  return enableCarry(new LocalWallet(options));
 }
 
 export function createWallet(config = {}, deps = {}) {
@@ -32,8 +35,9 @@ export function createWallet(config = {}, deps = {}) {
 
 export function walletOf(host) {
   const wallet = host?.wallet || host?.runtime?.wallet || host?.io?.wallet;
-  if (wallet) return wallet;
+  if (wallet) return enableCarry(wallet);
   if (!env.isDev) throw new Error("A production wallet is required");
+  if (host?.table) return host.table[tableWallet] ||= localWallet({ localBalance: 0 });
   return sessionOnly ||= localWallet({ localBalance: 0 });
 }
 

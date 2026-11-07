@@ -17,6 +17,8 @@ const handRow = h => ({ ...h, cards: h.cards.slice(), cardCount: h.cards.length,
 const handResults = p => p.hands.map(h => ({ ...handRow(h), handCards: h.cards.slice(), xiaZhuData: h.betAmount }));
 const current = table => table.hand?.players[table.hand.turn];
 function spend(io, table, p, amount) {
+  if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(casino.availablePoint(p.member))
+    || amount > casino.availablePoint(p.member) || !Number.isSafeInteger(p.member.totalBet + amount)) return false;
   const shortfall = Math.max(0, amount - p.member.point);
   if (shortfall > 0) {
     if (!casino.isCasino(table) || !casino.fundWager(io, table, p.member, shortfall)) return false;
@@ -328,7 +330,7 @@ export function tick(io, table, now) {
     } else checkDealer(io, table, now);
   } else if (h.state === STATE.INSURANCE) {
     for (const p of h.players) if (!p.insuranceOperated && (now >= h.deadline || (p.bot || p.member.pendingDeparture) && now >= p.actAt))
-      act(io, table, p.uid, SEND.INSURANCE, { buyInsurance: p.bot && now < h.deadline
+      act(io, table, p.uid, SEND.INSURANCE, { buyInsurance: p.bot === true && now < h.deadline
         && actions(table, p).includes('INSURANCE_BUY') && robot.buyInsurance(robot.decisionContext(table, p)) }, now, true);
     if (h.players.every(p => p.insuranceOperated)) checkDealer(io, table, now);
   } else if (h.state === STATE.CHECK && now >= h.deadline) {

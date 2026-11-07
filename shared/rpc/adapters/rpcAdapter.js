@@ -15,11 +15,15 @@ export async function refreshDataAccess(runtime) {
     const url=new URL(relative,import.meta.url);url.searchParams.set('v',String(runtime.hotVersion||0));
     return import(url.href);
   };
-  const [lobby,common]=await Promise.all([load('../implementations/prod/lobbyRpcProd.js'),load('../implementations/prod/commonRpcProd.js')]);
+  const [lobby,common,gateway]=await Promise.all([load('../implementations/prod/lobbyRpcProd.js'),load('../implementations/prod/commonRpcProd.js'),load('../implementations/prod/gatewayRpcProd.js')]);
   rpc.lobbyService.store=new lobby.LobbyRpcProd().store;
   const next=new common.CommonRpcProd();
   for(const name of Object.getOwnPropertyNames(Object.getPrototypeOf(next))){
     if(name!=='constructor')rpc.commonService[name]=next[name].bind(next);
+  }
+  if(rpc.gatewayService){
+    const nextGateway=new gateway.GatewayRpcProd();
+    rpc.gatewayService.getLoginData=nextGateway.getLoginData.bind(nextGateway);
   }
 }
 

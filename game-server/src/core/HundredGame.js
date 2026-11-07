@@ -1,7 +1,8 @@
 import { rel } from '../rel.js';
 const version = new URL(import.meta.url).searchParams.get('v') || '0';
 const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', version);
-const { debit } = await rel(import.meta.url, '../wallet/index.js', version);
+const { debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', version);
+const { scoreAmount, validWager, checkedTotal } = await rel(import.meta.url, './wager.js', version);
 const { GameBase } = await rel(import.meta.url, './GameBase.js', version);
 const robots = await rel(import.meta.url, './robot.js', version);
 
@@ -90,6 +91,7 @@ export class HundredGame extends GameBase {
   }
 
   placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
+    body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const { table, session, send } = ctx;
     const customData = Number(body?.customData ?? 2);
     if (table.hundredCycleTask || table.hundredBankers?.task || table.state !== this.betState()
@@ -105,16 +107,16 @@ export class HundredGame extends GameBase {
     }
     const params = Array.isArray(body?.params) ? body.params : [];
     const options = this.betOptions(table);
-    const normalized = params.map(item => ({ areaId: Number(item?.areaId), total: Number(item?.total) }));
+    const normalized = params.map(item => ({ areaId: Number(item?.areaId), total: scoreAmount(item?.total) }));
     const cumulative = new Map((table.playerBets.get(session.userId) || []).map(bet => [bet.areaId, bet.total]));
     for (const bet of normalized) cumulative.set(bet.areaId, (cumulative.get(bet.areaId) || 0) + bet.total);
-    const total = normalized.reduce((sum, item) => sum + item.total, 0);
+    const total = checkedTotal(normalized.map(item => item.total));
     if (!normalized.length || normalized.some(item => !options.areas.some(area => area.areaId === item.areaId)
       || !Number.isSafeInteger(item.total) || item.total < options.minBet || item.total > options.maxBet)
       || [...cumulative.values()].some(amount => !Number.isSafeInteger(amount) || amount > options.maxBet)
       || body.roomId != null && Number(body.roomId) !== Number(table.roomId)
       || body.roomType != null && Number(body.roomType) !== Number(table.roomType)
-      || !Number.isSafeInteger(total) || !debit(session, total, ctx).ok) {
+      || !validWager(total, walletOf(ctx).available(session)) || !debit(session, total, ctx).ok) {
       send(responseId, { customData, points: session.wallet, roomType: table.roomType, code: 1,
         myBets: table.playerBets.get(session.userId) || [], roomId: table.roomId });
       return false;

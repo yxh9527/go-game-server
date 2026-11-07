@@ -19,6 +19,7 @@ export class GatewayRpcDev {
       userName: `dev-${uid}`,
       agentId: 1,
       topAgentId: 1,
+      currency: { symbol: 'CNY' },
       walletAmount: getUserGold(uid),
     };
   }

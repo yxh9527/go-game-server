@@ -1,7 +1,8 @@
 import { rel } from '../rel.js';
 import { env } from '../../../shared/rpc/env.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
-const { credit, debit } = await rel(import.meta.url, '../wallet/index.js', v);
+const { credit, debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', v);
+const { scoreAmount, validWager, checkedTotal } = await rel(import.meta.url, './wager.js', v);
 const { PUSH } = await rel(import.meta.url, '../messages.js', v);
 const { hundredWalletContext } = await rel(import.meta.url, './robot.js', v);
 const history = env.isDev ? await rel(import.meta.url, '../../../cache/game-server/hundred-history.js', v) : null;
@@ -95,6 +96,7 @@ export function createBairenEngine(adapter) {
   }
 
   function acceptBet(ctx, body, responseId = 6201) {
+    body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const { table, session, io } = ctx;
     const current = table.playerBets.get(Number(session.userId)) || [];
     const result = (code) => {
@@ -112,7 +114,7 @@ export function createBairenEngine(adapter) {
     const params = Array.isArray(body.params) ? body.params : [];
     const normalized = [];
     for (const row of params) {
-      const areaId = Number(row?.areaId), total = Number(row?.total);
+      const areaId = Number(row?.areaId), total = scoreAmount(row?.total);
       if (!areaIds.includes(areaId) || !safeMoney(total) || total < table.rules.minBet
         || total > table.rules.maxBet
         || (table.config.rejectZeroOdds && !(numericOdds(table)[areaId] > 0))) {
@@ -121,7 +123,7 @@ export function createBairenEngine(adapter) {
       }
       normalized.push({ areaId, total });
     }
-    const requested = normalized.reduce((sum, row) => sum + row.total, 0);
+    const requested = checkedTotal(normalized.map(row => row.total));
     const byArea = new Map(current.map(row => [row.areaId, row.total]));
     for (const row of normalized) byArea.set(row.areaId, (byArea.get(row.areaId) || 0) + row.total);
     if (adapter.validateBet && (Date.now() >= table.phaseEndsAt || !adapter.validateBet(table, byArea))) {
@@ -129,7 +131,7 @@ export function createBairenEngine(adapter) {
     }
     const balanceFactor = table.hand?.betReserveFactor || table.config.betBalanceFactor || 1;
     if (!normalized.length || !Number.isSafeInteger(requested)
-      || !Number.isSafeInteger(requested * balanceFactor) || requested * balanceFactor > session.wallet) {
+      || !validWager(requested * balanceFactor, walletOf(ctx).available(session))) {
       result(1);
       return false;
     }
@@ -331,7 +333,7 @@ export function createBairenEngine(adapter) {
     if (table.state === PHASE.SHOWDOWN || (PHASE.COMPARING != null && table.state === PHASE.COMPARING)) {
       const promise = settleRound({ ...ctx, table, io });
       promise?.catch?.(error => ctx.runtime?.log?.error("hundred settlement failed", error.message));
-      return;
+      return promise;
     }
     if (table.state === PHASE.SETTLING) {
       table.state = PHASE.STATS ?? PHASE.ENDED;

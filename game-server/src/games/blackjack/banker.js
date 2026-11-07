@@ -66,7 +66,7 @@ export function request(ctx, id, body = {}) {
     else if (isActive(table, uid)) reply(7, '当前正在上庄中，无法再次申请');
     else if (s.entries.filter(e => e.bankerType === body.bankerType).length >= 10) reply(1, '当前区域庄家已满，请稍后再试');
     else if (!legalPair(body) || !legalCount(body.bankerCount ?? 10)) reply(3, '上庄金额错误 / 上庄次数设置错误');
-    else if (session.wallet < body.amount) reply(4, '余额不足，无法上庄');
+    else if (walletOf(ctx).available(session) < body.amount) reply(4, '余额不足，无法上庄');
     else {
       const profile = userInfoOf({ uid, name: session.name, icon: session.icon });
       s.entries.push({ uid, name: profile.name, icon: profile.icon, session, bankerType: body.bankerType,
@@ -86,7 +86,7 @@ export function request(ctx, id, body = {}) {
     else if (e.pendingCancel) reply(7, '已申请下庄');
     else if (body.bankerCount !== undefined && !legalCount(body.bankerCount)) reply(2, '上庄次数设置错误');
     else if (hasAmount && !legalPair(body) || !hasAmount && body.bankerCount === undefined) reply(3, '上庄金额错误');
-    else if (hasAmount && session.wallet < body.amount - (e.onBanker ? e.amount : 0)) reply(4, '余额不足，调整失败');
+    else if (hasAmount && walletOf(ctx).available(session) < body.amount - (e.onBanker ? e.amount : 0)) reply(4, '余额不足，调整失败');
     else {
       const target = e.onBanker ? (e.pendingChange ||= {}) : e;
       s.preparedInning = 0;

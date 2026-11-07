@@ -1,4 +1,4 @@
-import { credit, debit, walletOf } from "../wallet/index.js";
+import { credit, debit, walletOf, hasCarry } from "../wallet/index.js";
 import { GameBase } from "./GameBase.js";
 import { rel } from "../rel.js";
 
@@ -104,6 +104,7 @@ export class SeatGame extends GameBase {
       return table.members.find((item) => item.uid === session.userId);
     }
     const buyIn = opts.buyIn !== undefined ? Math.max(Number(opts.buyIn) || 0, 0) : this.buyIn(table, session);
+    Object.defineProperty(session, 'cashWallet', { value: walletOf(host), configurable: true });
     const used = new Set(table.members.map((item) => item.pos));
     let pos = Number(opts.pos);
     if (this.roomPolicy(table).randomSit) {
@@ -114,7 +115,10 @@ export class SeatGame extends GameBase {
       pos = this.nextSeat(table);
     }
     if (pos >= this.maxPeople(table)) return null;
-    if (buyIn > 0 && !debit(session, buyIn, host).ok) return null;
+    const reserved = !session.bot && !table.mtt && Number(table.roomType) !== 101
+      && !(table.gameId === 'blackjack' && table.playMode === 1);
+    if (reserved) walletOf(host).assertCashEntry(session, table);
+    if (!reserved && buyIn > 0 && !debit(session, buyIn, host).ok) return null;
     const member = {
       uid: session.userId,
       name: session.name,
@@ -132,6 +136,7 @@ export class SeatGame extends GameBase {
       // game instance must not restart the initial buy-in window.
       carryDeadline: buyIn > 0 ? 0 : Date.now() + INITIAL_CARRY_TIMEOUT_MS,
     };
+    if (reserved && buyIn > 0 && !walletOf(host).reserveCarry(session, member, table, buyIn).ok) return null;
     table.members.push(member);
     features.recordCarryIn(table, member, buyIn);
     table.observers = (table.observers || []).filter((item) => item.uid !== session.userId);
@@ -163,7 +168,7 @@ export class SeatGame extends GameBase {
   carryPanel(table, session) {
     const member = table.members.find((item) => item.uid === session.userId);
     const leftTime = member ? carryLeftTime(member) : 0;
-    const wallet = Math.max(Number(session.wallet) || 0, 0);
+    const wallet = Math.max(walletOf({ wallet: session.cashWallet }).available(session), 0);
     const carryMin = Number(table.carryMin) || this.buyIn(table, session) || 0;
     const carryMax = Math.max(wallet, carryMin);
     return {
@@ -187,6 +192,7 @@ export class SeatGame extends GameBase {
 
   onSitDown(ctx) {
     const { table, session, body, send } = ctx;
+    Object.defineProperty(session, 'cashWallet', { value: walletOf(ctx), configurable: true });
     if (this.expirePendingCarry(ctx).has(session.userId)) return;
     const member = this.sit(table, session, ctx, {
       pos: body?.position ?? body?.pos,
@@ -241,7 +247,17 @@ export class SeatGame extends GameBase {
       });
       return;
     }
-    if (!debit(session, amount, ctx).ok) {
+    const wasEmpty = member.point <= 0;
+    const reserved = !session.bot && !(table.gameId === 'blackjack' && table.playMode === 1);
+    // Hot adoption must not replace an already-debited legacy stack with a
+    // fresh reservation. Finish/leave that stack through its existing ledger.
+    if (reserved && member.point > 0 && !hasCarry(member)) {
+      send(PUSH.CARRY_SCORE_RESULT, { uid: session.userId, state: 1, carryIn: 0, carryBalance: member.point });
+      send(9999, { msgCode: 0, errorMsg: '旧带入筹码请先结算离座，再重新带入' });
+      return;
+    }
+    const paid = reserved ? walletOf(ctx).reserveCarry(session, member, table, amount) : debit(session, amount, ctx);
+    if (!paid.ok) {
       send(PUSH.CARRY_SCORE_RESULT, {
         uid: session.userId,
         state: 1,
@@ -250,8 +266,7 @@ export class SeatGame extends GameBase {
       });
       return;
     }
-    const wasEmpty = member.point <= 0;
-    member.point += amount;
+    if (!reserved) member.point += amount;
     delete member.carryDeadline;
     member.carryLeftTime = 0;
     features.recordCarryIn(table, member, amount);
@@ -283,7 +298,8 @@ export class SeatGame extends GameBase {
     if (!(member.carryDeadline > 0 && member.point === 0)) {
       this.abandonIfPlaying(ctx, member);
       features.recordCarryOut(table, member, member.point);
-      credit(session, member.point || 0, ctx);
+      if (hasCarry(member)) walletOf(ctx).releaseCarry(session, member, member.point, Boolean(table.hand));
+      else credit(session, member.point || 0, ctx);
     }
     table.members = table.members.filter((item) => item.uid !== session.userId);
     this.watch(table, session);
@@ -305,8 +321,10 @@ export class SeatGame extends GameBase {
       ctx.send(PUSH.CARRY_OUT_RES, { status: 0, point: member?.point || 0 });
       return true;
     }
-    member.point -= amount;
-    table.partialCarryOut = { member, session, amount, credited: false, persisted: false };
+    const reserved = hasCarry(member);
+    if (reserved) walletOf(ctx).releaseCarry(session, member, amount);
+    else member.point -= amount;
+    table.partialCarryOut = { member, session, amount, reserved, credited: false, persisted: false };
     return this.flushPartialCarryOut(ctx).then(() => true);
   }
 
@@ -317,7 +335,8 @@ export class SeatGame extends GameBase {
     if (!payout) return;
     const task = (async () => {
       if (!payout.credited) {
-        const result = await credit(payout.session, payout.amount, ctx, { operation: payout });
+        const result = payout.reserved ? { ok: true }
+          : await credit(payout.session, payout.amount, ctx, { operation: payout });
         if (result?.ok === false) throw new Error('Partial cash-out rejected');
         payout.credited = true;
         features.recordCarryOut(table, payout.member, payout.amount);
@@ -339,6 +358,7 @@ export class SeatGame extends GameBase {
 
   afterRound(ctx) {
     const { table, io } = ctx;
+    walletOf(ctx).releaseFinishedCarries(table);
     if (table.partialCarryOut) return this.flushPartialCarryOut(ctx);
     if (table.admissionTask) return table.admissionTask;
     if (table.phase === "playing" || table.hand) return;
@@ -388,14 +408,15 @@ export class SeatGame extends GameBase {
           }
         }
         if (!payout.credited) {
-          if (member.bot) payout.session.wallet += amount;
+          if (hasCarry(member)) wallet.releaseCarry(payout.session, member);
+          else if (member.bot) payout.session.wallet += amount;
           else if (amount > 0) {
             const result = await credit(payout.session, amount, ctx, { operation: payout });
             if (result?.ok === false) throw new Error("Post-hand cash-out rejected");
           }
           payout.credited = true;
           features.recordCarryOut(table, member, amount);
-          member.point = 0;
+          if (!hasCarry(member)) member.point = 0;
         }
         if (!payout.persisted) {
           if (!member.bot) await wallet.persist(payout.session);
@@ -528,6 +549,7 @@ export class SeatGame extends GameBase {
 
   tick(ctx) {
     const table = ctx.table;
+    for (const member of table.members) if (hasCarry(member)) walletOf(ctx).renewCarry(member);
     if(table.mtt){
       if(table.mtt.finished||table.mtt.paused||table.mtt.closed)return;
       const now=Date.now();
@@ -595,7 +617,9 @@ export class SeatGame extends GameBase {
     }
     if (!(member.carryDeadline > 0 && member.point === 0)) this.abandonIfPlaying(ctx, member);
     const cash = member.point || 0;
+    const reserved = hasCarry(member);
     features.recordCarryOut(table, member, cash);
+    if (reserved) walletOf(ctx).releaseCarry(ctx.session, member, member.point, Boolean(table.hand));
     table.members = table.members.filter((item) => item.uid !== uid);
     table.observers = (table.observers || []).filter((item) => item.uid !== uid);
     lifecycle.noteDeparture(table, person, completedBeforeLeave);
@@ -603,7 +627,7 @@ export class SeatGame extends GameBase {
     ctx.io.broadcast(PUSH.USER_LEVEL_ROOM, { roomId: table.roomId, uid, type: 1 });
     this.pushRoomSnapshot(ctx);
     features.pushObservers(ctx);
-    return cash;
+    return reserved ? 0 : cash;
   }
 
 }

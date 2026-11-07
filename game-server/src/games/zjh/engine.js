@@ -1,6 +1,7 @@
 import { makeDeck, shuffle } from "../holdem/cards.js";
 import { rel } from "../../rel.js";
 import { env } from "../../../../shared/rpc/env.js";
+import { scoreAmount, validWager } from '../../core/wager.js';
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
 const { default: gameConfig, roomRules } = await rel(import.meta.url, "./config.js", version);
@@ -173,12 +174,15 @@ function pushBet(io, table, p, operation, amount, round = table.hand.round) {
 }
 
 function pay(io, table, p, op, amount, round) {
+  if (!validWager(amount, p.point) || !Number.isSafeInteger(p.totalBet + amount)
+    || !Number.isSafeInteger(table.hand.pot + amount)) return false;
   p.point -= amount; p.totalBet += amount; p.streetBet = amount;
   table.hand.pot += amount;
   if (p.looked) p.seenBet = (p.seenBet || 0) + amount;
   else p.blindBet = (p.blindBet || 0) + amount;
   pushBet(io, table, p, op, amount, round);
   if (op === OP.ALL_IN && table.forceShowCard && ctjhParams(table).forceShowType === 2) revealCards(io, p);
+  return true;
 }
 
 function revealCards(io, player) {
@@ -223,6 +227,10 @@ function applyAction(io, table, uid, op, data, targetUid) {
   if (uid !== table.hand.actorUid) return false;
   const option = actionOptions(table, p).find((o) => o.operation === op && o.data.isEnable);
   if (!option) return false;
+  if ([OP.CALL, OP.RAISE, OP.COMPARE, OP.ALL_IN].includes(op)) {
+    if (!validWager(option.data.score, p.point)) return false;
+    if (data != null && (!Number.isSafeInteger(scoreAmount(data, 100)) || scoreAmount(data, 100) > p.point)) return false;
+  }
   if (op === OP.CALL || op === OP.RAISE) {
     if (data != null && (!Number.isFinite(Number(data))
       || Math.abs(Number(data) * 100 - option.data.score) > 0.000001)) return false;
@@ -231,7 +239,7 @@ function applyAction(io, table, uid, op, data, targetUid) {
   else if (op === OP.COMPARE) {
     const target = live(table).find((m) => m.uid === Number(targetUid) && m !== p);
     if (!target) return false;
-    pay(io, table, p, op, option.data.score);
+    if (!pay(io, table, p, op, option.data.score)) return false;
     // compareRule=1 resolves equal ranks by suit, as named in the original client.
     const winner = compare3(evaluate3(p.hole), evaluate3(target.hole)) > 0 ? p : target;
     const loser = winner === p ? target : p;
@@ -246,7 +254,7 @@ function applyAction(io, table, uid, op, data, targetUid) {
     table.hand.comparisonPause = { fromUid: p.uid, until: Date.now() + gameConfig.compareAnimationMs };
     return true;
   } else {
-    pay(io, table, p, op, option.data.score);
+    if (!pay(io, table, p, op, option.data.score)) return false;
     if (op === OP.RAISE) table.hand.currentBet *= 2;
   }
   nextActor(io, table, p);

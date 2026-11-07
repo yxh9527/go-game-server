@@ -88,7 +88,7 @@ test('receipts prevent duplicate debit, refund and payout across RPC wallet repl
   const payment = {};
   wallet.credit(a, 500, { operation: payment });
   next.credit(b, 500, { operation: payment });
-  assert.equal(debits, 2);
+  assert.equal(debits, 1, 'insufficient free balance is rejected before a money operation');
   assert.equal(credits, 2);
   assert.equal(balance, 1500);
   assert.equal(a.wallet, b.wallet);

@@ -23,7 +23,8 @@ export function createSessionControl(runtime, { send, close, kickId }) {
       session.authenticated = false;
       if (!alreadyRevoked) {
         send(ws, kickId);
-        ws.close?.(1000, 'Replaced by a new login');
+        const disconnect = () => ws.close?.(1000, 'Replaced by a new login');
+        if (runtime.wallet?.deliver) runtime.wallet.deliver(disconnect); else disconnect();
       }
     }
     await Promise.all(entries.map(([ws]) => close(ws)));
@@ -57,7 +58,8 @@ export function createSessionControl(runtime, { send, close, kickId }) {
         if ((state.latest.get(key) || 0) > order) {
           socket.closed = true;
           send(ws, kickId);
-          ws.close?.(1000, 'Replaced by a new login');
+          const disconnect = () => ws.close?.(1000, 'Replaced by a new login');
+          if (runtime.wallet?.deliver) runtime.wallet.deliver(disconnect); else disconnect();
           return false;
         }
         state.latest.set(key, order);

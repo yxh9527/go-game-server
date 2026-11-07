@@ -40,7 +40,7 @@ export class LocalWallet extends WalletAdapter {
   }
 
   #key(session) {
-    return session?.userId ? `${Number(session.agentId) || 0}:${Number(session.userId)}` : null;
+    return session?.userId ? `${Number(session.agentId) || 0}:${Number(session.userId)}:${session.currency || 'CNY'}` : null;
   }
 
   #attach(session) {

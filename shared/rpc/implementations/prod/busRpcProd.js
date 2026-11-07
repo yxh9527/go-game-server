@@ -1,8 +1,10 @@
 import { prodDeps } from "./prodDeps.js";
+import { createCashCarryStore } from '../../cash-carry-store.js';
 
 export class BusRpcProd {
   constructor() {
     this.redis = prodDeps.redis;
+    this.cashCarry = createCashCarryStore(this.redis);
     this.sub = this.redis?.duplicate?.();
     this.handlers = new Map();
     this.sub?.on("message", (channel, message) => {

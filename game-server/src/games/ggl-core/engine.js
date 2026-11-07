@@ -4,6 +4,8 @@ const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { ERROR, kindOf, prizeFromMask } = await rel(import.meta.url, './rules.js', v);
 const local = env.isDev ? await rel(import.meta.url, '../../../../cache/game-server/scratch-tickets.js', v) : null;
 const history = await rel(import.meta.url, './history.js', v);
+const { walletOf } = await rel(import.meta.url, '../../wallet/index.js', v);
+const { validWager } = await rel(import.meta.url, '../../core/wager.js', v);
 export { prizeFromMask };
 
 export function createScratchTable(roomId, roomType, roomRow, config) {
@@ -57,6 +59,24 @@ export async function scratchRequest(ctx, method, body = {}) {
   body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   try {
     if (body.kind !== undefined && body.kind !== kindOf(table)) throw Object.assign(new Error('Wrong ticket kind'), { code: ERROR.INVALID });
+    const buying = method === 'purchase' || method === 'reveal' && body.revealMode === 'RANDOM_BUY_REVEAL';
+    if (buying) {
+      const value = body.faceValue;
+      if (!Number.isSafeInteger(value) || value <= 0 || !table.config.denominations.includes(value)
+        || value > Number(table.cfg?.hundred_max_bet || table.config.defaultMaxBet)) {
+        throw Object.assign(new Error('Invalid scratch denomination'), { code: ERROR.INVALID });
+      }
+      let count = 1;
+      if (method === 'purchase') {
+        const book = body.purchaseMode === 'FULL_BOOK';
+        if (!book && body.purchaseMode !== 'RANDOM_SINGLE') throw Object.assign(new Error('Invalid purchase mode'), { code: ERROR.INVALID });
+        const items = book ? body.bookId7List : body.serialFulls;
+        if (!Array.isArray(items) || !items.length || items.length > (book ? 5 : 100)) throw Object.assign(new Error('Invalid ticket quantity'), { code: ERROR.INVALID });
+        count = items.length * (book ? 20 : 1);
+      }
+      const wallet = walletOf(ctx);
+      if (!validWager(value * count, wallet.available(session))) throw Object.assign(new Error('Insufficient available balance'), { code: ERROR.BALANCE });
+    }
     const result = await service(ctx)[method](ctx, body);
     if (!result || typeof result !== 'object' || !Number.isInteger(result.code)) throw new Error('Scratch service returned no valid result');
     return { ...base(table, session), ...result };

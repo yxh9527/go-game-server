@@ -209,10 +209,11 @@ test('wire login stays observing, immediate seat reserves 12s, cancel/timeout an
   await send(5003,{position:0});assert.equal(table.members.length,1);assert.equal(table.members[0].point,0);
   const deadline=table.members[0].carryDeadline;now+=5000;await send(5002,{});assert.equal(table.members[0].carryDeadline,deadline);
   now=deadline+1;await send(5001,{carryIn:50});assert.equal(table.members.length,0);assert.equal(session.wallet,50000);
-  await send(5003,{position:0});await send(5001,{carryIn:100});assert.equal(session.wallet,40000);
+  await send(5003,{position:0});await send(5001,{carryIn:100});assert.equal(session.wallet,50000);
+  assert.equal(session.carryAmount,10000);
   table.members.push({uid:88,pos:6,name:'peer',point:10000,state:2});
   const game=handler.games.byRoomType.get(32);engine.begin({broadcast(){},env:'dev'},table,now);
-  await send(2110);assert.equal(session.wallet,40000);assert.ok(table.members.find(m=>m.uid===77).pendingDeparture);
+  await send(2110);assert.equal(session.wallet,50000);assert.ok(table.members.find(m=>m.uid===77).pendingDeparture);
   const io={broadcast(){},env:'dev'};engine.tick(io,table,table.hand.deadline);engine.tick(io,table,table.hand.deadline);engine.tick(io,table,table.hand.deadline);
   const point=table.members.find(m=>m.uid===77).point;await game.afterRound({table,io,runtime});
   assert.equal(session.wallet,40000+point);assert.ok(!table.members.some(m=>m.uid===77));

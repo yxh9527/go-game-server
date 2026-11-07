@@ -12,7 +12,8 @@ export class WalletAdapter {
   }
 
   canDebit(session, amount) {
-    return Number.isSafeInteger(amount) && amount >= 0 && this.balance(session) >= amount;
+    const available = this.available ? this.available(session) : this.balance(session);
+    return Number.isSafeInteger(amount) && amount >= 0 && Number.isSafeInteger(available) && available >= amount;
   }
 
   async load(_session) {
@@ -37,7 +38,7 @@ export function applyDebit(session, amount) {
     return { ok: true, balance: Number(session.wallet) || 0 };
   }
   const cur = Number(session.wallet) || 0;
-  if (cur < n) {
+  if (!Number.isSafeInteger(cur) || cur < n) {
     return { ok: false, balance: cur };
   }
   session.wallet = cur - n;

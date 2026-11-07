@@ -49,7 +49,8 @@ test('no-show binary flow shares seats, buy-in, settlement, replay and exit acro
     assert.equal(registry.session(peer.ws).wallet, 10000);
     await request(peer, SEND.SEND_CARRY_SCORE, { carryIn: 10 });
     assert.equal(seat.point, 1000);
-    assert.equal(registry.session(peer.ws).wallet, 9000);
+    assert.equal(registry.session(peer.ws).wallet, 10000);
+    assert.equal(registry.session(peer.ws).carryAmount, 1000);
   }
   table.startAt = 0;
   await handler.tick();

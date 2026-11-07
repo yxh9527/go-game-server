@@ -32,7 +32,7 @@ async function fixture() {
     get handler() { return handler; }, async reload() { runtime.hotVersion = 'room-change-2'; handler = await createHandler(runtime); } };
 }
 
-test('cash games switch through the common join/leave flow and enter the target as observer', async () => {
+test('cash games reject another cash entry until carry is released, then enter as observer', async () => {
   for (const type of [19, 25, 24, 27, 31, 32, 26, 28, 30]) {
     const f = await fixture(), old = await f.join(type);
     assert.equal(f.session.clubId, 7);
@@ -41,46 +41,48 @@ test('cash games switch through the common join/leave flow and enter the target 
     let credits = 0; const credit = f.wallet.credit.bind(f.wallet);
     f.wallet.credit = (...args) => { credits++; return credit(...args); };
     const start = f.messages.length;
+    await f.join(type === 19 ? 25 : 19);
+    assert.equal(f.session.roomId, old.roomId, 'a funded chair logically excludes other cash games');
+    assert.ok(f.messages.some(m => m.msgid === 9999 && /带入/.test(m.payload.errorMsg)));
+    await f.request(2110, {});
     const target = await f.join(type === 19 ? 25 : 19);
     assert.ok(!old.members.some(m => m.uid === f.session.userId));
     assert.ok(!old.observers.some(m => m.uid === f.session.userId));
     assert.ok(target.observers.some(m => m.uid === f.session.userId));
     assert.ok(!target.members.some(m => m.uid === f.session.userId));
     assert.equal(f.session.wallet, balance);
-    assert.equal(credits, 1);
+    assert.equal(credits, 0, 'releasing reservation must not credit money');
     const outgoing = f.messages.slice(start).filter(m => m.msgid === 2205);
     assert.ok(outgoing.every(m => m.payload.roomId === old.roomId));
     assert.equal(f.messages.findLast(m => m.msgid === 2201).payload.roomId, target.roomId);
     await f.request(2102, { roomId: target.roomId, roomType: target.roomType, isOb: true });
-    assert.equal(credits, 1);
+    assert.equal(credits, 0);
     assert.equal(target.observers.filter(m => m.uid === f.session.userId).length, 1);
   }
 });
 
-test('failed cash-out blocks destination, retries across hot reload, and never pays twice after persistence failure', async () => {
+test('failed release persistence blocks destination and retries across hot reload without money movement', async () => {
   const f = await fixture(), old = await f.join(19);
   await f.carry(old);
   const targetId = f.row(25).game_room_config_id * 10000;
-  let reject = true, credits = 0, failPersist = true;
+  let credits = 0, failPersist = true;
   const credit = f.wallet.credit.bind(f.wallet), persist = f.wallet.persist.bind(f.wallet);
   f.wallet.credit = (...args) => {
-    if (reject) return { ok: false };
     credits++; return credit(...args);
   };
   f.wallet.persist = async session => {
     if (failPersist) throw new Error('store unavailable');
     return persist(session);
   };
-  await assert.rejects(f.request(2102, { roomId: targetId, roomType: 25 }), /cash-out rejected/);
+  await assert.rejects(f.request(2110, {}), /store unavailable/);
   assert.equal(f.session.roomId, old.roomId); assert.ok(f.session.roomLeave);
   assert.equal(f.messages.some(m => m.msgid === 2201 && m.payload.roomId === targetId), false);
-  reject = false;
   await f.reload();
   await assert.rejects(f.request(2110, {}), /store unavailable/);
-  assert.equal(credits, 1); assert.equal(f.session.wallet, 100000);
+  assert.equal(credits, 0); assert.equal(f.session.wallet, 100000);
   failPersist = false;
   await f.request(2102, { roomId: targetId, roomType: 25 });
-  assert.equal(credits, 1); assert.equal(f.session.roomLeave, undefined);
+  assert.equal(credits, 0); assert.equal(f.session.roomLeave, undefined);
   assert.equal(f.session.roomId, targetId); assert.equal(f.session.wallet, 100000);
 });
 
@@ -90,7 +92,10 @@ test('concurrent target joins serialize and do not leave duplicate observers or 
   let credits = 0; const credit = f.wallet.credit.bind(f.wallet);
   f.wallet.credit = async (...args) => { credits++; await new Promise(resolve => setImmediate(resolve)); return credit(...args); };
   await Promise.all([f.request(2102, { roomId: a, roomType: 25 }), f.request(2102, { roomId: b, roomType: 24 })]);
-  assert.equal(credits, 1); assert.equal(f.session.roomId, b); assert.equal(f.session.wallet, 100000);
+  assert.equal(f.session.roomId, old.roomId);
+  await f.request(2110, {});
+  await Promise.all([f.request(2102, { roomId: a, roomType: 25 }), f.request(2102, { roomId: b, roomType: 24 })]);
+  assert.equal(credits, 0); assert.equal(f.session.roomId, b); assert.equal(f.session.wallet, 100000);
   const tables = f.registry.listAgentGameRooms(7).filter(table => table.observers?.some(m => m.uid === f.session.userId));
   assert.equal(tables.length, 1); assert.equal(tables[0].roomId, b);
 });
@@ -103,8 +108,10 @@ test('unsettled Niuniu chips remain on the original hand after switching, and se
   niuniu.begin(io, old, 1000);
   const hand = old.hand;
   await f.join(19);
+  assert.equal(f.session.roomId, old.roomId, 'funded live hand excludes a second cash table');
+  await f.request(2110, {});
   assert.equal(old.hand, hand); assert.equal(actor.pendingDeparture, true);
-  assert.equal(actor.point, funded); assert.equal(f.session.wallet, 100000 - funded);
+  assert.equal(actor.point, funded); assert.equal(f.session.wallet, 100000);
   let now = 1000;
   for (let i = 0; old.hand && i < 60; i++) { now += 1000; niuniu.tick(io, old, now); }
   assert.equal(old.hand, null);
@@ -119,10 +126,11 @@ test('unsettled Niuniu chips remain on the original hand after switching, and se
 
 test('closed connections retain and retry unpaid cash-out without recreating their old seat', async () => {
   const f = await fixture(), old = await f.join(19); await f.carry(old);
-  let reject = true; const credit = f.wallet.credit.bind(f.wallet);
-  f.wallet.credit = (...args) => reject ? { ok: false } : credit(...args);
+  let reject = true; const persist = f.wallet.persist.bind(f.wallet);
+  f.wallet.credit = () => assert.fail('reservation release never credits money');
+  f.wallet.persist = (...args) => reject ? Promise.reject(new Error('store unavailable')) : persist(...args);
   f.ws.readyState = 3;
-  await assert.rejects(f.handler.onClose(f.ws), /cash-out rejected/);
+  await assert.rejects(f.handler.onClose(f.ws), /store unavailable/);
   assert.ok(f.registry.session(f.ws)?.roomLeave);
   reject = false; await f.reload(); await f.handler.tick();
   assert.equal(f.registry.session(f.ws), null); assert.equal(f.session.wallet, 100000);

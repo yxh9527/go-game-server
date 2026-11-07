@@ -316,7 +316,9 @@ test('casino bet errors distinguish balance, total limit, unsupported target and
 test('casino deadlines do not admit late carries and internal departure timeout still settles normally', () => {
   const f = fixture();
   f.table.members = [{ uid: 1, pos: 0, point: 5000 }];
-  engine.begin(f.io, f.table);
+  const deck = makeShoe();
+  [deck[1], deck[8]] = [deck[8], deck[1]];
+  engine.begin(f.io, f.table, Date.now(), deck);
   f.game.onLeave(f.ctx);
   assert.equal(f.table.members[0].pendingDeparture, true);
   engine.tick(f.io, f.table, f.table.hand.deadline);
@@ -329,5 +331,6 @@ test('casino deadlines do not admit late carries and internal departure timeout 
   assert.equal(f.table.hand.players.some(p => p.uid === 2), false);
   for (let i = 0; i < 80 && !f.table.hand.settled; i++) engine.tick(f.io, f.table, f.table.hand.deadline);
   assert.equal(f.table.hand.state, STATE.SETTLE);
+  assert.equal(f.table.hand.players[0].insuranceOperated, true, 'a departed seat without a bot flag still declines insurance on timeout');
   assert.equal(f.table.members.reduce((sum, m) => sum + m.point, 0) + f.table.houseNetScore, 6000);
 });

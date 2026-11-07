@@ -25,6 +25,7 @@ export class GatewayRpcProd {
       userName: profile.userName || "",
       agentId: Number(profile.agentId || 0),
       topAgentId: Number(profile.topAgentId || 0),
+      currency: profile.currency,
       walletAmount: 0,
     };
   }

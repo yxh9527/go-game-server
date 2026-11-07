@@ -5,6 +5,7 @@ import { PUSH } from "../../../game-server/src/messages.js";
 import { ranking } from "../../../game-server/src/core/room-features.js";
 import { HoldemGame } from "../../../game-server/src/games/holdem/HoldemGame.js";
 import { ZjhGame } from "../../../game-server/src/games/zjh/ZjhGame.js";
+import { createWallet } from '../../../game-server/src/wallet/index.js';
 
 class DemoSeat extends SeatGame {
   constructor() {
@@ -25,6 +26,7 @@ class DemoSeat extends SeatGame {
 }
 
 function mockCtx(game, table, session, body = {}) {
+  if (!table.testWallet) Object.defineProperty(table, 'testWallet', { value: createWallet({ mode: 'local', local_balance: 0 }) });
   const messages = [];
   const io = {
     broadcast(msgid, payload) {
@@ -33,6 +35,7 @@ function mockCtx(game, table, session, body = {}) {
   };
   return {
     table,
+    wallet: table.testWallet,
     session,
     body,
     io,
@@ -58,7 +61,8 @@ test("SeatGame joins as observer and starts after explicit sit and carry-in", ()
   for (const [ctx, session] of [[ctxA, a], [ctxB, b]]) {
     game.onSitDown(ctx);
     game.onCarryScore({ ...ctx, body: { carryIn: 1 } });
-    assert.equal(session.wallet, 400);
+    assert.equal(session.wallet, 500);
+    assert.equal(session.carryAmount, 100);
   }
   assert.equal(table.members.length, 2);
   assert.equal(table.phase, "starting");
@@ -123,7 +127,8 @@ test("SeatGame sitdown then carry-in seats the observer", () => {
   const buy = mockCtx(game, table, a, { carryIn: 1 });
   game.onCarryScore(buy);
   assert.equal(table.members[0].point, 100);
-  assert.equal(a.wallet, 400);
+  assert.equal(a.wallet, 500);
+  assert.equal(a.carryAmount, 100);
   const result = buy.messages.find((m) => m.msgid === PUSH.CARRY_SCORE_RESULT);
   assert.equal(result.payload.state, 0);
   assert.equal(result.payload.carryIn, 100);
@@ -138,7 +143,9 @@ test("SeatGame leave returns chips and clears empty table", () => {
   game.onSitDown(mockCtx(game, table, a));
   game.onCarryScore(mockCtx(game, table, a, { carryIn: 1 }));
   const cash = game.onLeave(mockCtx(game, table, a));
-  assert.equal(cash, 100);
+  assert.equal(cash, 0, 'release is not a second wallet credit');
+  assert.equal(a.wallet, 100);
+  assert.equal(a.carryAmount, 0);
   assert.equal(table.members.length, 0);
 });
 
@@ -153,7 +160,8 @@ test("SeatGame converts online carry-in display units to score before validating
   const buy = mockCtx(game, table, a, { carryIn: 25 });
   game.onCarryScore(buy);
 
-  assert.equal(a.wallet, 997_500);
+  assert.equal(a.wallet, 1_000_000);
+  assert.equal(a.availableBalance, 997_500);
   assert.equal(table.members[0].point, 2_500);
   const result = buy.messages.find((m) => m.msgid === PUSH.CARRY_SCORE_RESULT);
   assert.deepEqual(result.payload, {
@@ -251,7 +259,7 @@ test("successful buy-in before the deadline cancels timeout, including subsequen
   game.onCarryScore({ ...ctx, body: { carryIn: 1 } });
   const member = table.members[0];
   assert.equal(member.point, 100);
-  assert.equal(session.wallet, 400);
+  assert.equal(session.wallet, 500);
   assert.equal(member.carryDeadline, undefined);
   assert.equal(game.carryPanel(table, session).isByServerSettle, false);
   assert.equal(game.roomInfo(table).memberList[0].carryLeftTime, 0);

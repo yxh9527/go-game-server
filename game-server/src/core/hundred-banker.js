@@ -44,7 +44,7 @@ export function request(ctx, id, body, groups, enabled = true) {
   const e = s.entries.find(e => e.uid === uid && e.bankerType === body.bankerType);
   if (id === 6133) {
     if (e) reply(1, '请勿重复申请上庄');
-    else if (!validPair(body) || session.wallet < body.amount) reply(1, '上庄金额无效或余额不足');
+    else if (!validPair(body) || walletOf(ctx).available(session) < body.amount) reply(1, '上庄金额无效或余额不足');
     else if (s.entries.filter(e => e.bankerType === body.bankerType && !e.removed).length >= 10) reply(1, '当前区域庄家已满');
     else {
       const info = userInfoOf({ ...session, uid });
@@ -62,7 +62,7 @@ export function request(ctx, id, body, groups, enabled = true) {
     const hasAmount = body.amount !== undefined || body.maxWinLoseAmount !== undefined;
     if (!e || e.removed || e.pendingCancel) reply(3, '当前无法调整上庄数据');
     else if (hasAmount && !validPair(body) || body.bankerCount !== undefined && ![10, 20, 30].includes(body.bankerCount)) reply(3, '上庄参数无效');
-    else if (hasAmount && session.wallet < body.amount - (e.onBanker ? e.amount : 0)) reply(4, '余额不足');
+    else if (hasAmount && walletOf(ctx).available(session) < body.amount - (e.onBanker ? e.amount : 0)) reply(4, '余额不足');
     else {
       const target = e.onBanker ? e.pendingChange ||= {} : e;
       if (hasAmount) { target.amount = body.amount; target.maxWinLoseAmount = body.maxWinLoseAmount; }

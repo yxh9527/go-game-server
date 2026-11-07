@@ -38,6 +38,8 @@ export async function createHandler(runtime) {
     Object.assign(runtime.wallet, createRpcWallet(runtime.rpc));
   }
   const pool = poolModule.createRoomPool(runtime, gameOf);
+  const { walletOf, hasCarry } = await rel(import.meta.url, './wallet/index.js', v);
+  const cashWallet = walletOf({ wallet: runtime.wallet });
   for (const table of runtime.registry.tables.values()) {
     if (table.kind === 'slots') table.config = gameOf(table.roomType).config;
     if (["zjh", "niuniu", "sss", "blackjack", "sgay", "mahjong"].includes(table.gameId)) {
@@ -74,7 +76,9 @@ export async function createHandler(runtime) {
         payload = { ...payload, openHundredGame: Boolean(session?.openHundredGame),
           conf: { ...payload.conf, hundredSwitch: true } };
       }
-      ws.send(codec.encodeFrame(msgid, payload));
+      const frame = codec.encodeFrame(msgid, payload);
+      const deliver = () => { if (ws.readyState === 1) ws.send(frame); };
+      if (runtime.wallet.deliver) runtime.wallet.deliver(deliver); else deliver();
     }
   }
 
@@ -274,6 +278,20 @@ export async function createHandler(runtime) {
         respond({ code: 404, error: "未找到房间配置" });
         return;
       }
+      const allocationGame = gameOf(cfg.room_type);
+      if (allocationGame?.kind === 'normal' && Number(cfg.room_type) !== 101
+        && !(allocationGame.id === 'blackjack' && Number(cfg.play_mode) === 1)) {
+        const account = { userId: uid, agentId, currency: profile?.currency?.symbol || 'CNY' };
+        const carry = await cashWallet.refreshCarry(account);
+        if (carry) {
+          const owned = pool.list(agentId).find(room => Number(room.roomId) === Number(String(carry.tableKey).split(':').at(-1)));
+          if (!owned || Number(owned.roomType) !== Number(cfg.room_type)
+            || Number(owned.gameRoomConfigId) !== Number(cfg.game_room_config_id)) {
+            throw Object.assign(new Error('当前仍有棋牌桌带入，请先离座'), { code: 503 });
+          }
+          respond({ code: 200, data: owned }); return;
+        }
+      }
       respond({ code: 200, data: pool.allocate(agentId, cfg, body.roomIndex) });
     } catch (error) {
       runtime.log.error("room pool query failed", error.message);
@@ -308,12 +326,12 @@ export async function createHandler(runtime) {
           }
         }
         if (!payout.credited) {
-          const result = runtime.wallet.credit
+          const member = table.members.find((item) => Number(item.uid) === payout.uid);
+          const result = hasCarry(member) ? (cashWallet.releaseCarry(payout.session, member), { ok: true }) : runtime.wallet.credit
             ? await runtime.wallet.credit(payout.session, payout.amount, { operation: payout })
             : (payout.session.wallet += payout.amount, { ok: true });
           if (result?.ok === false) throw new Error("Room refund rejected");
           payout.credited = true;
-          const member = table.members.find((item) => Number(item.uid) === payout.uid);
           if (member) features.recordCarryOut(table, member, payout.amount);
         }
         if (!payout.persisted) {
@@ -355,7 +373,9 @@ export async function createHandler(runtime) {
   function onMessage(ws, data) {
     const socket = sessions.socketState(ws);
     if (socket.closed) return Promise.resolve();
-    const task = processMessage(ws, data);
+    const task = runtime.wallet.authoritative
+      ? runtime.wallet.run(() => processMessage(ws, data), runtime)
+      : processMessage(ws, data);
     // Closing waits for business actions that already passed authentication.
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const login = raw.length >= 8 && raw[0] === 0xc0 && raw.readInt16BE(2) === SEND.ROOM_LOGIN;
@@ -411,7 +431,7 @@ export async function createHandler(runtime) {
           openHundredGame: Boolean(body.openHundredGame),
           accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
           loginIdentity: sessions.identity(body),
-          currency: String(body.currency || 'CNY'),
+          currency: 'CNY',
         };
         try {
           if (!Number.isSafeInteger(session.userId) || session.userId <= 0) throw new Error('Invalid login user');
@@ -427,6 +447,7 @@ export async function createHandler(runtime) {
             session.agentId = Number(profile?.agentId) || 0;
             session.clubId ||= Number(profile?.clubId || profile?.agentId) || 0;
             session.topAgentId = Number(profile?.topAgentId) || 0;
+            session.currency = String(profile?.currency?.symbol || 'CNY');
             if (profile?.userName) session.name = String(profile.userName);
             session.icon = profile?.icon ?? profile?.userIcon;
           }
@@ -459,6 +480,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.authenticated === false || session.superseded || sessions.socketState(ws).closed) return;
+    if (runtime.env === 'prod') await cashWallet.refreshCarry(session);
     if (session.roomJoinTask && msgid !== SEND.SEND_JOIN_ROOM) await session.roomJoinTask;
     if (session.superseded) return;
     // Inline shortcuts intentionally subscribe to OTHER games (60 -> 58, 62 -> 50).
@@ -602,6 +624,11 @@ export async function createHandler(runtime) {
           send(ws, PUSH.ROOM_DISSMISS, { roomId });
           return;
         }
+        if (table.kind === 'normal' && Number(table.roomType) !== 101
+          && !(table.gameId === 'blackjack' && table.playMode === 1)) {
+          try { await cashWallet.checkCashEntry(session, table); }
+          catch (error) { send(ws, 9999, { msgCode: 0, errorMsg: error.message }); return; }
+        }
         await gameOf(table.roomType)?.afterRound?.(ctxOf(ws, session, table));
         if (table.kind === "normal" && lifecycle.isExpired(table)) {
           await expireRoom(table);
@@ -651,6 +678,10 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.inRoom === false) return;
+    if (msgid !== SEND.SEND_LEVEL_OUT) {
+      try { cashWallet.guardCashTable(table); }
+      catch (error) { send(ws, 9999, { msgCode: 0, errorMsg: error.message }); return; }
+    }
     if (msgid === SEND.GGL_STATE) session.roomHydrating = false;
     const game = gameOf(table.roomType);
     await game.afterRound?.(ctxOf(ws, session, table));
@@ -747,18 +778,26 @@ export async function createHandler(runtime) {
     return task;
   }
 
-  function tick() {
+  function tick(onlyTable) {
+    if (runtime.wallet.authoritative && !runtime.wallet.managed()) {
+      return Promise.allSettled([...runtime.registry.tables.values()].map(table =>
+        runtime.wallet.run(() => tick(table), runtime).catch(error => { runtime.log.error('cash tick failed', error.message); throw error; })));
+    }
     const closing = [];
     for (const [ws, session] of runtime.registry.sessions) {
       if (!session.roomLeave || session.leaveTask) continue;
       const table = session.roomLeave.table;
+      if (onlyTable && table !== onlyTable) continue;
       closing.push(leaveTable(ws, session, table, gameOf(table.roomType)).then(() => {
         if (ws.readyState !== 1) runtime.registry.drop(ws);
       }).catch(error => runtime.log.error('room cash-out failed; will retry', error.message)));
     }
     for (const table of [...runtime.registry.tables.values()]) {
+      if (onlyTable && table !== onlyTable) continue;
       const game = gameOf(table.roomType);
       const context = { runtime, io: tableIo(table), table };
+      try { cashWallet.guardCashTable(table); }
+      catch (error) { runtime.log.error('cash table paused', error.message); continue; }
       const admission = game?.afterRound?.(context);
       if (admission) {
         closing.push(admission);
@@ -783,7 +822,10 @@ export async function createHandler(runtime) {
       if (table.kind !== "normal" && table.retired) runtime.registry.removeTable(table.roomId, table.agentId, table.gameId);
     }
     pool.expand();
-    return Promise.allSettled(closing);
+    return Promise.allSettled(closing).then(results => {
+      if (runtime.wallet.authoritative) { const rejected = results.find(result => result.status === 'rejected'); if (rejected) throw rejected.reason; }
+      return results;
+    });
   }
 
   function onClose(ws) {
@@ -791,8 +833,9 @@ export async function createHandler(runtime) {
     socket.closed = true;
     if (socket.closeTask) return socket.closeTask;
     const task = Promise.resolve().then(async () => {
-      await Promise.allSettled([...(socket.actions || [])]);
-      await closeSession(ws);
+      if (!runtime.wallet.authoritative) await Promise.allSettled([...(socket.actions || [])]);
+      if (runtime.wallet.authoritative) await runtime.wallet.run(() => closeSession(ws), runtime);
+      else await closeSession(ws);
     });
     socket.closeTask = task;
     const clear = () => { if (socket.closeTask === task) delete socket.closeTask; };

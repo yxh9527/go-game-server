@@ -159,7 +159,11 @@ function openBetting(io, table, now) {
 }
 export function bet(io, table, uid, multiple) {
   const p = owner(table, uid), hand = table.hand;
-  if (!p || hand.stage !== 'bet' || p.uid === hand.bankerUid || p.bet !== null || !betOptions(table, p).includes(multiple)) return false;
+  if (!p || hand.stage !== 'bet' || p.uid === hand.bankerUid || p.bet !== null
+    || !Number.isSafeInteger(multiple) || multiple <= 0 || !betOptions(table, p).includes(multiple)
+    || !Number.isSafeInteger(table.ante * hand.bankerMultiple * multiple)
+    || table.ante * hand.bankerMultiple * multiple <= 0
+    || table.ante * hand.bankerMultiple * multiple > p.member.point) return false;
   p.bet = multiple;
   io.broadcast(MSG.BET, [{ playerId: p.uid, multiple, multipleAnte: table.ante * multiple,
     point: p.member.point }]);

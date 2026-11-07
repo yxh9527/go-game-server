@@ -8,7 +8,8 @@ export const displaySeat = pos => DISPLAY_SEATS[pos] ?? -1;
 // Unlike ordinary Bjk, the native casino has no CARRYIN_RESULT listener or
 // carry request. A seat uses its account's available money; only accepted
 // wagers enter the shared table escrow. Never transfer the whole wallet.
-export const availablePoint = member => (member?.point || 0) + (member?.casinoWalletSession?.wallet || 0);
+export const availablePoint = member => (member?.point || 0)
+  + (member?.casinoWalletSession?.availableBalance ?? member?.casinoWalletSession?.wallet ?? 0);
 export function bindWalletSeat(member, session) {
   if (!member || member.bot || session.bot) return;
   member.casinoWalletSession = session;

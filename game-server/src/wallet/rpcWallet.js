@@ -1,5 +1,7 @@
 import { env } from "../../../shared/rpc/env.js";
 import { bindBalance, unavailable, walletOperation } from './operations.js';
+import { enableCarry } from './carry.js';
+import { createAuthoritativeWallet } from './authoritative.js';
 
 const accountsKey = Symbol.for('gogame.wallet.accounts');
 
@@ -7,6 +9,7 @@ const accountsKey = Symbol.for('gogame.wallet.accounts');
  * 游戏侧钱包门面。余额权威在 rpc.common，业务不要直接 new Dev/Prod。
  */
 export function createRpcWallet(rpc) {
+  if (!env.isDev) return createAuthoritativeWallet(rpc);
   const accounts = rpc.common[accountsKey] ||= new Map();
   function attach(session, balance) {
     const key = JSON.stringify([Number(session.agentId) || 0, Number(session.userId), session.currency || 'CNY']);
@@ -15,7 +18,7 @@ export function createRpcWallet(rpc) {
     bindBalance(session, account);
     return account;
   }
-  return {
+  const wallet = enableCarry({
     mode: env.isDev ? "local" : "online",
     async load(session) {
       if (!session?.userId) {
@@ -50,5 +53,6 @@ export function createRpcWallet(rpc) {
     async persist(session) {
       // A balance snapshot is never a money operation.
     },
-  };
+  }, rpc.common);
+  return wallet;
 }

@@ -1,4 +1,5 @@
 import { debit } from "../../wallet/index.js";
+import { scoreAmount, validWager } from '../../core/wager.js';
 import { OP } from "./op.js";
 import { cardName, compareRank, evaluate7, makeDeck, shuffle } from "./cards.js";
 import gameConfig from "./config.js";
@@ -398,6 +399,9 @@ export function beginHand(io, table) {
 
 function postInitialBet(io, table, player, amount) {
   const pay = Math.min(player.point, amount);
+  if (!Number.isSafeInteger(player.point) || player.point < 0) throw new Error('Invalid holdem bankroll');
+  if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(pay) || pay < 0 || pay > player.point
+    || !Number.isSafeInteger(player.totalBet + pay) || !Number.isSafeInteger(table.hand.pot + pay)) throw new Error('Invalid forced holdem wager');
   player.point -= pay;
   player.totalBet += pay;
   player.lastOperation = OP.PER;
@@ -411,6 +415,9 @@ function postInitialBet(io, table, player, amount) {
 
 function postBlind(io, table, player, amount, operation) {
   const pay = Math.min(player.point, amount);
+  if (!Number.isSafeInteger(player.point) || player.point < 0) throw new Error('Invalid holdem bankroll');
+  if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(pay) || pay < 0 || pay > player.point
+    || !Number.isSafeInteger(player.totalBet + pay) || !Number.isSafeInteger(table.hand.pot + pay)) throw new Error('Invalid holdem blind');
   player.point -= pay;
   player.streetBet += pay;
   player.totalBet += pay;
@@ -458,8 +465,11 @@ function applyAction(io, table, uid, operation, operationData) {
   const toCall = Math.max(0, hand.currentBet - actor.streetBet);
   let op = Number(operation);
   const amountOps = [OP.ALL_IN, OP.FOLLOW, OP.ADD, OP.BET, OP.POT_1, OP.POT_2, OP.POT_3, OP.POT_4, OP.POT_5, OP.CUSTOM_ADD];
-  const amount = operationData == null || operationData === "" ? 0 : Number(operationData);
-  if (amountOps.includes(op) && !Number.isFinite(amount)) {
+  if (![OP.PASS, OP.ABANDON, ...amountOps].includes(op)) return;
+  const scale = [OP.FOLLOW, OP.ALL_IN].includes(op) ? 1 : 100;
+  const amount = operationData == null ? 0 : scoreAmount(operationData, scale);
+  if (amountOps.includes(op) && (!Number.isSafeInteger(amount)
+    || amount > actor.streetBet + actor.point)) {
     return;
   }
   if (op === OP.PASS && toCall > 0) {
@@ -471,7 +481,7 @@ function applyAction(io, table, uid, operation, operationData) {
     actor.folded = true;
     actor.lastOperation = OP.ABANDON;
   } else if (op === OP.FOLLOW) {
-    payTo(actor, hand, toCall);
+    if (!payTo(actor, hand, toCall)) return;
     actor.lastOperation = actor.point === 0 ? OP.ALL_IN : OP.FOLLOW;
     if (actor.point === 0) {
       actor.allIn = true;
@@ -479,9 +489,9 @@ function applyAction(io, table, uid, operation, operationData) {
   } else if (amountOps.includes(op) && op !== OP.FOLLOW) {
     const raiseTo = op === OP.ALL_IN
       ? actor.streetBet + actor.point
-      : raiseAmount(table, actor, amount);
+      : raiseAmount(table, actor, amount / 100);
     const pay = Math.min(actor.point, Math.max(0, raiseTo - actor.streetBet));
-    payTo(actor, hand, pay);
+    if (!payTo(actor, hand, pay)) return;
     if (actor.streetBet > hand.currentBet) {
       hand.minRaise = actor.streetBet - hand.currentBet;
       hand.currentBet = actor.streetBet;
@@ -548,11 +558,17 @@ function recordReplayDeal(hand, gameState) {
 }
 
 function payTo(player, hand, amount) {
+  if (!Number.isSafeInteger(amount) || amount < 0) return false;
   const pay = Math.min(player.point, Math.max(0, amount));
+  if (pay === 0 && Number.isSafeInteger(amount) && amount >= 0) return true;
+  if (!validWager(pay, player.point)) return false;
+  if (!Number.isSafeInteger(player.totalBet + pay) || !Number.isSafeInteger(player.streetBet + pay)
+    || !Number.isSafeInteger(hand.pot + pay)) return false;
   player.point -= pay;
   player.streetBet += pay;
   player.totalBet += pay;
   hand.pot += pay;
+  return true;
 }
 
 function raiseAmount(table, actor, operationData) {

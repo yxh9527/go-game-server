@@ -1,6 +1,7 @@
 import { shuffle } from '../holdem/cards.js';
 import { rel } from '../../rel.js';
 import { env } from '../../../../shared/rpc/env.js';
+import { validWager } from '../../core/wager.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH: MSG } = await rel(import.meta.url, './messages.js', v);
 const { evaluate, cardTypeInfo } = await rel(import.meta.url, './hand.js', v);
@@ -98,6 +99,7 @@ export function bet(io, table, uid, multiple, now = Date.now()) {
   if (!p || h.stage !== 'bet' || h.settled || p.bet !== null || now >= h.deadline
       || !Number.isInteger(multiple) || multiple < 1 || multiple > maxMultiple(table, p)) return false;
   const score = rules(table).ante * multiple;
+  if (!validWager(score, p.member.point) || !Number.isSafeInteger(h.pot + score)) return false;
   p.bet = score; p.member.point -= score; p.member.totalBet = score; p.member.lastOperation = 1; h.pot += score;
   h.events.push({ uid: p.uid, operationType: 1, operationData: multiple, bet: score, gameState: 4, time: now });
   io.broadcast(MSG.BET, { uid: p.uid, currentBetScore: score, totalBetScore: score,

@@ -38,7 +38,8 @@ test('new login kicks the old login, refunds once, and late close cannot remove 
   await old.send(SEND.SEND_SITDOWN, { position: 0 });
   await old.send(SEND.SEND_CARRY_SCORE, { carryIn: 5 });
   const previous = f.runtime.registry.session(old.ws);
-  assert.equal(previous.wallet, 9500);
+  assert.equal(previous.wallet, 10000);
+  assert.equal(previous.carryAmount, 500);
   await f.reload();
   await join(next, { ...credentials, userToken: 'session-b', deviceId: 'device-b' });
   const current = f.runtime.registry.session(next.ws);
@@ -71,8 +72,9 @@ test('same-session primary and hundred socket coexist across hot update; new cre
 test('opening the hundred overlay after a normal launch keeps its existing primary', async () => {
   const f = await fixture(), main = f.socket(), hundred = f.socket();
   await join(main, credentials);
-  await hundred.send(SEND.ROOM_LOGIN, credentials);
+  await hundred.send(SEND.ROOM_LOGIN, { ...credentials, currency: 'UNTRUSTED' });
   await hundred.send(SEND.ENTER, { roomType: 50, playMode: 1 });
+  assert.equal(f.runtime.registry.session(hundred.ws).currency, 'CNY');
   assert.equal(main.ws.readyState, 1);
   assert.equal(f.runtime.registry.session(main.ws).inRoom, true);
   assert.equal(f.runtime.registry.session(hundred.ws).loginRole, 'hundred');
@@ -99,7 +101,8 @@ test('failed authentication never evicts the active login; repeated 1105 cannot 
   assert.equal(main.ws.readyState, 1);
   await main.send(SEND.ROOM_LOGIN, { ...credentials, userId: 999 });
   assert.equal(f.runtime.registry.session(main.ws), session);
-  assert.equal(session.wallet, 9500);
+  assert.equal(session.wallet, 10000);
+  assert.equal(session.carryAmount, 500);
   assert.equal(session.inRoom, true);
 });
 
@@ -124,14 +127,15 @@ test('late authentication cannot replace a newer successful login or resurrect a
   assert.equal(f.runtime.registry.session(fast.ws).authenticated, true);
 });
 
-test('replacement login and duplicate close wait for one in-flight cash-out across hot update', async () => {
+test('replacement login and duplicate close release carry once and await persistence across hot update', async () => {
   const f = await fixture(), old = f.socket(), next = f.socket();
   await join(old);
   await old.send(SEND.SEND_SITDOWN, { position: 0 });
   await old.send(SEND.SEND_CARRY_SCORE, { carryIn: 5 });
-  const start = deferred(), finish = deferred(), original = f.runtime.wallet.credit.bind(f.runtime.wallet);
-  let credits = 0;
-  f.runtime.wallet.credit = async (...args) => { credits++; start.resolve(); await finish.promise; return original(...args); };
+  const start = deferred(), finish = deferred();
+  let saves = 0;
+  f.runtime.wallet.credit = () => assert.fail('reservation release must never credit the wallet');
+  f.runtime.wallet.persist = async () => { saves++; start.resolve(); await finish.promise; };
   const leaving = old.send(SEND.SEND_LEVEL_OUT);
   await start.promise;
   await f.reload();
@@ -140,7 +144,7 @@ test('replacement login and duplicate close wait for one in-flight cash-out acro
   assert.equal(f.runtime.registry.session(next.ws), null);
   finish.resolve();
   await Promise.all([leaving, replacing, closing, f.handler.onClose(old.ws)]);
-  assert.equal(credits, 1);
+  assert.equal(saves, 1);
   assert.equal(f.runtime.registry.session(next.ws).wallet, 10000);
 });
 
@@ -161,4 +165,40 @@ test('concurrent bets on multiple tables share the primary and hundred account b
   assert.equal(f.runtime.registry.session(hundred.ws).wallet, 4000);
   assert.equal(tables.reduce((sum, table) => sum + (table.playerBets.get(login.userId) || [])
     .reduce((total, bet) => total + bet.total, 0), 0), 6000);
+});
+
+test('cash entry is exclusive while native hundred and multi-slot discovery retain the funded primary', async () => {
+  const f = await fixture(), main = f.socket(), hundred = f.socket();
+  await join(main);
+  await main.send(SEND.SEND_SITDOWN, { position: 0 });
+  await main.send(SEND.SEND_CARRY_SCORE, { carryIn: 60 });
+  const session = f.runtime.registry.session(main.ws);
+  const oldRoom = session.roomId;
+  assert.equal(session.wallet, 10000);
+  assert.equal(session.carryAmount, 6000);
+  const target = f.runtime.configs.find(row => Number(row.room_type) === 25);
+  await main.send(SEND.SEND_JOIN_ROOM, { roomType: 25, roomId: Number(target.game_room_config_id) * 10000 });
+  assert.equal(session.roomId, oldRoom);
+  assert.ok(main.frames.some(frame => frame.msgid === 9999 && /带入/.test(frame.payload.errorMsg)));
+  await hundred.send(SEND.ROOM_LOGIN, credentials);
+  await hundred.send(SEND.ENTER, { roomType: 50, playMode: 1 });
+  assert.equal(main.ws.readyState, 1);
+  assert.equal(session.carryAmount, 6000);
+  await hundred.send(SEND.MB_REG_ROOMS_REQ, { mulRoomTypeList: [{ roomType: 58 }, { roomType: 61 }], customData: 2 });
+  const registered = hundred.frames.findLast(frame => frame.msgid === PUSH.MB_REGED_ROOM_INFOS).payload.roomInfos;
+  assert.ok(registered.some(room => room.roomType === 58));
+  assert.ok(registered.some(room => room.roomType === 61));
+  const baccarat = registered.find(room => room.roomType === 58);
+  await hundred.send(SEND.MB_ROOM_BET_REQ, { roomType: 58, roomId: baccarat.roomId, params: [{ areaId: 1, total: 5000 }] });
+  assert.notEqual(hundred.frames.findLast(frame => frame.msgid === PUSH.MB_ROOM_BET_RES).payload.code, 0);
+  assert.equal(session.wallet, 10000);
+  await hundred.send(SEND.MB_ROOM_BET_REQ, { roomType: 58, roomId: baccarat.roomId, params: [{ areaId: 1, total: 4000 }] });
+  assert.equal(hundred.frames.findLast(frame => frame.msgid === PUSH.MB_ROOM_BET_RES).payload.code, 0);
+  assert.equal(session.wallet, 6000);
+  assert.equal(session.carryAmount, 6000);
+  assert.equal(session.availableBalance, 0);
+  await main.send(SEND.SEND_LEVEL_OUT);
+  assert.equal(session.wallet, 6000);
+  assert.equal(session.carryAmount, 0);
+  assert.equal(session.availableBalance, 6000);
 });

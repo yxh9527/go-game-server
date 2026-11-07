@@ -2,6 +2,7 @@
 // Multiple winners share a short payer fairly; packet/response order is inert.
 function allocate(rows, limit) {
   const total = rows.reduce((n, row) => n + row.amount, 0);
+  if (!Number.isSafeInteger(total) || !Number.isSafeInteger(limit) || limit < 0) throw new Error('Invalid mahjong transfer budget');
   if (total <= limit) return;
   const parts = rows.map(row => ({ row, exact: row.amount * limit / total }));
   let remainder = limit;
@@ -10,7 +11,13 @@ function allocate(rows, limit) {
   for (let i = 0; i < remainder; i++) parts[i].row.amount++;
 }
 export function transfer(claims, category = 5, categoryName = '胡分') {
-  const rows = claims.map(c => ({ ...c, amount: Math.max(0, Math.floor(c.amount)) }));
+  if (claims.some(c => !Number.isSafeInteger(c.amount) || c.amount < 0
+    || !Number.isSafeInteger(c.from?.member?.point) || c.from.member.point < 0
+    || !Number.isSafeInteger(c.to?.member?.point) || c.to.member.point < 0
+    || !Number.isSafeInteger(c.to.openingPoint) || c.to.openingPoint < 0)) {
+    throw new Error('Invalid mahjong transfer amount');
+  }
+  const rows = claims.map(c => ({ ...c }));
   const winners = [...new Set(rows.map(c => c.to))];
   for (const to of winners) allocate(rows.filter(c => c.to === to), Math.min(to.openingPoint, to.member.point));
   for (const from of new Set(rows.map(c => c.from))) allocate(rows.filter(c => c.from === from), from.member.point);
