@@ -7,6 +7,24 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { clientVersion, createClientApp, langModuleFiles } from "../../client-web/src/app.js";
 import { CLIENT_DEV_PATCH } from "../../cache/client-web/dev-patch.js";
+import {adaptHoldemReplayResponse} from '../../client-web/src/holdem-replay-response.js';
+import {adaptPlayerPanelResponse} from '../../client-web/src/player-panel-response.js';
+
+test('main script serves the spectator replay fix at both routes without rewriting original static assets',async()=>{
+  const file=new URL('../../static/client/2.0.1279/assets/main/index.88f4e.js',import.meta.url);
+  const original=fs.readFileSync(file,'utf8'),expected=adaptPlayerPanelResponse(adaptHoldemReplayResponse(original));
+  assert.notEqual(expected,original);assert.equal(adaptHoldemReplayResponse(expected),expected);
+  assert.equal(adaptHoldemReplayResponse('unrelated bundle'),'unrelated bundle');
+  const server=http.createServer(createClientApp());await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    for(const route of ['/2.0.1279/assets/main/index.88f4e.js','/assets/main/index.88f4e.js']){
+      const response=await fetch('http://127.0.0.1:'+server.address().port+route);
+      assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+      assert.equal(await response.text(),expected);
+    }
+    assert.equal(fs.readFileSync(file,'utf8'),original);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
 
 test("client version reads static/client", () => {
   assert.equal(clientVersion(), "2.0.1279");

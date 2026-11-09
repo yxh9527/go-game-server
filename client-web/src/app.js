@@ -10,6 +10,8 @@ const CLIENT_DEV_PATCH = env.isDev
   ? (await rel(import.meta.url, "../../cache/client-web/dev-patch.js", v)).CLIENT_DEV_PATCH
   : "";
 const { adaptScratchMultiResponse } = await rel(import.meta.url, './scratch-multi-response.js', v);
+const { adaptHoldemReplayResponse } = await rel(import.meta.url, './holdem-replay-response.js', v);
+const { adaptPlayerPanelResponse } = await rel(import.meta.url, './player-panel-response.js', v);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");
@@ -74,6 +76,16 @@ export function createClientApp() {
     res.set("Cache-Control", "no-store").type("application/javascript")
       .sendFile(path.join(clientDir, "js/webHallEarly.js"));
   });
+
+  const mainDir=path.join(clientDir,'assets/main');
+  if(fs.existsSync(mainDir))for(const name of fs.readdirSync(mainDir).filter(file=>/^index\.[^.]+\.js$/.test(file))){
+    const file=path.join(mainDir,name);let modified=-1,adapted;
+    app.get(['/'+version+'/assets/main/'+name,'/assets/main/'+name],(_req,res)=>{
+      const current=fs.statSync(file).mtimeMs;
+      if(current!==modified){adapted=adaptPlayerPanelResponse(adaptHoldemReplayResponse(fs.readFileSync(file,'utf8')));modified=current;}
+      res.set('Cache-Control','no-store').type('js').send(adapted);
+    });
+  }
 
   const multiDir = path.join(clientDir, 'assets/MultyBet');
   if (fs.existsSync(multiDir)) for (const name of fs.readdirSync(multiDir).filter(file => /^index\.[^.]+\.js$/.test(file))) {

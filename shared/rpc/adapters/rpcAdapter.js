@@ -25,6 +25,7 @@ export async function refreshDataAccess(runtime) {
     const nextGateway=new gateway.GatewayRpcProd();
     rpc.gatewayService.getLoginData=nextGateway.getLoginData.bind(nextGateway);
     rpc.gatewayService.getUserCenter=nextGateway.getUserCenter.bind(nextGateway);
+    rpc.gatewayService.playerPanel=nextGateway.playerPanel.bind(nextGateway);
     rpc.gatewayService.writeUserCenter=nextGateway.writeUserCenter.bind(nextGateway);
   }
 }

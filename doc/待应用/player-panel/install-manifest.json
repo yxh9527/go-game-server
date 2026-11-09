@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "relative": "data-center\\dao\\gogame.go",
+      "sourceHash": "4258702b83b4fb874633a91e7cdb1d2411b59582e332175761ac40afb3b40084",
+      "originalHash": "2ae3a7384ecb3376a9dcbb7698e8b251603b4ba4d0b50d189fcad68fd88c94df"
+    },
+    {
+      "relative": "data-center\\dao\\player_panel.go",
+      "sourceHash": "a1b58d8a53cbfb05b76e0b9b8247e34897522c5fc6c0119188ab3959e5c2cca7",
+      "originalHash": "0f9cc7efe695864b5524e2b1268ebd834f84a64a6ffb3d686036e100a2ef7110"
+    },
+    {
+      "relative": "data-center\\dao\\player_panel_test.go",
+      "sourceHash": "a3e126dcbf45ea30f4c8b9721d9d2c3d02c48d78606a648424627a9dc435cb2b",
+      "originalHash": "ec149ba9249b72050250d727c8f07c4f9244913331cb3125eb4b547267933ada"
+    },
+    {
+      "relative": "app\\tables\\gogame\\player_panel.go",
+      "sourceHash": "cbf6208403eb148016df3cad6364b02e27e90146a6a6ebea830d5ec35c2827d6",
+      "originalHash": null
+    },
+    {
+      "relative": "app\\tables\\gogame\\seed.go",
+      "sourceHash": "3ebd648421a727324b1650f2b9199dfef32bfe20f2c5009223e46f5758b7db85",
+      "originalHash": "cfda1f789682723478b98998f767f25a16d0be2d409b2c2040d859770057680a"
+    }
+  ]
+}

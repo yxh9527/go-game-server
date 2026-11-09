@@ -1,0 +1,106 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: original Holdem scene\n    at file:///D:/project/gogame/test/browser/check-native-login-fair.mjs:57:10",
+  "errors": [],
+  "frames": [
+    {
+      "direction": "sent",
+      "msgid": 1105,
+      "flags": 128,
+      "payload": {
+        "isAutoLogin": true,
+        "userId": 88123221,
+        "openId": "88123221",
+        "userToken": "dev-88123221",
+        "version": "1.0.0.4393",
+        "cVersion": 20240607,
+        "rebindwx": false,
+        "deviceId": "94270670-724b-4bcd-8a1b-a9496a7d03fd",
+        "deviceName": "Windows%20chrome-v-154.0.0.0",
+        "language": 1,
+        "openHundredGame": false,
+        "clubId": 0,
+        "isApiLogin": true,
+        "currency": "CNY",
+        "plat": 4,
+        "abFlag": 2,
+        "roomId": 25010000,
+        "isInRoom": false
+      }
+    },
+    {
+      "direction": "sent",
+      "msgid": 1105,
+      "flags": 128,
+      "payload": {
+        "isAutoLogin": true,
+        "userId": 88123221,
+        "openId": "88123221",
+        "userToken": "dev-88123221",
+        "version": "1.0.0.4393",
+        "cVersion": 20240607,
+        "rebindwx": false,
+        "deviceId": "94270670-724b-4bcd-8a1b-a9496a7d03fd",
+        "deviceName": "Windows%20chrome-v-154.0.0.0",
+        "language": 1,
+        "openHundredGame": false,
+        "clubId": 0,
+        "isApiLogin": true,
+        "currency": "CNY",
+        "plat": 4,
+        "abFlag": 2,
+        "roomId": 25010000,
+        "isInRoom": false
+      }
+    },
+    {
+      "direction": "received",
+      "msgid": 1205,
+      "flags": 128,
+      "payload": {
+        "serverTime": 1794054340171,
+        "clubId": 1,
+        "roomId": 25010000,
+        "enableLog": false,
+        "opType": 0,
+        "exchangeRate": 1,
+        "playerClubId": 1,
+        "isOpenQuickChange": false,
+        "openHundredGame": false
+      }
+    },
+    {
+      "direction": "sent",
+      "msgid": 2102,
+      "flags": 128,
+      "payload": {
+        "roomId": 25010000,
+        "clubId": 0,
+        "isOb": true,
+        "openHundredGame": false,
+        "roomType": 25
+      }
+    },
+    {
+      "direction": "received",
+      "msgid": 1203,
+      "flags": 128,
+      "payload": null
+    },
+    {
+      "direction": "received",
+      "msgid": 1205,
+      "flags": 128,
+      "payload": {
+        "serverTime": 1794054340173,
+        "clubId": 1,
+        "roomId": 25010000,
+        "enableLog": false,
+        "opType": 0,
+        "exchangeRate": 1,
+        "playerClubId": 1,
+        "isOpenQuickChange": false,
+        "openHundredGame": false
+      }
+    }
+  ]
+}

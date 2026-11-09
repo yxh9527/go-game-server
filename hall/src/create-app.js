@@ -120,6 +120,20 @@ export async function createApp(runtime) {
       res.set('Cache-Control','no-store').json(await userCenter.userCenterProfileResponse(runtime,params));
       return;
     }
+    if(op===81652){
+      try{const data=await roomPool.requestRoomPool(runtime,params,'player-records',{
+        roomId:Number(params.roomId),targetUid:Number(params.targetUid),pageNum:Number(params.pageNum||1),pageSize:Number(params.pageSize||10),
+      });res.set('Cache-Control','no-store').json({msgCode:200,errMsg:null,data});}
+      catch(error){res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null});}
+      return;
+    }
+    if(op===81651){
+      try{const data=await roomPool.requestRoomPool(runtime,{...params,userId:params.userId??params.uid},'player-profile',{
+        roomId:Number(params.roomId),targetUid:Number(params.targetUid),
+      });res.set('Cache-Control','no-store').json({msgCode:200,errMsg:null,data});}
+      catch(error){res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null});}
+      return;
+    }
     if (op === 46 && runtime.env === "dev") {
       const gameRoomId = decode.num(params.gameRoomId, 0);
       const inningNum = decode.num(params.inningNum, 0);

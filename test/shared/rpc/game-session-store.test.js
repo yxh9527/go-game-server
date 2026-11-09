@@ -10,7 +10,7 @@ test('distributed lease store fences replacements and only admits a matching hun
  const first=await a.claim(primary,{identity:'device-a'});assert.equal(first.role,'primary');assert.equal(await a.verify(primary),true);
  assert.equal(await a.updateRoom(primary,{roomType:19}),true);
  primary.inRoom=true;assert.equal(await a.updateRoom(primary,{roomType:19}),true);
- const overlay={...primary,loginId:'login-overlay',socketId:'overlay'};
+ const overlay={...primary,gameId:undefined,roomType:undefined,inRoom:false,loginId:'login-overlay',socketId:'overlay'};
  const paired=await b.claim(overlay,{identity:'device-a',allowPair:true});assert.equal(paired.loginId,first.loginId);assert.equal(paired.role,'hundred');
  assert.equal(await a.verify(primary),true);assert.equal(await b.verify({...overlay,loginId:paired.loginId}),true);
  const replacement={...primary,loginId:'login-b',socketId:'replacement'};
@@ -18,6 +18,18 @@ test('distributed lease store fences replacements and only admits a matching hun
  assert.equal(await a.verify(primary),false);assert.equal(await b.verify({...overlay,loginId:first.loginId}),false);
  assert.equal(revoked.length,1);assert.equal(revoked[0].loginId,first.loginId);
  await a.release(primary);assert.equal(await b.verify(replacement),true);
+});
+
+test('closing an auxiliary keeps the primary owner and permits a replacement auxiliary on another node',async()=>{
+ const backend=createInMemoryGameSessionBackend(),a=createGameSessionStore({backend,instanceId:'a'}),b=createGameSessionStore({backend,instanceId:'b'});
+ const primary={agentId:7,userId:42,roomId:700001,gameId:'holdem',inRoom:true,loginId:'primary',socketId:'p'};
+ await a.claim(primary,{identity:'same'});await a.updateRoom(primary,{roomType:19});
+ const aux={agentId:7,userId:42,roomId:700001,loginId:'aux',socketId:'a'};
+ const pair=await b.claim(aux,{identity:'same',allowPair:true});aux.loginId=pair.loginId;
+ await b.release(aux);assert.equal(await a.verify(primary),true);
+ const second={...aux,loginId:'aux-2',socketId:'b'};
+ assert.equal((await b.claim(second,{identity:'same',allowPair:true})).role,'hundred');
+ assert.equal(await a.verify(primary),true);
 });
 
 test('redis implementation uses atomic claim, fencing counter, ttl and cross-node revocation',async()=>{

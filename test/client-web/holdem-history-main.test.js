@@ -4,11 +4,12 @@ import vm from "node:vm";
 import test from "node:test";
 import { createTexasTable, texasHistoryDetail, texasHistoryPayload } from "../../game-server/src/games/holdem/engine.js";
 import { evaluate7 } from "../../game-server/src/games/holdem/cards.js";
+import {adaptHoldemReplayResponse} from '../../client-web/src/holdem-replay-response.js';
 
 // The current historyContent prefab uses these main-bundle components, not
 // DzpkHistoryDetail in the older Holdem-bundle panel. Exercise the real parser
 // and renderer together with the server's actual detail/list payloads.
-const bundle = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/main/index.88f4e.js", import.meta.url), "utf8");
+const bundle = adaptHoldemReplayResponse(fs.readFileSync(new URL("../../static/client/2.0.1279/assets/main/index.88f4e.js", import.meta.url), "utf8"));
 
 function method(module, anchor, next, context) {
   const moduleStart = bundle.indexOf("'" + module + "':[");
@@ -70,6 +71,30 @@ function replayTable() {
   });
   return table;
 }
+
+test('observer replay without showdown completes native parsing without revealing either player hand',()=>{
+  const table=replayTable(),stored=table.history[0];
+  stored.firstGameList=stored.firstGameList.slice(0,2).map((player,index)=>({...player,
+    showCards:[-1,-1],cardTypeInfo:undefined,cardTypeId:0,score:index===0?10:-10,
+    operateList:index===0?[]:[{operate:6,gameState:4}],
+  }));
+  stored.roundEvents=[{uid:2,operationType:6,gameState:4,pot:20,bet:0}];
+  const before=structuredClone(table.history),replay=texasHistoryPayload(table).playBackList[0],detail=texasHistoryDetail(table,1);
+  assert.ok(JSON.parse(detail.exploitsInfoMsgs[0].roundList).every(row=>row.operationType!==11),'uncontested hand has no fabricated SHOW');
+  let result;
+  const model={_stageAndOptsMap:new Map(),gameRecordDetailMap:{},_currentPlayBack:replay,
+    getMemberInfo(uid){return this.detailData.memberResults.find(row=>row.uid===uid);},
+    recordDetailCallBack(summary,timeline,showdown){result={summary,timeline,showdown};},
+  };
+  const parse=method('HoldemHistoryModel',"z['prototype']['onPushRecordDetail']=",",z['prototype']['checkToShowSendCards']=",{
+    q:{GameState:{BET_FRONT:1,BET_BLIND:2,BET_PERFLOP:4}},v:{default:{userData:{uid:10001}}},w:{default:{SHOW:11}},
+  });
+  assert.doesNotThrow(()=>parse.call(model,detail));
+  assert.ok(result);assert.equal(result.showdown,undefined,'no publicly revealed showdown panel');
+  assert.deepEqual(Array.from(result.summary.cardList),stored.firstGameList[0].commonPoker);
+  assert.ok(JSON.parse(detail.exploitsInfoMsgs[0].inningResults).every(row=>row.handPais.length===0&&!row.cardTypeInfo));
+  assert.deepEqual(table.history,before);
+});
 
 test("original Holdem parser renders two hole cards and five board cards for six players", () => {
   const table = replayTable();

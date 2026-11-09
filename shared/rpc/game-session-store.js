@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 export const GAME_SESSION_CHANNEL='gogame:game-session:v1';
+export const GAME_SESSION_STORE_VERSION='native-sockets-2';
 export const GAME_SESSION_TTL_MS=30000;
 export const GAME_SESSION_OPERATION_TTL_MS=30000;
 const UNLOCK_SCRIPT="if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
@@ -26,7 +27,6 @@ if action=='claim' then
   if tonumber(input.attempt or 0)<latest then return cjson.encode({ok=false,stale=true}) end
   if input.allowPair and old and old.primary and old.primary.inRoom
     and old.primary.identity==input.identity and old.primary.roomId==input.roomId
-    and old.primary.gameId==input.gameId
     and (old.primary.roomType==19 or old.primary.roomType==24 or old.primary.roomType==25
       or old.primary.roomType==26 or old.primary.roomType==31) and #old.paired==0 then
     input.loginId=old.loginId
@@ -70,7 +70,8 @@ if action=='release' then
   local paired={}
   for _,peer in ipairs(old.paired or {}) do if peer.socketId~=input.socketId then table.insert(paired,peer) end end
   old.paired=paired
-  if #paired==0 then redis.call('DEL',KEYS[1]) else redis.call('SET',KEYS[1],cjson.encode(old),'PX',ttl) end
+  local remaining=redis.call('PTTL',KEYS[1])
+  if remaining>0 then redis.call('SET',KEYS[1],cjson.encode(old),'PX',remaining) end
   return '1'
 end
 return redis.error_reply('GAME_SESSION_ACTION')
@@ -140,7 +141,7 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
     if(action==='claim'){
       if(Number(extra.attempt||0)<(backend.sequences.get('attempt:'+Number(session.userId))||0))return{ok:false,stale:true};
       if(extra.allowPair&&old?.primary?.inRoom&&old.primary.identity===extra.identity&&old.primary.roomId===extra.roomId
-        &&old.primary.gameId===extra.gameId&&[19,24,25,26,31].includes(old.primary.roomType)&&old.paired.length===0){
+        &&[19,24,25,26,31].includes(old.primary.roomType)&&old.paired.length===0){
         old.paired.push({...input,role:'hundred'});old.expiresAt=Date.now()+ttlMs;return{ok:true,loginId:old.loginId,generation:old.generation,role:'hundred'};
       }
       const generation=(backend.sequences.get(key)||0)+1;backend.sequences.set(key,generation);
@@ -160,13 +161,13 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
     if(action==='release'){
       if(!owns)return false;
       if(old.primary.socketId===session.socketId){backend.records.delete(key);if(old.paired.length)publish({event:'revoke',loginId:old.loginId,reason:'primary-closed'});}
-      else{old.paired=old.paired.filter(p=>p.socketId!==session.socketId);if(old.paired.length)old.expiresAt=Date.now()+ttlMs;else backend.records.delete(key);}
+      else{old.paired=old.paired.filter(p=>p.socketId!==session.socketId);}
       return true;
     }
     throw new Error('Invalid game session action');
   }
   return{
-    instanceId,ttlMs,
+    instanceId,ttlMs,coordinationVersion:GAME_SESSION_STORE_VERSION,memoryBackend:redis?undefined:backend,
     subscribe(fn){callbacks.add(fn);return()=>callbacks.delete(fn);},
     async beginAttempt(userId){
       const uid=Number(userId);if(!Number.isSafeInteger(uid)||uid<=0)throw new Error('Invalid game session attempt user');

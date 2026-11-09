@@ -37,10 +37,14 @@ export function createSessionControl(runtime, { send, close, kickId }) {
     if(entries.length)void evict(entries).catch(error=>runtime.log?.error?.('distributed session eviction failed',error.message));
     runtime.log?.info?.(`[game-server] session revoked login=${loginId} reason=${reason}`);
   }
-  if(distributed&&!state.unsubscribe)state.unsubscribe=distributed.subscribe(message=>{
-    try{const event=typeof message==='string'?JSON.parse(message):message;if(event?.event==='revoke')revokeLogin(event.loginId,event.reason);}
-    catch(error){runtime.log?.error?.('invalid distributed session event',error.message);}
-  });
+  state.revokeLogin=revokeLogin;
+  if(distributed&&state.distributed!==distributed){
+    state.unsubscribe?.();state.distributed=distributed;
+    state.unsubscribe=distributed.subscribe(message=>{
+      try{const event=typeof message==='string'?JSON.parse(message):message;if(event?.event==='revoke')state.revokeLogin(event.loginId,event.reason);}
+      catch(error){runtime.log?.error?.('invalid distributed session event',error.message);}
+    });
+  }
   function peers(session, ws) {
     return [...runtime.registry.sessions].filter(([other, s]) => other !== ws
       && accountKey(s) === accountKey(session) && (s.authenticated !== false || s.superseded));
@@ -67,10 +71,7 @@ export function createSessionControl(runtime, { send, close, kickId }) {
     accept(ws, session, order, credentials = {}) {
       return serialize(accountKey(session), async () => {
         const socket = socketState(ws), key = accountKey(session);
-        if (socket.closed || ws.readyState !== 1) {
-          if(lease)await distributed.release(session);
-          return false;
-        }
+        if (socket.closed || ws.readyState !== 1) return false;
         if ((state.latest.get(key) || 0) > order) {
           socket.closed = true;
           send(ws, kickId);
@@ -80,7 +81,9 @@ export function createSessionControl(runtime, { send, close, kickId }) {
         }
         let lease=null;
         if(distributed){
-          lease=await distributed.claim(session,{identity:session.loginIdentity,allowPair:Boolean(credentials.openHundredGame),attempt:session.loginAttempt});
+          // 1105 carries neither socket channel nor gameId. The native client
+          // opens RoomSocket-222 even while openHundredGame is false.
+          lease=await distributed.claim(session,{identity:session.loginIdentity,allowPair:true,attempt:session.loginAttempt});
           if(!lease?.ok)throw Object.assign(new Error('Game session claim failed'),{code:'SESSION_CLAIM_FAILED'});
           session.loginId=lease.loginId;session.sessionGeneration=lease.generation;session.loginRole=lease.role;
           if(socket.closed||ws.readyState!==1){await distributed.release(session);return false;}
@@ -99,7 +102,10 @@ export function createSessionControl(runtime, { send, close, kickId }) {
           try{await evict(existing);}
           catch(error){if(lease)await distributed.release(session);throw error;}
         }
-        if (socket.closed || ws.readyState !== 1) return false;
+        if (socket.closed || ws.readyState !== 1) {
+          if(lease)await distributed.release(session);
+          return false;
+        }
         runtime.registry.bind(ws, session);
         return true;
       });

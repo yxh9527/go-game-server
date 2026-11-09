@@ -13,11 +13,12 @@ function deferred() {
   let resolve;
   return { promise: new Promise(r => { resolve = r; }), resolve: (...args) => resolve(...args) };
 }
-async function fixture() {
+async function fixture(distributed=false) {
   const runtime = { hotVersion: 'login-guard', registry: createRegistry(), configs: seedRooms(), findConfig,
     wallet: createWallet({ mode: 'local', local_balance: 10000 }),
     gateway: { validateToken: async token => token !== 'invalid', getLoginData: async () => ({ agentId: 9 }) },
     log: { info() {}, error() {} } };
+  if(distributed)runtime.bus={gameSessions:createGameSessionStore({instanceId:'session-regression'})};
   let handler = await createHandler(runtime);
   function socket() {
     const frames = [];
@@ -33,6 +34,44 @@ async function join(s, login = credentials) {
   await s.send(SEND.ROOM_LOGIN, login);
   await s.send(SEND.SEND_JOIN_ROOM, { roomType: 19, roomId: login.roomId });
 }
+
+test('native initial login keeps its automatic hundred socket when both 1105 payloads omit the game identity and disable the overlay',async()=>{
+ const f=await fixture(true),main=f.socket(),overlay=f.socket();
+ const login={...credentials,openHundredGame:false};
+ await join(main,login);const primary=f.runtime.registry.session(main.ws);
+ await overlay.send(SEND.ROOM_LOGIN,login);
+ assert.equal(main.ws.readyState,1,'initial RoomSocket-222 must not kick RoomSocket-111');
+ assert.equal(overlay.ws.readyState,1);assert.equal(f.runtime.registry.session(overlay.ws)?.loginRole,'hundred');
+ assert.equal(f.runtime.registry.session(overlay.ws)?.loginId,primary.loginId);
+ assert.equal(main.frames.filter(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT).length,0);
+ await f.handler.onClose(overlay.ws);
+ await main.send(SEND.PING);
+ assert.equal(main.ws.readyState,1,'closing the hundred socket cannot revoke the primary lease');
+ assert.equal(await f.runtime.bus.gameSessions.verify(primary),true);
+ const reopened=f.socket();await reopened.send(SEND.ROOM_LOGIN,login);
+ assert.equal(f.runtime.registry.session(reopened.ws)?.loginRole,'hundred');assert.equal(main.ws.readyState,1);
+ await f.reload();await main.send(SEND.PING);assert.equal(main.ws.readyState,1);
+});
+
+test('hot update upgrades the old private dev coordination store without kicking its valid primary and auxiliary',async()=>{
+ const f=await fixture(true),main=f.socket(),overlay=f.socket();
+ const login={...credentials,openHundredGame:false};
+ await join(main,login);await main.send(SEND.SEND_SITDOWN,{position:0});await main.send(SEND.SEND_CARRY_SCORE,{carryIn:5});
+ await overlay.send(SEND.ROOM_LOGIN,login);
+ const primary=f.runtime.registry.session(main.ws),secondary=f.runtime.registry.session(overlay.ws),store=f.runtime.bus.gameSessions;
+ const snapshot={wallet:primary.wallet,carry:primary.carryAmount,loginId:primary.loginId};
+ delete store.memoryBackend;delete store.coordinationVersion;
+ await f.reload();
+ assert.notEqual(f.runtime.bus.gameSessions,store);assert.equal(f.runtime.registry.session(main.ws),primary);
+ assert.equal(f.runtime.registry.session(overlay.ws),secondary);
+ assert.equal(await f.runtime.bus.gameSessions.verify(primary),true);assert.equal(await f.runtime.bus.gameSessions.verify(secondary),true);
+ assert.equal(primary.wallet,snapshot.wallet);assert.equal(primary.carryAmount,snapshot.carry);assert.equal(primary.loginId,snapshot.loginId);
+ await main.send(SEND.PING);await overlay.send(SEND.PING);
+ assert.equal(main.ws.readyState,1);assert.equal(overlay.ws.readyState,1);
+ assert.equal(main.frames.some(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT),false);
+ const next=f.socket();await next.send(SEND.ROOM_LOGIN,{...credentials,userToken:'replacement',deviceId:'replacement'});
+ assert.equal(main.ws.readyState,3);assert.equal(overlay.ws.readyState,3,'new store events reach the current hot handler');
+});
 
 test('new login kicks the old login, refunds once, and late close cannot remove the replacement', async () => {
   const f = await fixture(), old = f.socket(), next = f.socket();

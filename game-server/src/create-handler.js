@@ -34,10 +34,19 @@ export async function createHandler(runtime) {
   const { SEND, PUSH } = messages;
   // The RPC adapter may predate this hot update; attach the coordination store
   // to its resident bus without replacing the bus or restarting connections.
-  if(runtime.bus&&!runtime.bus.gameSessions){
-    const {createGameSessionStore}=await rel(import.meta.url,'../../shared/rpc/game-session-store.js',v);
-    runtime.bus.gameSessions=createGameSessionStore({redis:runtime.env==='prod'?runtime.bus.redis:null,
-      instanceId:randomUUID(),required:runtime.env==='prod'});
+  if(runtime.bus){
+    const {createGameSessionStore,GAME_SESSION_STORE_VERSION}=await rel(import.meta.url,'../../shared/rpc/game-session-store.js',v);
+    const previous=runtime.bus.gameSessions;
+    if(previous?.coordinationVersion!==GAME_SESSION_STORE_VERSION){
+      const next=createGameSessionStore({redis:runtime.env==='prod'?runtime.bus.redis:null,
+        backend:previous?.memoryBackend,instanceId:previous?.instanceId||randomUUID(),required:runtime.env==='prod'});
+      if(previous&&!previous.memoryBackend&&runtime.env!=='prod'){
+        const {adoptGameSessions}=await rel(import.meta.url,'../../cache/game-server/session-coordination.js',v);
+        await adoptGameSessions(runtime,previous,next);
+      }
+      await previous?.close?.();
+      runtime.bus.gameSessions=next;
+    }
   }
   const { createSessionControl } = await rel(import.meta.url, './session-control.js', v);
   const sessions = createSessionControl(runtime, { send, close: onClose, kickId: PUSH.USER_LOGIN_KICKOUT });
@@ -51,7 +60,11 @@ export async function createHandler(runtime) {
   const { installUserCenter } = await rel(import.meta.url, './core/user-center.js', v);
   const legacyCenter = runtime.env==='dev' ? await rel(import.meta.url, '../../cache/game-server/user-center.js', v) : null;
   const userCenter = installUserCenter(runtime,legacyCenter?.legacyUserCenterRecords);
+  const {createPlayerPanel}=await rel(import.meta.url,'./core/player-panel.js',v);
+  const playerPanel=await createPlayerPanel(runtime);
+  const {projectPlayerNotes}=await rel(import.meta.url,'../../shared/player-panel.js',v);
   for (const table of runtime.registry.tables.values()) {
+    playerPanel.syncRoomBots(table);
     if (table.kind === 'slots') table.config = gameOf(table.roomType).config;
     if (["zjh", "niuniu", "sss", "blackjack", "sgay", "mahjong"].includes(table.gameId)) {
       // Refresh only room policy; preserve the resident hand, seats and clocks.
@@ -81,6 +94,8 @@ export async function createHandler(runtime) {
       const table = session?.inRoom !== false && session
         ? runtime.registry.getTable(session.roomId, session.agentId, session.gameId) : null;
       if (table) payload = seatView.projectSeatMessage(table, session, msgid, payload);
+      if([PUSH.ROOM_INFO,PUSH.JOIN_ROOM,PUSH.DZPK_PUSH_RANKINGLIST,PUSH.DZPK_PUSH_WATCHGAME,PUSH.NIUNIU_INNING_BEGIN_INFO].includes(msgid))
+        payload=projectPlayerNotes(payload,session?.playerPanelNotes);
       const hostHundredType = {19: 50, 25: 51, 24: 52, 31: 60, 26: 62}[Number(payload?.roomType)];
       if (msgid === PUSH.ROOM_TYPE_RESULT && hostHundredType
         && runtime.configs.some(row => Number(row.state ?? 1) === 1 && Number(row.room_type) === hostHundredType)) {
@@ -265,6 +280,35 @@ export async function createHandler(runtime) {
       }
       const profile = await runtime.gateway.getLoginData(uid);
       const agentId = Number(profile?.agentId) || 0;
+      if(body.action==='player-profile'){
+        const roomId=Number(body.roomId);
+        const viewer=[...runtime.registry.sessions.values()].find(s=>Number(s.userId)===uid&&Number(s.agentId)===agentId
+          &&s.inRoom===true&&!s.superseded&&s.authenticated!==false&&Number(s.roomId)===roomId&&s.loginRole!=='hundred');
+        const table=viewer&&runtime.registry.getTable(roomId,agentId,viewer.gameId);
+        if(!table){respond({code:403,error:'只能查询当前房间玩家资料'});return;}
+        try{respond({code:200,data:await playerPanel.profile(viewer,table,Number(body.targetUid))});}
+        catch(error){respond({code:error.status||503,error:error.message});}return;
+      }
+      if(body.action==='player-records'){
+        const roomId=Number(body.roomId);
+        const viewer=[...runtime.registry.sessions.values()].find(s=>Number(s.userId)===uid&&Number(s.agentId)===agentId
+          &&s.inRoom===true&&!s.superseded&&s.authenticated!==false&&Number(s.roomId)===roomId&&s.loginRole!=='hundred');
+        const table=viewer&&runtime.registry.getTable(roomId,agentId,viewer.gameId);
+        if(!table||!viewer){respond({code:403,error:'只能查看当前房间玩家记录'});return;}
+        try{respond({code:200,data:await playerPanel.records(viewer,table,Number(body.targetUid),Number(body.pageNum||1),Number(body.pageSize||10))});}
+        catch(error){respond({code:error.status||503,error:error.message});}return;
+      }
+      if(body.action==='fair-code'&&runtime.env==='dev'){
+        const roomId=Number(body.gameRoomId),inning=Number(body.currentInning);
+        if(!Number.isSafeInteger(roomId)||roomId<=0||!Number.isSafeInteger(inning)||inning<=0
+          ||body.roomType!=null&&(!Number.isSafeInteger(Number(body.roomType))||Number(body.roomType)<=0)){
+          respond({code:400,error:'Invalid fair-code query'});return;
+        }
+        const candidates=runtime.registry.listAgentGameRooms(agentId).filter(table=>Number(table.roomId)===roomId
+          &&(body.roomType==null||Number(table.roomType)===Number(body.roomType))&&!table.closing);
+        const data=candidates.length===1?fair.fairCodeDetail(candidates[0],uid,inning):null;
+        respond(data?{code:200,data}:{code:404,error:'Fair-code record not found or not authorized'});return;
+      }
       if (body.action === 'wallet' && runtime.env === 'dev') {
         const account={userId:uid,agentId,wallet:0};await runtime.wallet.load(account);
         respond({code:200,data:{walletAmount:account.wallet}});return;
@@ -373,6 +417,8 @@ export async function createHandler(runtime) {
       table.observers = [];
       table.hand = null;
       table.history = [];
+      table.playerPanelHands?.clear();
+      table.playerPanelBots?.clear();
       table.fairCodes?.clear();
       table.roomFeatures?.players.clear();
       delete table.roomFeatures;
@@ -675,6 +721,7 @@ export async function createHandler(runtime) {
         table.standby = false;
         const game = gameOf(table.roomType);
         game.onJoin(ctxOf(ws, session, table, body));
+        playerPanel.syncRoomBots(table);
         if(!await sessions.updateRoom(session,table)){
           session.superseded=true;send(ws,PUSH.USER_LOGIN_KICKOUT);ws.close?.(1000,'Game session lease lost');return;
         }
@@ -712,6 +759,15 @@ export async function createHandler(runtime) {
     }
     if (msgid === SEND.GGL_STATE) session.roomHydrating = false;
     const game = gameOf(table.roomType);
+    if([SEND.USER_INFO,SEND.USER_EMO,SEND.SEND_IM_USERREMARK,SEND.SEND_USER_CHAT].includes(msgid)){
+      try{
+        if(msgid===SEND.USER_INFO){send(ws,PUSH.USER_INFO,await playerPanel.profile(session,table,Number(payload?.uid||session.userId)));}
+        else if(msgid===SEND.USER_EMO){send(ws,PUSH.USER_EMO,await playerPanel.quota(session,table));}
+        else if(msgid===SEND.SEND_IM_USERREMARK){send(ws,PUSH.IM_USERREMARK_REQ,await playerPanel.remark(session,table,payload||{}));}
+        else{const result=await playerPanel.gift(session,table,payload||{});tableIo(table).broadcast(PUSH.USER_CHAT,result.message);send(ws,PUSH.USER_EMO,result.remaining);}
+      }catch(error){send(ws,9999,{msgCode:error.status||503,errorMsg:error.message});}
+      return;
+    }
     await game.afterRound?.(ctxOf(ws, session, table));
     if (table.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
       await expireRoom(table);
@@ -840,6 +896,7 @@ export async function createHandler(runtime) {
       }
       if (game) {
         const ticking = game.tick(context);
+        playerPanel.syncRoomBots(table);
         if (ticking?.then) closing.push(ticking.catch(error => runtime.log.error('game tick failed', error.message)));
         const settled = game.afterRound?.(context);
         if (settled) {

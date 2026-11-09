@@ -1,12 +1,16 @@
 import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
 import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
+import {playerPanelPersistedRecords} from '../../../player-panel.js';
 
 export class GatewayRpcProd {
+  async playerPanel(action,input){return (await getGogameStorageClient()).call('playerPanel'+action[0].toUpperCase()+action.slice(1),input);}
   async getUserCenter(query) {
     return (await getGogameStorageClient()).call('userCenter',query);
   }
   async writeUserCenter(records) {
-    return (await getGogameStorageClient()).call('userCenterWrite',{records});
+    const storage=await getGogameStorageClient(),hands=playerPanelPersistedRecords(records);
+    if(hands.length)await storage.call('playerPanelWrite',{records:hands});
+    return storage.call('userCenterWrite',{records});
   }
   async authenticate(token, userId) {
     const client = await getDataCenterClient();

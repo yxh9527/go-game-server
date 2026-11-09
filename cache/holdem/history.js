@@ -377,6 +377,7 @@ export function recordHand(table, hand, results) {
   table.history ||= [];
   // Dev replay is room-local; keep every completed hand until the room is retired.
   table.history.push({
+    innerEndTime:Date.now(),
     gameRoomId: table.roomId,
     currentInningNum: table.currentInning,
     smallBlind: table.smallBlind,

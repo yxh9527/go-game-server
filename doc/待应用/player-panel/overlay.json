@@ -1,0 +1,9 @@
+{
+  "Replace": {
+    "D:\\project\\gogames\\data-center\\dao\\gogame.go": "D:\\project\\gogame\\doc\\待应用\\player-panel\\data-center\\dao\\gogame.go",
+    "D:\\project\\gogames\\data-center\\dao\\player_panel.go": "D:\\project\\gogame\\doc\\待应用\\player-panel\\data-center\\dao\\player_panel.go",
+    "D:\\project\\gogames\\data-center\\dao\\player_panel_test.go": "D:\\project\\gogame\\doc\\待应用\\player-panel\\data-center\\dao\\player_panel_test.go",
+    "D:\\project\\gogames\\app\\tables\\gogame\\player_panel.go": "D:\\project\\gogame\\doc\\待应用\\player-panel\\app\\tables\\gogame\\player_panel.go",
+    "D:\\project\\gogames\\app\\tables\\gogame\\seed.go": "D:\\project\\gogame\\doc\\待应用\\player-panel\\app\\tables\\gogame\\seed.go"
+  }
+}

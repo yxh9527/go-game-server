@@ -686,7 +686,7 @@ export function settle(io, table, now = Date.now()) {
   // Settlement releases all remaining hands, not future wall tiles.
   io.broadcast(proto(table).settle, payload);
   table.taxCollected = (table.taxCollected || 0) + results.reduce((n, p) => n + p.take, 0);
-  features.finishHandStats(table, results); fair.finishFairHand(table, results);
+  features.finishHandStats(table, results, payload); fair.finishFairHand(table, results);
   history?.record(table, h, payload);
   features.pushRanking({ table, io });
   table.lastMahjongResult = payload;

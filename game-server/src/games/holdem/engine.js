@@ -532,6 +532,8 @@ function recordReplayAction(table, player, operation, bet, gameState) {
     uid: player.uid,
     operate: operation,
     operationType: operation,
+    isRaise:[3,4,5,8,12,13,14,15].includes(operation)||operation===OP.ALL_IN&&player.streetBet>Math.max(0,
+      ...(hand.participants||hand.statsPlayers||table.members).filter(p=>p.uid!==player.uid).map(p=>Number(p.streetBet)||0)),
     bet: Number(bet) || 0,
     currentBetScore: Number(bet) || 0,
     totalBetScore: Number(player.totalBet) || 0,

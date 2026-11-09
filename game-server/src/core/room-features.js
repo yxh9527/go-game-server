@@ -4,6 +4,7 @@ const version = new URL(import.meta.url).searchParams.get("v") || "0";
 const { PUSH, SEND } = await rel(import.meta.url, "../messages.js", version);
 const { publicObserver, userInfoOf } = await rel(import.meta.url, "./member.js", version);
 const lifecycle = await rel(import.meta.url, "./room-lifecycle.js", version);
+const {recordRoomPlayerHand} = await rel(import.meta.url, "./player-panel-records.js", version);
 
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -52,7 +53,7 @@ export function beginHandStats(table, players) {
   table.hand.statsPlayers = players.slice();
 }
 
-export function finishHandStats(table, results) {
+export function finishHandStats(table, results, publicResult) {
   const data = state(table);
   const inning = number(table.currentInning);
   if (inning <= data.settledInning) return;
@@ -73,6 +74,7 @@ export function finishHandStats(table, results) {
   data.totalPot += number(table.hand?.pot);
   data.maxPot = Math.max(data.maxPot || 0, number(table.hand?.pot));
   data.settledInning = inning;
+  recordRoomPlayerHand(table, results, publicResult);
   table.recordUserCenter?.(results);
 }
 

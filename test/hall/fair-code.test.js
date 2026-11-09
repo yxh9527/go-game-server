@@ -9,6 +9,7 @@ import { createTexasTable, beginHand, onTexasAction } from "../../game-server/sr
 import { OP } from "../../game-server/src/games/holdem/op.js";
 import { encodeFrame, decodeFrame } from "../../game-server/src/codec.js";
 import { SEND, PUSH } from "../../game-server/src/messages.js";
+import {createGameSessionStore} from '../../shared/rpc/game-session-store.js';
 
 test("op29 uses authenticated shared proof query without joining, charging or standing a player", async (t) => {
   const registry = createRegistry();
@@ -22,16 +23,21 @@ test("op29 uses authenticated shared proof query without joining, charging or st
   const io = { env: "dev", broadcast() {}, send() {}, forEachPlayer() {} };
   beginHand(io, table);
   onTexasAction(io, table, { userId: table.hand.actorUid }, { operation: OP.ABANDON });
-  let persists = 0;
+  let persists = 0,loads=0;
+  const gameSessions=createGameSessionStore({instanceId:'fair-query-regression'});
   const handler = await createHandler({
     env: "dev", hotVersion: "fair-http-test", registry, configs: [], findConfig: () => null,
     gateway: {
       validateToken: async (token, uid) => token === "token-" + uid,
       getLoginData: async (uid) => ({ agentId: uid === 4 ? 2 : 1, userName: "user-" + uid }),
     },
-    wallet: { load: async (session) => { session.wallet = 1000; }, persist: async () => { persists += 1; } },
+    bus:{gameSessions},
+    wallet: { load: async (session) => { loads++;session.wallet = 1000; }, persist: async () => { persists += 1; } },
     log: { info() {}, error() {} },
   });
+  const loginFrames=[],active={readyState:1,send:raw=>loginFrames.push(decodeFrame(raw)),close(){this.readyState=3;}};
+  await handler.onMessage(active,encodeFrame(SEND.ROOM_LOGIN,{userId:1,userToken:'token-1',deviceId:'browser',roomId:table.roomId}));
+  const liveSession=registry.session(active);assert.ok(liveSession);assert.equal(loads,1);
   const gameServer = http.createServer();
   const sockets = new WebSocketServer({ server: gameServer });
   const errors = [];
@@ -69,6 +75,10 @@ test("op29 uses authenticated shared proof query without joining, charging or st
   assert.deepEqual(table.members.map((member) => [member.uid, member.point]), before);
   assert.equal(table.observers.length, 1);
   assert.equal(persists, 0);
+  assert.equal(loads,1,'proof queries never load a second player wallet');
+  assert.equal(registry.session(active),liveSession);assert.equal(registry.sessions.size,1);
+  assert.equal(active.readyState,1);assert.equal(loginFrames.some(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT),false);
+  assert.equal(await gameSessions.verify(liveSession),true,'proof requests and their close events never touch the primary lease');
   assert.deepEqual(errors, []);
 
   // Common socket routing also serves the list and ranking panel.
