@@ -203,14 +203,14 @@ for (const type of [19, 25]) {
     assert.equal(f.table.roomFeatures.totalHands, 6);
   });
 
-  test(type + ": the last seated human's leaving fold counts its settlement as hand one", async (t) => {
+  test(type + ": the last seated human's disconnected fold counts its settlement as hand one", async (t) => {
     const f = await fixture(t, type);
     f.bots();
     f.table.members = f.table.members.slice(0, 1);
     await f.join();
     f.game.sit(f.table, f.session, f.ctx, { pos: 1, buyIn: 200 });
     f.game.startRound(f.ctx);
-    await f.leave();
+    await f.handler.onClose(f.ws);
     assert.equal(f.table.hand, null);
     assert.equal(f.table.roomFeatures.totalHands, 1);
     assert.equal(f.table.emptySinceHands, 0);

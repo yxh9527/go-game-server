@@ -15,10 +15,11 @@ import { createHandler } from "../../game-server/src/create-handler.js";
 import { createRegistry } from "../../game-server/src/registry.js";
 import { createRoomLogic } from "../../hall/src/rooms.js";
 import * as hallDecode from "../../hall/src/decode.js";
+import {adaptHundredCleanupResponse} from '../../client-web/src/hundred-cleanup-response.js';
 
 const main = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/main/index.88f4e.js", import.meta.url), "utf8");
 const holdem = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/Holdem/index.55219.js", import.meta.url), "utf8");
-const multyBet = fs.readFileSync(new URL("../../static/client/2.0.1279/assets/BairenMultyBet/index.74b50.js", import.meta.url), "utf8");
+const multyBet = adaptHundredCleanupResponse(fs.readFileSync(new URL("../../static/client/2.0.1279/assets/BairenMultyBet/index.74b50.js", import.meta.url), "utf8"));
 function method(bundle, anchor, next, globals = {}) {
   const start = bundle.indexOf(anchor);
   const end = bundle.indexOf(next, start);
@@ -85,7 +86,7 @@ test("original Bairen socket selector and unsubscribe complete for ordinary room
   }
 });
 
-test("original holdem exit handler returns observers and seated players to the API hall", async () => {
+test("original holdem exit handler returns observers after seated players stand first", async () => {
   for (const seated of [false, true]) {
     const registry = createRegistry();
     const game = new HoldemGame();
@@ -98,7 +99,7 @@ test("original holdem exit handler returns observers and seated players to the A
     const ws = { readyState: 1, send(frame) { received.push(decodeFrame(frame)); } };
     registry.bind(ws, session);
     const handler = await createHandler({ hotVersion: "client-exit", registry, configs: [], findConfig: () => null,
-      wallet: { async persist() {} }, log: { info() {}, error() {} },
+      wallet: { async persist() {},credit(player,amount){player.wallet+=amount;return {ok:true};} }, log: { info() {}, error() {} },
     });
     let returnedToHall = 0;
     const globals = {
@@ -112,6 +113,11 @@ test("original holdem exit handler returns observers and seated players to the A
     };
     room.levelRoom = method(holdem, "aI['prototype']['levelRoom']=", ",aI['prototype']['updateBlindDispalyInfo']=", globals);
     const exit = method(holdem, "aI['prototype']['userLevelRoom']=", ",aI['prototype']['userLevelRoomData']=", globals);
+    if(seated){
+      await handler.onMessage(ws,encodeFrame(SEND.SEND_LEVEL_OUT));
+      assert.equal(received.some(frame=>frame.msgid===PUSH.USER_LEVEL_ROOM),false);
+      await handler.onMessage(ws,encodeFrame(SEND.SEND_NEXT_ROUND_STANDUP));
+    }
     await handler.onMessage(ws, encodeFrame(SEND.SEND_LEVEL_OUT));
     for (const frame of received) if (frame.msgid === PUSH.USER_LEVEL_ROOM) exit.call(room, frame.payload);
     assert.equal(returnedToHall, 1, seated ? "seated player returns" : "observer returns");

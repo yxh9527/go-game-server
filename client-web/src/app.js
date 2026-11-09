@@ -12,6 +12,8 @@ const CLIENT_DEV_PATCH = env.isDev
 const { adaptScratchMultiResponse } = await rel(import.meta.url, './scratch-multi-response.js', v);
 const { adaptHoldemReplayResponse } = await rel(import.meta.url, './holdem-replay-response.js', v);
 const { adaptPlayerPanelResponse } = await rel(import.meta.url, './player-panel-response.js', v);
+const { adaptRoomUiResponse } = await rel(import.meta.url, './room-ui-response.js', v);
+const { adaptHundredCleanupResponse } = await rel(import.meta.url, './hundred-cleanup-response.js', v);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");
@@ -82,9 +84,21 @@ export function createClientApp() {
     const file=path.join(mainDir,name);let modified=-1,adapted;
     app.get(['/'+version+'/assets/main/'+name,'/assets/main/'+name],(_req,res)=>{
       const current=fs.statSync(file).mtimeMs;
-      if(current!==modified){adapted=adaptPlayerPanelResponse(adaptHoldemReplayResponse(fs.readFileSync(file,'utf8')));modified=current;}
+      if(current!==modified){adapted=adaptHundredCleanupResponse(adaptRoomUiResponse(adaptPlayerPanelResponse(adaptHoldemReplayResponse(fs.readFileSync(file,'utf8')))));modified=current;}
       res.set('Cache-Control','no-store').type('js').send(adapted);
     });
+  }
+
+  for(const bundle of ['Zjh','Qznn','Bairen','BairenMultyBet']){
+    const bundleDir=path.join(clientDir,'assets',bundle);
+    if(fs.existsSync(bundleDir))for(const name of fs.readdirSync(bundleDir).filter(file=>/^index\.[^.]+\.js$/.test(file))){
+      const file=path.join(bundleDir,name);let modified=-1,adapted;
+      app.get(['/'+version+'/assets/'+bundle+'/'+name,'/assets/'+bundle+'/'+name],(_req,res)=>{
+        const current=fs.statSync(file).mtimeMs;
+        if(current!==modified){adapted=adaptHundredCleanupResponse(adaptRoomUiResponse(fs.readFileSync(file,'utf8')));modified=current;}
+        res.set('Cache-Control','no-store').type('js').send(adapted);
+      });
+    }
   }
 
   const multiDir = path.join(clientDir, 'assets/MultyBet');

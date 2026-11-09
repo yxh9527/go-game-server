@@ -9,10 +9,12 @@ import { clientVersion, createClientApp, langModuleFiles } from "../../client-we
 import { CLIENT_DEV_PATCH } from "../../cache/client-web/dev-patch.js";
 import {adaptHoldemReplayResponse} from '../../client-web/src/holdem-replay-response.js';
 import {adaptPlayerPanelResponse} from '../../client-web/src/player-panel-response.js';
+import {adaptRoomUiResponse} from '../../client-web/src/room-ui-response.js';
+import {adaptHundredCleanupResponse} from '../../client-web/src/hundred-cleanup-response.js';
 
 test('main script serves the spectator replay fix at both routes without rewriting original static assets',async()=>{
   const file=new URL('../../static/client/2.0.1279/assets/main/index.88f4e.js',import.meta.url);
-  const original=fs.readFileSync(file,'utf8'),expected=adaptPlayerPanelResponse(adaptHoldemReplayResponse(original));
+  const original=fs.readFileSync(file,'utf8'),expected=adaptHundredCleanupResponse(adaptRoomUiResponse(adaptPlayerPanelResponse(adaptHoldemReplayResponse(original))));
   assert.notEqual(expected,original);assert.equal(adaptHoldemReplayResponse(expected),expected);
   assert.equal(adaptHoldemReplayResponse('unrelated bundle'),'unrelated bundle');
   const server=http.createServer(createClientApp());await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -24,6 +26,34 @@ test('main script serves the spectator replay fix at both routes without rewriti
     }
     assert.equal(fs.readFileSync(file,'utf8'),original);
   }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
+test('Zjh script serves a clean inning diagnostic without rewriting original static assets',async()=>{
+  const file=new URL('../../static/client/2.0.1279/assets/Zjh/index.df153.js',import.meta.url);
+  const original=fs.readFileSync(file,'utf8'),server=http.createServer(createClientApp());
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+server.address().port+'/2.0.1279/assets/Zjh/index.df153.js');
+    const source=await response.text();
+    assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+    assert.ok(source.includes("console['log']('----------',az)"));
+    assert.ok(!source.includes("console['error']('----------',az)"));
+    assert.equal(fs.readFileSync(file,'utf8'),original);
+  }finally{await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
+
+test('Bairen host initialization keeps diagnostics without reporting every ordinary entry as an error',async()=>{
+  const file=new URL('../../static/client/2.0.1279/assets/Bairen/index.85029.js',import.meta.url);
+  const original=fs.readFileSync(file,'utf8'),expected=adaptHundredCleanupResponse(adaptRoomUiResponse(original)),server=http.createServer(createClientApp());
+  assert.notEqual(expected,original);new vm.Script(expected);
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    for(const route of ['/2.0.1279/assets/Bairen/index.85029.js','/assets/Bairen/index.85029.js']){
+      const response=await fetch('http://127.0.0.1:'+server.address().port+route);
+      assert.equal(response.status,200);assert.equal(await response.text(),expected);
+    }
+    assert.equal(fs.readFileSync(file,'utf8'),original);
+  }finally{await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
 test("client version reads static/client", () => {
@@ -146,9 +176,9 @@ test("hundred-game cleanup does not block ordinary room exit without a hundred d
   const intervalCallbacks = [];
   let cleanupCalls = 0;
   class BairenMultyBetViewModel {
-    sendUnregRoomsReq() {
+    sendUnregRoomsReq(message) {
       cleanupCalls += 1;
-      return Promise.reject(new Error("当前没有hundredDomain百人服地址, 无法连接百人服"));
+      return Promise.reject(new Error(message||"当前没有hundredDomain百人服地址, 无法连接百人服"));
     }
   }
   const classes = { BairenMultyBetViewModel };
@@ -184,8 +214,10 @@ test("hundred-game cleanup does not block ordinary room exit without a hundred d
   vm.runInNewContext(patch, context);
   for (const callback of intervalCallbacks) callback();
   await BairenMultyBetViewModel.prototype.sendUnregRoomsReq();
+  assert.equal(await BairenMultyBetViewModel.prototype.sendUnregRoomsReq("当前无可用房间服"),0);
+  await assert.rejects(BairenMultyBetViewModel.prototype.sendUnregRoomsReq("unexpected failure"),/unexpected failure/);
 
-  assert.equal(cleanupCalls, 1);
+  assert.equal(cleanupCalls, 3);
 });
 
 test("observer snapshot enables the client's gated empty-seat request", () => {

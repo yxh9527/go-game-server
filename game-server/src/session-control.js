@@ -93,7 +93,7 @@ export function createSessionControl(runtime, { send, close, kickId }) {
         const primary = existing.length === 1 && existing[0][1];
         const host = primary && runtime.registry.getTable(primary.roomId, primary.agentId, primary.gameId);
         const localPaired = primary && !primary.superseded && primary.loginRole !== 'hundred' && host?.kind === 'normal'
-          && [19, 25, 24, 31, 26].includes(Number(host.roomType)) && primary.inRoom === true
+          && [19, 24, 25, 26, 27, 28, 30, 31, 32].includes(Number(host.roomType)) && primary.inRoom === true
           && primary.loginIdentity === session.loginIdentity && Number(primary.roomId) === Number(session.roomId);
         const paired=lease?lease.role==='hundred':localPaired;
         session.loginRole = paired ? 'hundred' : 'primary';

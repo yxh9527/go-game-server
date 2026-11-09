@@ -77,6 +77,44 @@ try{
   assert.equal(frames.filter(f=>f.direction==='received'&&f.msgid===PUSH.USER_LOGIN_KICKOUT).length,0,'repeated fair-code queries never revoke the native sockets');
   assert.equal(frames.filter(f=>f.direction==='sent'&&f.msgid===1105).length,2,'queries do not introduce player logins');
   assert.equal(await evaluate(`cc.director.getScene().name`,gameTarget),expectedScene);
+  if(process.argv.includes('--seated-exit-policy')){
+    await evaluate("cc.app.gameRoom.dispatchEventAll('HideAllPopupPanel');true",gameTarget);
+    const menu="(()=>{const roots=[cc.director.getScene(),...Object.values(cc.game._persistRootNodes)];return roots.flatMap(n=>n.getComponentsInChildren(cc.Component)).find(c=>c.node.activeInHierarchy&&typeof c.onExitRoomClick==='function'&&typeof c.onToggleNextStandUp==='function');})()";
+    assert.ok(await evaluate("(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>typeof c.clickSeatDown==='function'),nodes=[];function walk(n){if(Number.isInteger(n.seatIndex)&&n.activeInHierarchy&&n.getComponent(cc.Button)?.interactable)nodes.push(n);n.children.forEach(walk);}if(!c)return false;walk(c.node);if(!nodes.length)return false;c.clickSeatDown({target:nodes[0]});return true;})()",gameTarget),'native available seat');
+    await delay(500);
+    assert.ok(await evaluate("(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&c._curdata&&typeof c.onDaiRuClick==='function');if(!c)return false;c._carryReqCount=100;c.onDaiRuClick();return true;})()",gameTarget),'native carry-in');
+    await delay(1000);
+    for(let i=0;i<180;i++){
+      if(await evaluate("!!cc.app.gameRoom.getMyMemberInfo()&&cc.app.gameRoom.getIsJoinGame("+uid+")",gameTarget))break;
+      await delay(500);
+    }
+    assert.ok(await evaluate("!!cc.app.gameRoom.getMyMemberInfo()&&cc.app.gameRoom.getIsJoinGame("+uid+")",gameTarget),'player actually participates in a live hand');
+    await evaluate("(()=>{const u=__require('GameUtils').default,old=u.showMoveTips;window.__exitTip='';u.showMoveTips=function(text){window.__exitTip=text;return old.apply(this,arguments);};return true;})()",gameTarget);
+    const start=frames.length;
+    await evaluate("(()=>{const c="+menu+";if(!c)return false;c.onExitRoomClick();return true;})()",gameTarget);await delay(400);
+    assert.equal(frames.slice(start).some(f=>f.direction==='sent'&&f.msgid===2110),false,'native exit does not send a room-leave request while seated');
+    assert.ok((await evaluate("window.__exitTip",gameTarget)).includes('下局站起'));
+    await evaluate("__require('SocketMgr').default.instance.send(2110);true",gameTarget);await delay(500);
+    assert.ok(frames.slice(start).some(f=>f.direction==='received'&&f.msgid===9999&&f.payload.errorMsg.includes('下局站起')),'server also rejects direct/bypassed exits');
+    assert.ok(await evaluate("!!cc.app.gameRoom.getMyMemberInfo()",gameTarget));
+    await evaluate("(()=>{const c="+menu+";c.onToggleNextStandUp();return true;})()",gameTarget);await delay(500);
+    assert.ok(frames.slice(start).some(f=>f.direction==='received'&&f.msgid===2225&&f.payload===true),'next-round standing is acknowledged');
+    for(let i=0;i<240;i++){
+      if(!await evaluate("!!cc.app.gameRoom.getMyMemberInfo()",gameTarget))break;
+      await evaluate("(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&typeof c.onQiPaiClick==='function'&&c.actionBtns?.activeInHierarchy);if(c)c.onQiPaiClick();return true;})()",gameTarget);
+      await delay(500);
+    }
+    assert.equal(await evaluate("!!cc.app.gameRoom.getMyMemberInfo()",gameTarget),false,'settlement stands the player without leaving the room');
+    assert.equal(await evaluate("cc.director.getScene().name",gameTarget),expectedScene);
+    assert.equal(frames.slice(start).some(f=>f.direction==='received'&&f.msgid===2205&&f.payload.uid===uid),false,'standing does not imply room exit');
+    await evaluate("(()=>{const c="+menu+";c.onExitRoomClick();return true;})()",gameTarget);
+    for(let i=0;i<60;i++){
+      if(frames.slice(start).some(f=>f.direction==='received'&&f.msgid===2205&&f.payload.uid===uid))break;
+      await delay(250);
+    }
+    assert.ok(frames.slice(start).some(f=>f.direction==='received'&&f.msgid===2205&&f.payload.uid===uid),'observer can explicitly leave after standing');
+    assert.equal(errors.length,0);console.log('PASS_SEATED_EXIT_POLICY',JSON.stringify({scene:expectedScene,nativeExitBlocked:true,serverExitBlocked:true,stoodAfterSettlement:true,exitAfterStanding:true}));
+  }
   let playerPanelCheck;
   if(process.argv.includes('--player-panel')){
     await evaluate("cc.app.gameRoom.dispatchEventAll('HideAllPopupPanel');true",gameTarget);

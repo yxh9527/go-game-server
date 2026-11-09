@@ -80,6 +80,15 @@ for (const roomType of [19, 25]) {
       credits.length = 0;
 
       await handler.onMessage(ws, encodeFrame(SEND.SEND_LEVEL_OUT));
+      if(["pending-carry","funded"].includes(state)){
+        assert.equal(session.inRoom,true,'seated users must stand before explicit room exit');
+        assert.ok(received.some(frame=>frame.msgid===9999));
+        assert.equal(received.some(frame=>frame.msgid===PUSH.USER_LEVEL_ROOM),false);
+        await handler.onMessage(ws,encodeFrame(SEND.SEND_NEXT_ROUND_STANDUP));
+        assert.equal(table.members.some(member=>member.uid===58),false);
+        received.length=peerReceived.length=0;
+        await handler.onMessage(ws,encodeFrame(SEND.SEND_LEVEL_OUT));
+      }
 
       const expected = { roomId: table.roomId, uid: 58, type: 1 };
       assert.deepEqual(received.filter((frame) => frame.msgid === PUSH.USER_LEVEL_ROOM).map((frame) => frame.payload), [expected]);
@@ -121,7 +130,7 @@ for (const roomType of [19, 25]) {
   }
 }
 
-test("concurrent exits share cash-out across hot reload and wait before acknowledging", async () => {
+test("disconnect cash-out and concurrent exit retries share cleanup across hot reload", async () => {
   const registry = createRegistry();
   const table = createTexasTable(700014, 19, { carry_min: 500 });
   table.members.push({ uid: 60, pos: 0, point: 500, name: "player", state: 1 });
@@ -144,7 +153,7 @@ test("concurrent exits share cash-out across hot reload and wait before acknowle
     }, async persist() {} }, log: { info() {}, error() {} },
   };
   const handler = await createHandler(runtime);
-  const first = handler.onMessage(ws, encodeFrame(SEND.SEND_LEVEL_OUT));
+  const first = handler.onClose(ws);
   const duplicate = handler.onMessage(ws, encodeFrame(SEND.SEND_LEVEL_OUT));
   await creditStarted;
   runtime.hotVersion = "exit-concurrent-after";

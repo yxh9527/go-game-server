@@ -690,6 +690,9 @@ export async function createHandler(runtime) {
         const body = payload || {};
         const roomId = Number(body.roomId || session.roomId);
         const roomType = Number(body.roomType || 0);
+        const source=runtime.registry.getTable(session.roomId,session.agentId,session.gameId);
+        if(session.inRoom!==false&&source&&(Number(source.roomId)!==roomId||roomType&&Number(source.roomType)!==roomType)
+          &&rejectSeatedExit(ws,session,source,gameOf(source.roomType)))return;
         const table = ensureTable(roomId, roomType, session.agentId);
         if (!table) {
           send(ws, PUSH.ROOM_DISSMISS, { roomId });
@@ -774,6 +777,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (msgid === SEND.SEND_LEVEL_OUT) {
+      if(rejectSeatedExit(ws,session,table,game))return;
       await leaveTable(ws, session, table, game);
       return;
     }
@@ -811,7 +815,8 @@ export async function createHandler(runtime) {
       await expireRoom(table);
     }
     if (handled && game.kind === "normal") pool.expand();
-    if (handled && ([SEND.GGL_BUY, SEND.GGL_PURCHASE, SEND.SEND_CARRY_SCORE, SEND.SEND_STANDUP].includes(msgid))) {
+    const nextStandReleased=msgid===SEND.SEND_NEXT_ROUND_STANDUP&&!table.members?.some(m=>m.uid===session.userId);
+    if (handled && ([SEND.GGL_BUY, SEND.GGL_PURCHASE, SEND.SEND_CARRY_SCORE, SEND.SEND_STANDUP].includes(msgid)||nextStandReleased)) {
       if (messageGame.kind === 'slots') sendWalletPoint(ws, session);
       else { pushPoint(ws, session); await persist(session); }
     }
@@ -819,6 +824,12 @@ export async function createHandler(runtime) {
 
   function sendLeaveResult(ws, session, roomId = session.roomId) {
     send(ws, PUSH.USER_LEVEL_ROOM, { roomId, uid: session.userId, type: 1 });
+  }
+
+  function rejectSeatedExit(ws,session,table,game) {
+    if(game?.canExitRoom?.(table,session)!==false)return false;
+    send(ws,9999,{msgCode:0,errorMsg:'请先点击“下局站起”，离桌后再退出牌局'});
+    return true;
   }
 
   function leaveTable(ws, session, table, game) {

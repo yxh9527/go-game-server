@@ -71,7 +71,10 @@ test('Zjh binary flow: spectator, seat, carry, circle, reconnect, hot reload, se
   await act(ZJH_OP.COMPARE, { targetUid: peers.find((p) => p.uid !== hand.actorUid && p.uid !== 199).uid, operationData: 0 });
   assert.ok(table.hand.comparisonPause, 'comparison animation precedes settlement');
   await request(actor, SEND.SEND_LEVEL_OUT);
-  assert.ok(table.members.find(p => p.uid === actor.uid).pendingDeparture);
+  assert.equal(registry.session(actor.ws).inRoom,true);
+  assert.equal(table.members.find(p => p.uid === actor.uid).pendingDeparture,undefined);
+  await request(actor,SEND.SEND_NEXT_ROUND_STANDUP);
+  assert.equal(table.members.find(p=>p.uid===actor.uid).standAfterRound,true);
   assert.ok(!actor.messages.some(m => m.msgid === ZJH_PUSH.INNING_RESULT));
   runtime.hotVersion = 'zjh-comparing';
   handler = await createHandler(runtime);
@@ -89,7 +92,10 @@ test('Zjh binary flow: spectator, seat, carry, circle, reconnect, hot reload, se
   assert.ok(handler.getDevHoldemRecordDetail(table.roomId, 1, 199, 7));
   assert.equal(handler.getDevHoldemRecordDetail(table.roomId, 1, 999, 7), null);
   assert.equal(handler.getDevHoldemRecordDetail(table.roomId, 1, 199, 8), null);
-  for (const peer of peers) await request(peer, SEND.SEND_LEVEL_OUT);
+  for (const peer of peers) {
+    await request(peer,SEND.SEND_NEXT_ROUND_STANDUP);
+    await request(peer, SEND.SEND_LEVEL_OUT);
+  }
   assert.equal(peers.reduce((sum, p) => sum + registry.session(p.ws).wallet, 0), 30000);
   assert.equal(table.members.length, 0);
   assert.equal(table.observers.length, 0);

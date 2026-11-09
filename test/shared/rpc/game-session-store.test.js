@@ -3,6 +3,22 @@ import test from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createGameSessionStore,createInMemoryGameSessionBackend,GAME_SESSION_SCRIPT,GAME_SESSION_TTL_MS} from '../../../shared/rpc/game-session-store.js';
 
+test('auxiliary pairing covers all seat games across nodes and still fences a replacement device',async()=>{
+ for(const roomType of [19,24,25,26,27,28,30,31,32]){
+  const backend=createInMemoryGameSessionBackend(),a=createGameSessionStore({backend,instanceId:'main'}),b=createGameSessionStore({backend,instanceId:'aux'});
+  const main={agentId:7,userId:42,roomId:700000+roomType,roomType,inRoom:true,loginId:'main',socketId:'primary'};
+  await a.claim(main,{identity:'same-device'});await a.updateRoom(main,{roomType});
+  const aux={...main,inRoom:false,roomType:undefined,loginId:'aux',socketId:'secondary'};
+  const pair=await b.claim(aux,{identity:'same-device',allowPair:true});aux.loginId=pair.loginId;
+  assert.equal(pair.role,'hundred','room type '+roomType);
+  assert.equal(await a.verify(main),true);assert.equal(await b.verify(aux),true);
+  const next={...main,loginId:'new-device',socketId:'replacement'};
+  await b.claim(next,{identity:'different-device',allowPair:true});
+  assert.equal(await a.verify(main),false);assert.equal(await b.verify(aux),false);assert.equal(await b.verify(next),true);
+  await a.close();await b.close();
+ }
+});
+
 test('distributed lease store fences replacements and only admits a matching hundred overlay',async()=>{
  const backend=createInMemoryGameSessionBackend(),a=createGameSessionStore({backend,instanceId:'a'}),b=createGameSessionStore({backend,instanceId:'b'});
  const revoked=[];a.subscribe(message=>revoked.push(JSON.parse(message)));

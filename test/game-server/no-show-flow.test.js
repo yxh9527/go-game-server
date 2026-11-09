@@ -79,7 +79,10 @@ test('no-show binary flow shares seats, buy-in, settlement, replay and exit acro
   assert.equal(history.playBackList[0].firstGameList.length, 2);
   assert.ok(history.playBackList[0].firstGameList.every((p) => p.showCards.every((c) => c === -1)));
   assert.equal(table.roomFeatures.totalHands, 1);
-  for (const peer of peers) await request(peer, SEND.SEND_LEVEL_OUT);
+  for (const peer of peers) {
+    await request(peer,SEND.SEND_NEXT_ROUND_STANDUP);
+    await request(peer, SEND.SEND_LEVEL_OUT);
+  }
   assert.equal(peers.reduce((sum, p) => sum + registry.session(p.ws).wallet, 0), 30000);
   assert.equal(table.members.length, 0);
   assert.equal(table.observers.length, 0);

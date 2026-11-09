@@ -290,7 +290,7 @@ export class SeatGame extends GameBase {
     if (!member) {
       return;
     }
-    if (this.holdSeatUntilRoundEnd(table, member)) {
+    if (this.isUnsettledParticipant(table, session.userId) || this.holdSeatUntilRoundEnd(table, member)) {
       member.standAfterRound = true;
       ctx.send(PUSH.NEXT_ROUND_STANDUP_RES, true);
       return;
@@ -311,6 +311,22 @@ export class SeatGame extends GameBase {
   afterSit(_table, _member, _session) {}
 
   holdSeatUntilRoundEnd(_table, _member) { return false; }
+
+  isUnsettledParticipant(table, uid) {
+    const hand=table.hand;
+    if(!hand||hand.settled)return false;
+    const players=hand.statsPlayers||hand.participants||hand.players||table.members.filter(m=>m.hole?.length);
+    return players.some(p=>Number(p.uid??p.member?.uid)===Number(uid));
+  }
+
+  canExitRoom(table, session) {
+    // Tournament disconnect/spectating follows match's existing seat policy.
+    if(table.mtt||Number(table.roomType)===101)return true;
+    // Explicit room exit is available after standing, including for players
+    // who folded but still own a chair. Disconnect/replacement cleanup still
+    // uses onLeave and must retain its existing settlement responsibility.
+    return !table.members.some(member=>Number(member.uid)===Number(session.userId));
+  }
 
   onCarryOut(ctx) {
     const { table, session, body } = ctx;
@@ -524,7 +540,8 @@ export class SeatGame extends GameBase {
       if (member) {
         member.standAfterRound = !member.standAfterRound;
         ctx.send(PUSH.NEXT_ROUND_STANDUP_RES, member.standAfterRound);
-        if (member.standAfterRound && !ctx.table.hand) this.onStandUp(ctx);
+        if (member.standAfterRound && !this.isUnsettledParticipant(ctx.table, member.uid)
+          && !this.holdSeatUntilRoundEnd(ctx.table, member)) this.onStandUp(ctx);
       }
       return true;
     }

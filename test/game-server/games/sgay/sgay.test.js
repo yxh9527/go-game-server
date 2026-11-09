@@ -213,9 +213,11 @@ test('wire login stays observing, immediate seat reserves 12s, cancel/timeout an
   assert.equal(session.carryAmount,10000);
   table.members.push({uid:88,pos:6,name:'peer',point:10000,state:2});
   const game=handler.games.byRoomType.get(32);engine.begin({broadcast(){},env:'dev'},table,now);
-  await send(2110);assert.equal(session.wallet,50000);assert.ok(table.members.find(m=>m.uid===77).pendingDeparture);
+  await send(2110);assert.equal(session.wallet,50000);assert.equal(session.inRoom,true);
+  assert.equal(table.members.find(m=>m.uid===77).pendingDeparture,undefined);
+  await send(5007);assert.equal(table.members.find(m=>m.uid===77).standAfterRound,true);
   const io={broadcast(){},env:'dev'};engine.tick(io,table,table.hand.deadline);engine.tick(io,table,table.hand.deadline);engine.tick(io,table,table.hand.deadline);
-  const point=table.members.find(m=>m.uid===77).point;await game.afterRound({table,io,runtime});
+  const point=table.members.find(m=>m.uid===77).point;await game.afterRound({table,io,runtime,session});
   assert.equal(session.wallet,40000+point);assert.ok(!table.members.some(m=>m.uid===77));
   assert.ok(handler.getDevHoldemRecordDetail(table.roomId,1,77,9));
   assert.equal(handler.getDevHoldemRecordDetail(table.roomId,1,78,9),null);

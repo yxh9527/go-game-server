@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 export const GAME_SESSION_CHANNEL='gogame:game-session:v1';
-export const GAME_SESSION_STORE_VERSION='native-sockets-2';
+export const GAME_SESSION_STORE_VERSION='native-sockets-3';
 export const GAME_SESSION_TTL_MS=30000;
 export const GAME_SESSION_OPERATION_TTL_MS=30000;
 const UNLOCK_SCRIPT="if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
@@ -25,10 +25,12 @@ end
 if action=='claim' then
   local latest=tonumber(redis.call('GET',KEYS[3]) or '0')
   if tonumber(input.attempt or 0)<latest then return cjson.encode({ok=false,stale=true}) end
+  -- Native seat-game hosts may open an auxiliary even without a hundred panel.
   if input.allowPair and old and old.primary and old.primary.inRoom
     and old.primary.identity==input.identity and old.primary.roomId==input.roomId
     and (old.primary.roomType==19 or old.primary.roomType==24 or old.primary.roomType==25
-      or old.primary.roomType==26 or old.primary.roomType==31) and #old.paired==0 then
+      or old.primary.roomType==26 or old.primary.roomType==27 or old.primary.roomType==28
+      or old.primary.roomType==30 or old.primary.roomType==31 or old.primary.roomType==32) and #old.paired==0 then
     input.loginId=old.loginId
     input.generation=old.generation
     input.role='hundred'
@@ -141,7 +143,7 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
     if(action==='claim'){
       if(Number(extra.attempt||0)<(backend.sequences.get('attempt:'+Number(session.userId))||0))return{ok:false,stale:true};
       if(extra.allowPair&&old?.primary?.inRoom&&old.primary.identity===extra.identity&&old.primary.roomId===extra.roomId
-        &&[19,24,25,26,31].includes(old.primary.roomType)&&old.paired.length===0){
+        &&[19,24,25,26,27,28,30,31,32].includes(old.primary.roomType)&&old.paired.length===0){
         old.paired.push({...input,role:'hundred'});old.expiresAt=Date.now()+ttlMs;return{ok:true,loginId:old.loginId,generation:old.generation,role:'hundred'};
       }
       const generation=(backend.sequences.get(key)||0)+1;backend.sequences.set(key,generation);

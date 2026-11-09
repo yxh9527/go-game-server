@@ -43,7 +43,8 @@ test('cash games reject another cash entry until carry is released, then enter a
     const start = f.messages.length;
     await f.join(type === 19 ? 25 : 19);
     assert.equal(f.session.roomId, old.roomId, 'a funded chair logically excludes other cash games');
-    assert.ok(f.messages.some(m => m.msgid === 9999 && /带入/.test(m.payload.errorMsg)));
+    assert.ok(f.messages.some(m => m.msgid === 9999 && /下局站起/.test(m.payload.errorMsg)));
+    await f.request(5007, {});
     await f.request(2110, {});
     const target = await f.join(type === 19 ? 25 : 19);
     assert.ok(!old.members.some(m => m.uid === f.session.userId));
@@ -64,6 +65,7 @@ test('cash games reject another cash entry until carry is released, then enter a
 test('failed release persistence blocks destination and retries across hot reload without money movement', async () => {
   const f = await fixture(), old = await f.join(19);
   await f.carry(old);
+  await f.request(5007, {});
   const targetId = f.row(25).game_room_config_id * 10000;
   let credits = 0, failPersist = true;
   const credit = f.wallet.credit.bind(f.wallet), persist = f.wallet.persist.bind(f.wallet);
@@ -93,6 +95,7 @@ test('concurrent target joins serialize and do not leave duplicate observers or 
   f.wallet.credit = async (...args) => { credits++; await new Promise(resolve => setImmediate(resolve)); return credit(...args); };
   await Promise.all([f.request(2102, { roomId: a, roomType: 25 }), f.request(2102, { roomId: b, roomType: 24 })]);
   assert.equal(f.session.roomId, old.roomId);
+  await f.request(5007, {});
   await f.request(2110, {});
   await Promise.all([f.request(2102, { roomId: a, roomType: 25 }), f.request(2102, { roomId: b, roomType: 24 })]);
   assert.equal(credits, 0); assert.equal(f.session.roomId, b); assert.equal(f.session.wallet, 100000);
@@ -100,7 +103,7 @@ test('concurrent target joins serialize and do not leave duplicate observers or 
   assert.equal(tables.length, 1); assert.equal(tables[0].roomId, b);
 });
 
-test('unsettled Niuniu chips remain on the original hand after switching, and settle only once', async () => {
+test('unsettled Niuniu chips cannot leave by exit or switching and stand only after settlement', async () => {
   const f = await fixture(), old = await f.join(24); await f.carry(old);
   const actor = old.members.find(m => m.uid === f.session.userId), funded = actor.point;
   old.members.push({ uid: 990001, pos: 1, point: funded, name: 'bot', bot: true });
@@ -110,13 +113,14 @@ test('unsettled Niuniu chips remain on the original hand after switching, and se
   await f.join(19);
   assert.equal(f.session.roomId, old.roomId, 'funded live hand excludes a second cash table');
   await f.request(2110, {});
-  assert.equal(old.hand, hand); assert.equal(actor.pendingDeparture, true);
+  assert.equal(old.hand, hand); assert.equal(actor.pendingDeparture, undefined);assert.equal(f.session.inRoom,true);
+  await f.request(5007, {});assert.equal(actor.standAfterRound,true);
   assert.equal(actor.point, funded); assert.equal(f.session.wallet, 100000);
   let now = 1000;
   for (let i = 0; old.hand && i < 60; i++) { now += 1000; niuniu.tick(io, old, now); }
   assert.equal(old.hand, null);
   const settled = actor.point;
-  await f.handler.games.byRoomType.get(24).afterRound({ runtime: f.runtime, table: old, io });
+  await f.handler.games.byRoomType.get(24).afterRound({ runtime: f.runtime, session:f.session, table: old, io });
   assert.equal(old.members.some(m => m.uid === f.session.userId), false);
   assert.equal(f.session.wallet, 100000 - funded + settled);
   const balance = f.session.wallet;

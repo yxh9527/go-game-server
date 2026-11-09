@@ -35,6 +35,29 @@ async function join(s, login = credentials) {
   await s.send(SEND.SEND_JOIN_ROOM, { roomType: 19, roomId: login.roomId });
 }
 
+test('all normal seat-game native auxiliary logins preserve the joined main connection locally and across coordination',async()=>{
+ for(const distributed of [false,true])for(const roomType of [19,24,25,26,27,28,30,31,32]){
+  const f=await fixture(distributed),main=f.socket(),aux=f.socket();
+  const cfg=f.runtime.configs.find(row=>Number(row.room_type)===roomType&&Number(row.state??1)===1);
+  assert.ok(cfg,'seed for '+roomType);
+  const login={...credentials,roomId:Number(cfg.game_room_config_id)*10000,openHundredGame:false};
+  await main.send(SEND.ROOM_LOGIN,login);
+  await main.send(SEND.SEND_JOIN_ROOM,{roomType,roomId:login.roomId});
+  const primary=f.runtime.registry.session(main.ws);assert.equal(primary.inRoom,true,'joined '+roomType);
+  await aux.send(SEND.ROOM_LOGIN,login);
+  assert.equal(main.ws.readyState,1,'auxiliary must not kick primary: '+roomType+' distributed='+distributed);
+  assert.equal(main.frames.some(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT),false);
+  assert.equal(f.runtime.registry.session(aux.ws)?.loginRole,'hundred');
+  if(distributed){
+   assert.equal(await f.runtime.bus.gameSessions.verify(primary),true);
+   f.runtime.bus.gameSessions.coordinationVersion='native-sockets-2';
+   await f.reload();
+   assert.equal(await f.runtime.bus.gameSessions.verify(primary),true,'hot update preserves the resident owner');
+   assert.equal(main.ws.readyState,1);assert.equal(aux.ws.readyState,1);
+  }
+ }
+});
+
 test('native initial login keeps its automatic hundred socket when both 1105 payloads omit the game identity and disable the overlay',async()=>{
  const f=await fixture(true),main=f.socket(),overlay=f.socket();
  const login={...credentials,openHundredGame:false};
@@ -177,7 +200,7 @@ test('replacement login and duplicate close release carry once and await persist
   let saves = 0;
   f.runtime.wallet.credit = () => assert.fail('reservation release must never credit the wallet');
   f.runtime.wallet.persist = async () => { saves++; start.resolve(); await finish.promise; };
-  const leaving = old.send(SEND.SEND_LEVEL_OUT);
+  const leaving = f.handler.onClose(old.ws);
   await start.promise;
   await f.reload();
   const replacing = next.send(SEND.ROOM_LOGIN, { ...credentials, userToken: 'session-b' });
@@ -220,7 +243,7 @@ test('cash entry is exclusive while native hundred and multi-slot discovery reta
   const target = f.runtime.configs.find(row => Number(row.room_type) === 25);
   await main.send(SEND.SEND_JOIN_ROOM, { roomType: 25, roomId: Number(target.game_room_config_id) * 10000 });
   assert.equal(session.roomId, oldRoom);
-  assert.ok(main.frames.some(frame => frame.msgid === 9999 && /带入/.test(frame.payload.errorMsg)));
+  assert.ok(main.frames.some(frame => frame.msgid === 9999 && /下局站起/.test(frame.payload.errorMsg)));
   await hundred.send(SEND.ROOM_LOGIN, credentials);
   await hundred.send(SEND.ENTER, { roomType: 50, playMode: 1 });
   assert.equal(main.ws.readyState, 1);
@@ -238,6 +261,7 @@ test('cash entry is exclusive while native hundred and multi-slot discovery reta
   assert.equal(session.wallet, 6000);
   assert.equal(session.carryAmount, 6000);
   assert.equal(session.availableBalance, 0);
+  await main.send(SEND.SEND_NEXT_ROUND_STANDUP);
   await main.send(SEND.SEND_LEVEL_OUT);
   assert.equal(session.wallet, 6000);
   assert.equal(session.carryAmount, 0);

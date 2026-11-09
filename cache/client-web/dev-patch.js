@@ -807,7 +807,9 @@ export const CLIENT_DEV_PATCH = `<script>
       var original = proto.sendUnregRoomsReq;
       proto.sendUnregRoomsReq = function () {
         function ignoreMissingDomain(err) {
-          if (String(err && err.message || err).indexOf("当前没有hundredDomain百人服地址") < 0) throw err;
+          var message = String(err && err.message || err);
+          if (message.indexOf("当前没有hundredDomain百人服地址") < 0 &&
+              message.indexOf("当前无可用房间服") < 0) throw err;
           step("skip hundred cleanup without hundredDomain");
           return 0;
         }
