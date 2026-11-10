@@ -1,0 +1,8 @@
+{
+  "source": "local gogames/data-center/dao/gogame_cash.go",
+  "upstreamAccountLimit": 1024,
+  "simultaneousPayoutAccounts": 65,
+  "settlementCommitted": true,
+  "allPayoutsExactlyOnce": true,
+  "onlineServiceCalled": false
+}

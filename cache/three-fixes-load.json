@@ -1,0 +1,98 @@
+{
+  "scope": "isolated heartbeat plus unchanged-content hot import",
+  "durationSeconds": 120,
+  "clients": 100,
+  "requests": 437900,
+  "reloads": 59,
+  "heapSamples": [
+    {
+      "seconds": 0,
+      "heapBytes": 12630104,
+      "sessions": 100,
+      "requests": 100,
+      "reloads": 0
+    },
+    {
+      "seconds": 10,
+      "heapBytes": 12990264,
+      "sessions": 100,
+      "requests": 21500,
+      "reloads": 4
+    },
+    {
+      "seconds": 20,
+      "heapBytes": 13030960,
+      "sessions": 100,
+      "requests": 42200,
+      "reloads": 9
+    },
+    {
+      "seconds": 30,
+      "heapBytes": 13056024,
+      "sessions": 100,
+      "requests": 80400,
+      "reloads": 14
+    },
+    {
+      "seconds": 40,
+      "heapBytes": 13111240,
+      "sessions": 100,
+      "requests": 120300,
+      "reloads": 19
+    },
+    {
+      "seconds": 50,
+      "heapBytes": 13149552,
+      "sessions": 100,
+      "requests": 160400,
+      "reloads": 24
+    },
+    {
+      "seconds": 60,
+      "heapBytes": 13161584,
+      "sessions": 100,
+      "requests": 199800,
+      "reloads": 29
+    },
+    {
+      "seconds": 70,
+      "heapBytes": 13150168,
+      "sessions": 100,
+      "requests": 239300,
+      "reloads": 34
+    },
+    {
+      "seconds": 80,
+      "heapBytes": 13173280,
+      "sessions": 100,
+      "requests": 279200,
+      "reloads": 39
+    },
+    {
+      "seconds": 90,
+      "heapBytes": 13182560,
+      "sessions": 100,
+      "requests": 318600,
+      "reloads": 44
+    },
+    {
+      "seconds": 100,
+      "heapBytes": 13194272,
+      "sessions": 100,
+      "requests": 358700,
+      "reloads": 49
+    },
+    {
+      "seconds": 110,
+      "heapBytes": 13184488,
+      "sessions": 100,
+      "requests": 398800,
+      "reloads": 54
+    }
+  ],
+  "afterCloseHeapBytes": 12941072,
+  "remainingSessions": 0,
+  "eventLoopP99Ms": 53.313535,
+  "eventLoopMaxMs": 185.204735,
+  "errors": []
+}

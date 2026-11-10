@@ -2,8 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { rel } from "../../game-server/src/rel.js";
+import { rel } from "../../shared/hot-import.js";
 import { env } from "../../shared/rpc/env.js";
+import {installHotResolver} from '../../shared/hot-loader.js';
+installHotResolver();
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
 const CLIENT_DEV_PATCH = env.isDev

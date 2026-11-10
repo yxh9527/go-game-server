@@ -55,7 +55,7 @@ try {
   };
   await Promise.all([send('Page.enable'), send('Runtime.enable'), send('Network.enable')]);
   await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-  const uid=88117759;
+  const uid=Number(process.env.GOGAME_BROWSER_UID)||88117759;
   await send('Page.navigate',{url:'http://lobby.localhost:11042/21/0?userId='+uid+'&userToken=dev-'+uid+'&openId='+uid+'&v=2.0.1279'});
   await delay(8500);
   assert.ok(await evaluate('(()=>{const e=document.querySelectorAll(\'[class*="roomList"] li\')[0];e?.click();return !!e})()'));

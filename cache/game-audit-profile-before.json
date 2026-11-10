@@ -1,0 +1,33 @@
+[
+  {
+    "name": "sss-eight-jokers",
+    "milliseconds": 1954.8404,
+    "options": 3
+  },
+  {
+    "name": "niuniu-five-wildcards",
+    "milliseconds": 28.628299999999854,
+    "type": 31
+  },
+  {
+    "name": "hot-reload-module-cache",
+    "samples": [
+      {
+        "generations": 0,
+        "heapBytes": 4662712
+      },
+      {
+        "generations": 1,
+        "heapBytes": 7850232
+      },
+      {
+        "generations": 4,
+        "heapBytes": 14393912
+      },
+      {
+        "generations": 8,
+        "heapBytes": 23071288
+      }
+    ]
+  }
+]

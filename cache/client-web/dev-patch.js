@@ -199,7 +199,13 @@ export const CLIENT_DEV_PATCH = `<script>
       beginEntry(data);
       step("capture openGame");
       var scene = window.cc && cc.director && typeof cc.director.getScene === "function" && cc.director.getScene();
-      if (scene && scene.name === "webHallOb") deliverOpenGame("capture");
+      if (scene && scene.name === "webHallOb") {
+        hookWebHallOb();
+        var version = entryVersion;
+        // Let the native bubble listener consume the request first. Calling
+        // it here leaves a second native copy cached for the next entry.
+        setTimeout(function () { if (currentEntry(version)) deliverOpenGame("capture"); }, 0);
+      }
     }
   }, true);
 
@@ -385,8 +391,17 @@ export const CLIENT_DEV_PATCH = `<script>
     var Cls = webHallObClass();
     if (!Cls || Cls.__gogameHooked || !Cls.prototype) return;
     Cls.__gogameHooked = true;
+    var origHandle = Cls.handleOpenGame;
+    if (typeof origHandle === "function") Cls.handleOpenGame = function () {
+      var entering = Cls._entering;
+      var result = origHandle.apply(this, arguments);
+      if (!entering && Cls._entering) { cocosTook = true; delivered = true; }
+      return result;
+    };
     var origStart = Cls.prototype.start;
     Cls.prototype.start = function () {
+      if (this.__gogameStarted) return;
+      this.__gogameStarted = true;
       step("WebHallOb.start");
       if (origStart) origStart.apply(this, arguments);
       setTimeout(function () { deliverOpenGame("afterStart"); }, 50);
@@ -447,9 +462,9 @@ export const CLIENT_DEV_PATCH = `<script>
         var ctor = c && c.constructor;
         if (!c || typeof c.start !== "function" || !ctor || typeof ctor.handleOpenGame !== "function") continue;
         if (c.__gogameStarted) continue;
-        c.__gogameStarted = true;
         try {
           c.start();
+          c.__gogameStarted = true;
         } catch (e) {
           step("start err " + e);
         }
@@ -486,6 +501,9 @@ export const CLIENT_DEV_PATCH = `<script>
       deliveryStep("deliver wait WebHallOb");
       return false;
     }
+    var Cls = webHallObClass();
+    var manager = findSceneManager();
+    if (Cls && Cls._entering || manager && manager.isLoadingScene) return false;
     delivered = true;
     var value = msg.value || msg;
     step("deliver handleOpenGame " + reason + " roomId=" + (value && value.joinRoom && value.joinRoom.roomId));

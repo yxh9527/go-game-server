@@ -1,4 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
+import { MAX_FRAME_BYTES } from '../../game-server/src/codec.js';
 
 /**
  * 网页客户端会拼 wss://domain；dev 下大厅用 HTTP，下发页面时改成 ws://。
@@ -6,23 +7,28 @@ import { WebSocket, WebSocketServer } from "ws";
  */
 export function attachGameProxy(server, target, log = console) {
   const upstreamUrl = `ws://${target}`;
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ server, maxPayload: MAX_FRAME_BYTES });
   wss.on("connection", (client) => {
     log.info?.("[hall] game ws proxy connected");
     const pending = [];
-    const upstream = new WebSocket(upstreamUrl);
+    let pendingBytes=0;
+    const upstream = new WebSocket(upstreamUrl,{handshakeTimeout:10000});
     function flush() {
       for (const [data, binary] of pending) {
         upstream.send(data, { binary });
       }
       pending.length = 0;
+      pendingBytes=0;
     }
     client.on("message", (data, isBinary) => {
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data, { binary: isBinary });
         return;
       }
-      pending.push([data, isBinary]);
+      if(pending.length>=64||pendingBytes+data.length>MAX_FRAME_BYTES){
+        pending.length=0;pendingBytes=0;client.close(1008,'Upstream request queue exceeded');upstream.close();return;
+      }
+      pendingBytes+=data.length;pending.push([data, isBinary]);
     });
     upstream.on("open", flush);
     upstream.on("message", (data, isBinary) => {
@@ -31,6 +37,7 @@ export function attachGameProxy(server, target, log = console) {
       }
     });
     const closeBoth = () => {
+      pending.length=0;pendingBytes=0;
       try {
         client.close();
       } catch {
@@ -42,8 +49,9 @@ export function attachGameProxy(server, target, log = console) {
         /* ignore */
       }
     };
-    client.on("close", () => upstream.close());
-    upstream.on("close", () => client.close());
+    const closeCode=code=>code>=1000&&code<=1014&&![1004,1005,1006].includes(code)||code>=3000&&code<=4999?code:1000;
+    client.on("close", (code,reason) => {pending.length=0;pendingBytes=0;upstream.close(closeCode(code),reason);});
+    upstream.on("close", (code,reason) => {pending.length=0;pendingBytes=0;client.close(closeCode(code),reason);});
     client.on("error", closeBoth);
     upstream.on("error", (err) => {
       log.error?.("[hall] game-server proxy", err.message);

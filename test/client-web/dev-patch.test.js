@@ -6,7 +6,7 @@ import { CLIENT_DEV_PATCH } from "../../cache/client-web/dev-patch.js";
 
 // Run the injected adapter with a real message/cache lifecycle and a virtual
 // clock, so a long idle hall and callbacks from earlier entries are exercised.
-function browser({ early = false, handler = true, nativeStart = false } = {}) {
+function browser({ early = false, handler = true, nativeStart = false, nativeMessage = false } = {}) {
   let now = 0;
   let nextTimer = 0;
   let activeScene = { name: "webHallOb" };
@@ -22,13 +22,19 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
   const classes = {};
   class Notify { emitModule() { return 'original-notification'; } }
   function WebHallOb() {}
-  WebHallOb.handleOpenGame = (value) => { opens.push(value); onOpen(value); };
+  WebHallOb.handleOpenGame = (value) => {
+    if(nativeMessage)WebHallOb._entering=true;
+    opens.push(value); onOpen(value);
+  };
   WebHallOb.prototype.start = function () {
     if (!nativeStart) return;
     const cache = window.__webHallEarly.take();
     if (cache?.openGame) WebHallOb.handleOpenGame(cache.openGame.value);
   };
   if (handler) classes.WebHallOb = WebHallOb;
+  if(nativeMessage)listeners.push({type:'message',capture:false,fn:event=>{
+    if(event.data.type==='openGame')WebHallOb.handleOpenGame(event.data.value);
+  }});
   if (nativeStart) activeScene._components = [new WebHallOb()];
   const bundle = {
     loadScene(name, progress, done) {
@@ -85,6 +91,7 @@ function browser({ early = false, handler = true, nativeStart = false } = {}) {
   vm.runInContext(CLIENT_DEV_PATCH.replace(/^<script>\s*/, "").replace(/\s*<\/script>$/, ""), context);
   return {
     logs, opens, loaded, runs, loads, window,
+    nativeStart() { activeScene._components[0].start(); },
     requestScene(options) { return new Notify().emitModule('common', 'loading', 'over', options); },
     setScene(name) {
       activeScene = { name };
@@ -133,6 +140,22 @@ test('shared loading notification opens the requested Zjh bundle and retires cal
   page.advance(3000);
   assert.equal(page.runs.length, 1);
   assert.equal(page.loaded.length, count);
+});
+
+test('the native message consumer owns entry before the fallback and is never called twice',()=>{
+  const page=browser({nativeMessage:true});
+  page.open(25010000,25);page.advance(3000);
+  assert.equal(page.opens.length,1,'capture fallback cannot leave a duplicate native request');
+  assert.equal(page.opens[0].joinRoom.roomId,25010000);
+});
+
+test('polling cannot invoke a waiting component start already run by Cocos a second time',()=>{
+  const page=browser({early:true,nativeStart:true});
+  page.setScene('launch');page.open(25010000,25);page.advance(200);
+  page.setScene('webHallOb');
+  page.nativeStart();page.advance(3000);
+  assert.equal(page.logs.filter(line=>line.endsWith('WebHallOb.start')).length,1);
+  assert.equal(page.opens.length,1);
 });
 
 test('hundred entry uses the normal host room returned by hall', () => {
@@ -293,6 +316,7 @@ test("old asynchronous scene loads cannot run after exit or a subsequent entry",
   assert.equal(page.runs.length, 0);
   assert.equal(page.loaded.length, loadedBefore);
   page.open(700001);
+  page.advance(0);
   complete(null, { name: "gameHoldem" });
   assert.equal(page.runs.length, 0, "old completion cannot be adopted by a newer request");
   assert.deepEqual(page.opens.map((value) => value.joinRoom.roomId), [700000, 700001]);

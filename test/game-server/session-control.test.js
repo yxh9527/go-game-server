@@ -76,6 +76,84 @@ test('native initial login keeps its automatic hundred socket when both 1105 pay
  await f.reload();await main.send(SEND.PING);assert.equal(main.ws.readyState,1);
 });
 
+test('completed disconnected accounts release local login fences while pending authentication remains fenced',async()=>{
+  const f=await fixture();
+  for(let uid=880001;uid<880021;uid++){
+    const socket=f.socket();await socket.send(SEND.ROOM_LOGIN,{...credentials,userId:uid});
+    await f.handler.onClose(socket.ws);
+  }
+  assert.equal(f.runtime.sessionControl.latest.size,0);assert.equal(f.runtime.sessionControl.latestKeysByUser.size,0);
+  assert.equal(f.runtime.sessionControl.pendingLogins.size,0);
+  const slow=f.socket(),fast=f.socket(),started=deferred(),finish=deferred();
+  f.runtime.gateway.validateToken=async token=>{if(token==='slow-fence'){started.resolve();await finish.promise;}return true;};
+  const waiting=slow.send(SEND.ROOM_LOGIN,{...credentials,userToken:'slow-fence'});await started.promise;
+  await fast.send(SEND.ROOM_LOGIN,credentials);await f.handler.onClose(fast.ws);
+  assert.equal(f.runtime.sessionControl.latest.size,1,'closing a newer login cannot release the fence of an older pending attempt');
+  finish.resolve();await waiting;
+  assert.equal(f.runtime.registry.session(slow.ws),null);assert.equal(slow.ws.readyState,3);
+  assert.equal(f.runtime.sessionControl.latest.size,0);assert.equal(f.runtime.sessionControl.pendingLogins.size,0);
+});
+
+test('normal primary teardown identifies auxiliary retirement separately from account replacement',async()=>{
+  const f=await fixture(true),main=f.socket(),aux=f.socket();
+  await join(main);await aux.send(SEND.ROOM_LOGIN,credentials);
+  assert.equal(f.runtime.registry.session(aux.ws).loginRole,'hundred');
+  await f.handler.onClose(main.ws);await f.handler.onClose(aux.ws);
+  assert.equal(aux.ws.readyState,3);assert.equal(f.runtime.registry.session(aux.ws),null);
+  assert.deepEqual(aux.frames.find(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT).payload,{reason:'primary-closed',auxiliary:true});
+  const old=f.socket(),other=f.socket();await join(old);
+  await other.send(SEND.ROOM_LOGIN,{...credentials,userToken:'other-device',deviceId:'other-device'});
+  assert.equal(old.frames.find(frame=>frame.msgid===PUSH.USER_LOGIN_KICKOUT).payload,null,'real replacements retain the original kick-out response');
+});
+
+test('late marked auxiliaries can never create or replace a primary session',async()=>{
+  for(const distributed of [false,true]){
+    const f=await fixture(distributed),main=f.socket(),aux=f.socket();
+    await join(main);
+    const owner=f.runtime.registry.session(main.ws),attempt=owner.loginAttempt;
+    await aux.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(main.ws.readyState,1);assert.equal(f.runtime.registry.session(aux.ws).loginRole,'hundred');
+    if(distributed)assert.equal(f.runtime.bus.gameSessions.memoryBackend.sequences.get('attempt:'+credentials.userId),attempt,'an auxiliary does not fence an authenticating primary');
+    await f.handler.onClose(main.ws);await f.handler.onClose(aux.ws);
+    const late=f.socket();await late.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(f.runtime.registry.session(late.ws),null);assert.equal(late.ws.readyState,3);
+    assert.deepEqual(late.frames.find(r=>r.msgid===PUSH.USER_LOGIN_KICKOUT).payload,{reason:'primary-closed',auxiliary:true});
+    const next=f.socket();await join(next,{...credentials,userToken:'new-token',deviceId:'new-device'});
+    const stale=f.socket();await stale.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(next.ws.readyState,1);assert.equal(f.runtime.registry.session(next.ws).loginRole,'primary');
+    assert.equal(f.runtime.registry.session(stale.ws),null);
+  }
+});
+
+test('premature auxiliaries cannot fence a primary still authenticating',async()=>{
+  for(const distributed of [false,true]){
+    const f=await fixture(distributed),main=f.socket(),aux=f.socket(),started=deferred(),finish=deferred();
+    let first=true;
+    f.runtime.gateway.validateToken=async()=>{if(first){first=false;started.resolve();await finish.promise;}return true;};
+    const pending=main.send(SEND.ROOM_LOGIN,credentials);await started.promise;
+    await aux.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(aux.ws.readyState,3);assert.equal(f.runtime.registry.session(aux.ws),null);
+    finish.resolve();await pending;
+    assert.equal(main.ws.readyState,1);assert.equal(f.runtime.registry.session(main.ws)?.loginRole,'primary');
+  }
+});
+
+test('marked auxiliaries may pair during the authenticated pre-join window, but never after explicit room exit',async()=>{
+  for(const distributed of [false,true]){
+    const f=await fixture(distributed),main=f.socket(),aux=f.socket();
+    await main.send(SEND.ROOM_LOGIN,credentials);
+    assert.equal(f.runtime.registry.session(main.ws).inRoom,false);
+    await aux.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(f.runtime.registry.session(aux.ws)?.loginRole,'hundred');
+    assert.equal(main.ws.readyState,1);
+    await main.send(SEND.SEND_JOIN_ROOM,{roomId:credentials.roomId,roomType:19});
+    await main.send(SEND.SEND_LEVEL_OUT);
+    await f.handler.onClose(aux.ws);
+    const late=f.socket();await late.send(SEND.ROOM_LOGIN,{...credentials,auxiliaryOnly:true});
+    assert.equal(f.runtime.registry.session(late.ws),null);assert.equal(main.ws.readyState,1);
+  }
+});
+
 test('hot update upgrades the old private dev coordination store without kicking its valid primary and auxiliary',async()=>{
  const f=await fixture(true),main=f.socket(),overlay=f.socket();
  const login={...credentials,openHundredGame:false};

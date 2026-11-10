@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import {importHotModule} from '../../shared/hot-import.js';
 
 export function watchHot({ dir, extraDirs = [], entry, skip, onReload, log }) {
   let timer = null;
   let loading = false;
   let pending = false;
+  let sequence=0;
 
   async function reload(reason) {
     if (loading) {
@@ -12,10 +14,10 @@ export function watchHot({ dir, extraDirs = [], entry, skip, onReload, log }) {
       return;
     }
     loading = true;
-    const version = Date.now();
+    const version = Date.now()+'-'+(++sequence);
     const url = pathToFileURL(entry).href + `?v=${version}`;
     try {
-      const mod = await import(url);
+      const mod = await importHotModule(url,version);
       await onReload(mod, version, reason);
     } catch (err) {
       log.error("hot reload failed, keep previous module", err);

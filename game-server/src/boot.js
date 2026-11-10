@@ -8,6 +8,7 @@ import { closeRpc, env, initRpc } from "../../shared/rpc/index.js";
 import { watchHot } from "./hot.js";
 import { createRegistry, findConfig } from "./registry.js";
 import { createRpcWallet } from "./wallet/rpcWallet.js";
+import { MAX_FRAME_BYTES } from './codec.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -64,7 +65,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
-    extraDirs: env.isDev ? [path.resolve(here, "../../cache/holdem"), path.resolve(here, "../../cache/zjh"), path.resolve(here, "../../cache/game-server"), path.resolve(here, "../../cache/rpc")] : [],
+    extraDirs: [path.resolve(here,'../../shared'),...(env.isDev ? [path.resolve(here, "../../cache/holdem"), path.resolve(here, "../../cache/zjh"), path.resolve(here, "../../cache/game-server"), path.resolve(here, "../../cache/rpc")] : [])],
     entry: path.join(here, "create-handler.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js") || rel.endsWith("registry.js"),
     onReload: apply,
@@ -87,8 +88,9 @@ async function main() {
       },
     }));
   });
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ server, maxPayload: MAX_FRAME_BYTES });
   wss.on("connection", (ws) => {
+    ws.on('error', error => log.warn?.('[game-server] websocket error', error.message));
     ws.on("message", (data) => {
       Promise.resolve(handler.onMessage(ws, data)).catch((err) => log.error(err));
     });

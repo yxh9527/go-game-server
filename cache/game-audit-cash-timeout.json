@@ -1,0 +1,15 @@
+{
+  "scenario": "upstream-applied-before-timeout",
+  "firstError": "commit applied, response timed out",
+  "afterTimeout": {
+    "balance": 1200,
+    "localSettled": false
+  },
+  "expectedSinglePayoutBalance": 1200,
+  "actualBalance": 1200,
+  "transactionIds": [
+    "tx-74514907-544b-4154-9867-5ffe28c30555"
+  ],
+  "subsequentError": "CASH_CONFIRMATION_REQUIRED",
+  "duplicateCreditObserved": false
+}

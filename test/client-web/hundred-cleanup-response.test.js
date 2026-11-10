@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import http from 'node:http';
 import {createClientApp} from '../../client-web/src/app.js';
-import {adaptHundredCleanupResponse,unregisterHundredRooms,unavailableCleanupSocket} from '../../client-web/src/hundred-cleanup-response.js';
+import {adaptHundredCleanupResponse,unregisterHundredRooms,unavailableCleanupSocket,prepareSocketLogin} from '../../client-web/src/hundred-cleanup-response.js';
 const file=new URL('../../static/client/2.0.1279/assets/BairenMultyBet/index.74b50.js',import.meta.url);
 const original=fs.readFileSync(file,'utf8'),adapted=adaptHundredCleanupResponse(original);
 const protocol={Request:{MB_UNREG_ROOMS_REQ:6124},Response:{MB_UNREG_ROOMS_RES:6225}};
@@ -96,6 +96,54 @@ test('a delayed hundred-exit command is harmless after the native model is relea
   const exit=vm.runInNewContext('('+source.slice(a,b)+')',{});let calls=0;
   assert.doesNotThrow(()=>exit.call({model:null}));
   exit.call({model:{exitRequest(){calls++;}}});assert.equal(calls,1);
+});
+
+test('native auxiliary retirement closes without a kick dialog/reconnect and does not swallow real replacements',()=>{
+  const original=fs.readFileSync(new URL('../../static/client/2.0.1279/assets/main/index.88f4e.js',import.meta.url),'utf8'),source=adaptHundredCleanupResponse(original);
+  const start=source.indexOf("'RoomSocket2':["),marker="l['prototype']['onMessageBack2']=",a=source.indexOf(marker,start)+marker.length,b=source.indexOf(",l;}",a);
+  const delivered=[],closed=[],global={isInBairenQpGame:true};
+  const handle=vm.runInNewContext('('+source.slice(a,b)+')',{h:{default:global},
+    k:{prototype:{onMessageBack2(id,payload){delivered.push({id,payload});}}},console:{log(){}}});
+  const socket={close:(noReconnect,resetContext)=>closed.push({noReconnect,resetContext})};
+  handle.call(socket,1203,{reason:'primary-closed',auxiliary:true});
+  assert.deepEqual(closed,[{noReconnect:true,resetContext:true}]);assert.equal(delivered.length,0);
+  handle.call(socket,1203,null);assert.equal(delivered[0].id,1203,'real kick-out still reaches native error handling');
+  assert.equal(adaptHundredCleanupResponse(source),source);
+});
+
+test('auxiliary login waits for confirmed primary authentication and cancels stale waits on socket close',async()=>{
+  for(const closeEarly of [false,true]){
+    const callbacks=new Map(),events=new Map(),sent=[];
+    const notify={on:(event,callback,target)=>callbacks.set(event,{callback,target}),offByTargetName:(event,target)=>{if(callbacks.get(event)?.target===target)callbacks.delete(event);}};
+    const raw={readyState:1,addEventListener:(name,callback)=>events.set(name,callback),removeEventListener:name=>events.delete(name)};
+    const primary={_socket:{readyState:1},__gogamePrimaryLoginReady:false};
+    const aux={channel:2,_socket:raw,sendLogin:(...args)=>sent.push(args)};
+    assert.equal(prepareSocketLogin(aux,[700000,false],primary,false,notify),true);
+    assert.equal(sent.length,0);assert.equal(aux.__gogameAuxiliaryOnly,true);
+    if(closeEarly)events.get('close')();
+    primary.__gogamePrimaryLoginReady=true;
+    callbacks.get('gogame:primary-login-ready').callback();
+    await Promise.resolve();assert.equal(callbacks.size,0);assert.equal(events.size,0);
+    assert.equal(sent.length,closeEarly?0:1);
+  }
+  const notify={on(){assert.fail('standalone socket cannot wait for a nonexistent primary');}};
+  const independent={channel:2,_socket:{readyState:1}};
+  assert.equal(prepareSocketLogin(independent,[],{_socket:null},true,notify),false);assert.equal(independent.__gogameAuxiliaryOnly,false);
+  const late={channel:2,_socket:{readyState:1}};
+  assert.equal(prepareSocketLogin(late,[],{_socket:null},false,notify),false);assert.equal(late.__gogameAuxiliaryOnly,true);
+});
+
+test('failed primary authentication retires a waiting auxiliary and repeated primary login retains the live handshake',async()=>{
+  const callbacks=new Map(),events=new Map(),closed=[],notify={on:(name,callback)=>callbacks.set(name,callback),offByTargetName:name=>callbacks.delete(name)};
+  const raw={readyState:1,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener:name=>events.delete(name)};
+  const primary={channel:1,_socket:{readyState:1}};
+  assert.equal(prepareSocketLogin(primary,[],null,false,notify),false);primary.__gogamePrimaryLoginReady=true;
+  prepareSocketLogin(primary,[],null,false,notify);assert.equal(primary.__gogamePrimaryLoginReady,true);
+  primary.__gogamePrimaryLoginReady=false;
+  const aux={channel:2,_socket:raw,close:(...args)=>closed.push(args)};
+  prepareSocketLogin(aux,[700000],primary,false,notify);
+  callbacks.get('gogame:primary-login-ended')();await Promise.resolve();
+  assert.deepEqual(closed,[[true,true]]);assert.equal(callbacks.size,0);assert.equal(events.size,0);
 });
 
 test('only the two unavailable-connection failures are harmless during cleanup',async()=>{

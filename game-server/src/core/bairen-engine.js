@@ -5,6 +5,7 @@ const { credit, debit, walletOf } = await rel(import.meta.url, '../wallet/index.
 const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel(import.meta.url, './wager.js', v);
 const { PUSH } = await rel(import.meta.url, '../messages.js', v);
 const { hundredWalletContext } = await rel(import.meta.url, './robot.js', v);
+const {canAddHundredBettor}=await rel(import.meta.url,'../../../shared/cash-limits.js',v);
 const history = env.isDev ? await rel(import.meta.url, '../../../cache/game-server/hundred-history.js', v) : null;
 
 export const PHASE = Object.freeze({ IDLE: 0, DEALING: 1, BETTING: 2, SHOWDOWN: 4, SETTLING: 5, STATS: 6, ENDED: 7 });
@@ -105,7 +106,7 @@ export function createBairenEngine(adapter) {
         betAreaIds: current.map(row => row.areaId) };
       io.sendUser?.(session.userId, responseId, payload);
     };
-    if (table.closing || !beforeWagerDeadline(table.phaseEndsAt)
+    if (!canAddHundredBettor(table,session.userId)||table.closing || !beforeWagerDeadline(table.phaseEndsAt)
       || table.hand?.cancelTask || table.hand?.pendingCancel || table.hand?.settling || table.hand?.settled
       || table.state !== PHASE.BETTING || Number(body.roomType) !== Number(table.roomType)
       || (body.roomId != null && Number(body.roomId) !== Number(table.roomId))) {
@@ -243,7 +244,7 @@ export function createBairenEngine(adapter) {
         if (!settlements.has(Number(uid))) {
           if (payout > 0) {
             const paid = await credit(session, payout, hundredWalletContext(ctx, session),
-              { key: 'bairen:' + table.agentId + ':' + table.roomType + ':' + table.roomId + ':' + table.inning + ':' + uid });
+              { operation: hand, key: 'bairen:' + table.agentId + ':' + table.roomType + ':' + table.roomId + ':' + table.inning + ':' + uid });
             if (paid?.ok === false) throw new Error('Hundred settlement credit rejected for user ' + uid);
           }
           settlements.set(Number(uid), { areaWinningScores: scores, realScore: net, points: session.wallet });

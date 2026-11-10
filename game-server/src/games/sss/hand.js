@@ -148,9 +148,18 @@ const maskOf = indexes => indexes.reduce((mask, i) => mask | 1 << i, 0);
 export function arrange(hole, limit = 3) {
   if (!Array.isArray(hole) || hole.length !== 13) return [];
   const cache = new Map();
+  // Physical ghost copies must remain distinct for arrangement validation,
+  // but identical ordered card values have exactly the same pile evaluation.
+  // Keep this cache local to one recommendation, never across players/hands.
+  const equivalent = new Set(hole).size < hole.length ? new Map() : null;
   const pile = (indexes, position) => {
     const mask = maskOf(indexes), key = mask * 4 + position;
-    if (!cache.has(key)) cache.set(key, evaluatePile(indexes.map(i => hole[i]), position));
+    if (!cache.has(key)) {
+      const cards=indexes.map(i=>hole[i]),signature=equivalent?position+':'+cards.join(','):null;
+      let value=equivalent?.get(signature);
+      if(!value){value=evaluatePile(cards,position);equivalent?.set(signature,value);}
+      cache.set(key,value);
+    }
     return cache.get(key);
   };
   const backs = FIVE.map(indexes => ({ indexes, mask: maskOf(indexes), value: pile(indexes, 2) }))

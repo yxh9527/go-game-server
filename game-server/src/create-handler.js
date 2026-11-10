@@ -1,5 +1,7 @@
-import { rel } from "./rel.js";
+import { rel } from "../../shared/hot-import.js";
 import { randomUUID } from 'node:crypto';
+import {installHotResolver} from '../../shared/hot-loader.js';
+installHotResolver();
 
 export async function createHandler(runtime) {
   const v = runtime.hotVersion;
@@ -217,15 +219,23 @@ export async function createHandler(runtime) {
   }
 
   function ensureTable(roomId, roomType, agentId = 0) {
+    if(!Number.isSafeInteger(Number(roomId))||Number(roomId)<=0)return null;
     const cfg = runtime.findConfig(runtime.configs, roomId, roomType);
     const game = gameOf(roomType) || gameOf(cfg?.room_type);
     let table = game ? runtime.registry.getTable(roomId, agentId, game.id) : null;
     if (table) {
+      if(roomType&&Number(table.roomType)!==Number(roomType))return null;
       if (table.agentId == null) table.agentId = Number(agentId) || 0;
       return table;
     }
     // Only match can create tournament rooms; stale client joins cannot mint chips.
     if (Number(roomType) === 101) return null;
+    // findConfig has a legacy room-type fallback. It must not let a client
+    // forge arbitrary room IDs/indexes and fill memory or exhaust the pool.
+    if(cfg&&(Number(cfg.state??1)!==1||Number(cfg.room_type)!==Number(roomType||cfg.room_type)
+      ||Math.floor(Number(roomId)/10000)!==Number(cfg.game_room_config_id)
+      ||Number(roomId)%10000!==Number(cfg.room_index||0)))return null;
+    if(!cfg&&runtime.env==='prod')return null;
     if (!game) {
       throw new Error(`no game for roomType=${roomType}`);
     }
@@ -440,11 +450,24 @@ export async function createHandler(runtime) {
   function onMessage(ws, data) {
     const socket = sessions.socketState(ws);
     if (socket.closed) return Promise.resolve();
-    const action=()=>runtime.wallet.authoritative
-      ?runtime.wallet.run(()=>processMessage(ws,data),runtime):processMessage(ws,data);
-    const task=runtime.bus?.gameSessions?sessions.withSession(ws,action):action();
-    // Closing waits for business actions that already passed authentication.
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    if(raw.length>codec.MAX_FRAME_BYTES||(socket.pendingMessages||0)>=64){
+      socket.closed=true;
+      ws.close?.(raw.length>codec.MAX_FRAME_BYTES?1009:1008,'Game request limit exceeded');
+      return Promise.resolve();
+    }
+    // Pings do not touch money. Avoid refreshing every account and capturing
+    // the entire room graph for each player's ordinary heartbeat.
+    const heartbeat=raw.length===8&&raw[0]===0xc0&&raw.readUInt32BE(4)===0
+      &&[SEND.PING,SEND.ROOM_PING].includes(raw.readInt16BE(2));
+    const action=()=>runtime.wallet.authoritative&&!heartbeat
+      ?runtime.wallet.run(()=>processMessage(ws,data),runtime):processMessage(ws,data);
+    socket.pendingMessages=(socket.pendingMessages||0)+1;
+    let task;
+    try{task=Promise.resolve(runtime.bus?.gameSessions?sessions.withSession(ws,action):action());}
+    catch(error){socket.pendingMessages--;return Promise.reject(error);}
+    const finished=()=>{socket.pendingMessages--;};task.then(finished,finished);
+    // Closing waits for business actions that already passed authentication.
     const login = raw.length >= 8 && raw[0] === 0xc0 && raw.readInt16BE(2) === SEND.ROOM_LOGIN;
     if (!login) {
       const tasks = socket.actions ||= new Set();
@@ -495,6 +518,7 @@ export async function createHandler(runtime) {
           topAgentId: 0,
           accumulatedWin: 0,
           inRoom: false,
+          hasJoined: false,
           authenticated: false,
           openHundredGame: Boolean(body.openHundredGame),
           accumulatedWinByKind: { GGL1: 0, GGL2: 0 },
@@ -505,7 +529,7 @@ export async function createHandler(runtime) {
         };
         try {
           if (!Number.isSafeInteger(session.userId) || session.userId <= 0) throw new Error('Invalid login user');
-          session.loginAttempt=await sessions.beginAttempt(session.userId);
+          session.loginAttempt=body.auxiliaryOnly===true?0:await sessions.beginAttempt(session.userId);
           if (runtime.gateway?.validateToken) {
             const ok = await runtime.gateway.validateToken(body.userToken || body.token, session.userId);
             if (!ok) {
@@ -523,6 +547,11 @@ export async function createHandler(runtime) {
             session.icon = profile?.icon ?? profile?.userIcon;
           }
           await runtime.wallet.load(session);
+          const loginTable=runtime.registry.getTable(session.roomId,session.agentId);
+          const loginConfig=runtime.findConfig(runtime.configs,session.roomId,0);
+          const loginType=Number(loginTable?.roomType
+            ||loginConfig&&Number(loginConfig.state??1)===1&&Math.floor(session.roomId/10000)===Number(loginConfig.game_room_config_id)&&loginConfig.room_type)||0;
+          if(gameOf(loginType)&&loginType!==101)session.roomType=loginType;
           session.authenticated = true;
           if (!await sessions.accept(ws, session, order,body)) return;
         } catch (err) {
@@ -543,7 +572,7 @@ export async function createHandler(runtime) {
         });
         runtime.log.info?.(`[game-server] room login uid=${session.userId} roomId=${session.roomId}`);
         return;
-      });
+      },Number(payload?.userId)||0);
     }
     const pendingLogin = sessions.socketState(ws).loginTask;
     if (pendingLogin) { await pendingLogin; session = runtime.registry.session(ws); }
@@ -720,6 +749,7 @@ export async function createHandler(runtime) {
         session.roomId = roomId;
         session.gameId = table.gameId;
         session.inRoom = true;
+        session.hasJoined = true;
         session.roomHydrating = Boolean(body.changeRoom);
         table.standby = false;
         const game = gameOf(table.roomType);
@@ -875,11 +905,23 @@ export async function createHandler(runtime) {
   }
 
   function tick(onlyTable) {
-    void userCenter.flush();
-    if(runtime.bus?.gameSessions)void sessions.renewAll().catch(error=>runtime.log.error('game session lease renewal failed',error.message));
+    if(!onlyTable){
+      void userCenter.flush();
+      // Lease liveness is independent of a slow wallet batch, but overlapping
+      // renewals must not pile up either. Never renew every user per table.
+      if(runtime.bus?.gameSessions&&!runtime.sessionRenewTask){
+        const renewal=sessions.renewAll().catch(error=>runtime.log.error('game session lease renewal failed',error.message));
+        runtime.sessionRenewTask=renewal;
+        const done=()=>{if(runtime.sessionRenewTask===renewal)delete runtime.sessionRenewTask;};renewal.then(done,done);
+      }
+    }
     if (runtime.wallet.authoritative && !runtime.wallet.managed()) {
-      return Promise.allSettled([...runtime.registry.tables.values()].map(table =>
+      if(runtime.cashTickTask)return runtime.cashTickTask;
+      const batch=Promise.allSettled([...runtime.registry.tables.values()].map(table =>
         runtime.wallet.run(() => tick(table), runtime).catch(error => { runtime.log.error('cash tick failed', error.message); throw error; })));
+      runtime.cashTickTask=batch;
+      const done=()=>{if(runtime.cashTickTask===batch)delete runtime.cashTickTask;};batch.then(done,done);
+      return batch;
     }
     const closing = [];
     for (const [ws, session] of runtime.registry.sessions) {

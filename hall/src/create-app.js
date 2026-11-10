@@ -1,5 +1,7 @@
 import express from "express";
-import { rel } from "./rel.js";
+import { rel } from "../../shared/hot-import.js";
+import {installHotResolver} from '../../shared/hot-loader.js';
+installHotResolver();
 
 export async function createApp(runtime) {
   const v = runtime.hotVersion;

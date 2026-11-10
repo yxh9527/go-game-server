@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 export const GAME_SESSION_CHANNEL='gogame:game-session:v1';
-export const GAME_SESSION_STORE_VERSION='native-sockets-3';
+export const GAME_SESSION_STORE_VERSION='native-sockets-6';
 export const GAME_SESSION_TTL_MS=30000;
 export const GAME_SESSION_OPERATION_TTL_MS=30000;
 const UNLOCK_SCRIPT="if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
@@ -24,13 +24,15 @@ local function owns(record)
 end
 if action=='claim' then
   local latest=tonumber(redis.call('GET',KEYS[3]) or '0')
-  if tonumber(input.attempt or 0)<latest then return cjson.encode({ok=false,stale=true}) end
+  if not input.requirePair and tonumber(input.attempt or 0)<latest then return cjson.encode({ok=false,stale=true}) end
   -- Native seat-game hosts may open an auxiliary even without a hundred panel.
-  if input.allowPair and old and old.primary and old.primary.inRoom
+  if input.allowPair and old and old.primary
+    and (old.primary.inRoom or (input.requirePair and old.primary.hasJoined==false))
     and old.primary.identity==input.identity and old.primary.roomId==input.roomId
     and (old.primary.roomType==19 or old.primary.roomType==24 or old.primary.roomType==25
       or old.primary.roomType==26 or old.primary.roomType==27 or old.primary.roomType==28
-      or old.primary.roomType==30 or old.primary.roomType==31 or old.primary.roomType==32) and #old.paired==0 then
+      or old.primary.roomType==30 or old.primary.roomType==31 or old.primary.roomType==32
+      or (input.requirePair and old.primary.roomType>0 and old.primary.roomType~=101)) and #old.paired==0 then
     input.loginId=old.loginId
     input.generation=old.generation
     input.role='hundred'
@@ -38,6 +40,7 @@ if action=='claim' then
     redis.call('SET',KEYS[1],cjson.encode(old),'PX',ttl)
     return cjson.encode({ok=true,loginId=old.loginId,generation=old.generation,role='hundred'})
   end
+  if input.requirePair then return cjson.encode({ok=false,auxiliaryAbsent=true}) end
   local generation=redis.call('INCR',KEYS[2])
   local revoked=old and old.loginId or ''
   input.generation=generation
@@ -55,6 +58,7 @@ if action=='renew' then
 end
 if action=='update' then
   if not old or old.loginId~=input.loginId or not old.primary or old.primary.socketId~=input.socketId then return '0' end
+  old.primary.hasJoined=old.primary.hasJoined or old.primary.inRoom or input.inRoom
   old.primary.inRoom=input.inRoom
   old.primary.roomId=input.roomId
   old.primary.gameId=input.gameId
@@ -139,13 +143,16 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
       const result=await redis.eval(GAME_SESSION_SCRIPT,3,recordKey,generationKey,attemptKey,action,JSON.stringify(input),ttlMs,GAME_SESSION_CHANNEL);
       return typeof result==='string'?JSON.parse(result):result;
     }
-    const key=accountKey(session),old=backend.records.get(key);
+    const key=accountKey(session),stored=backend.records.get(key),old=stored?.expiresAt>Date.now()?stored:null;
     if(action==='claim'){
-      if(Number(extra.attempt||0)<(backend.sequences.get('attempt:'+Number(session.userId))||0))return{ok:false,stale:true};
-      if(extra.allowPair&&old?.primary?.inRoom&&old.primary.identity===extra.identity&&old.primary.roomId===extra.roomId
-        &&[19,24,25,26,27,28,30,31,32].includes(old.primary.roomType)&&old.paired.length===0){
+      if(!extra.requirePair&&Number(extra.attempt||0)<(backend.sequences.get('attempt:'+Number(session.userId))||0))return{ok:false,stale:true};
+      if(extra.allowPair&&old?.primary&&(old.primary.inRoom||extra.requirePair&&old.primary.hasJoined===false)
+        &&old.primary.identity===extra.identity&&old.primary.roomId===extra.roomId
+        &&([19,24,25,26,27,28,30,31,32].includes(old.primary.roomType)
+          ||extra.requirePair&&old.primary.roomType>0&&old.primary.roomType!==101)&&old.paired.length===0){
         old.paired.push({...input,role:'hundred'});old.expiresAt=Date.now()+ttlMs;return{ok:true,loginId:old.loginId,generation:old.generation,role:'hundred'};
       }
+      if(extra.requirePair)return {ok:false,auxiliaryAbsent:true};
       const generation=(backend.sequences.get(key)||0)+1;backend.sequences.set(key,generation);
       if(old)publish({event:'revoke',loginId:old.loginId,reason:'replaced'});
       const primary={...input,generation,role:'primary'};
@@ -158,7 +165,7 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
     if(action==='renew'){if(owns)old.expiresAt=Date.now()+ttlMs;return owns;}
     if(action==='update'){
       if(!old.primary||old.primary.socketId!==session.socketId||old.loginId!==session.loginId)return false;
-      Object.assign(old.primary,{inRoom:extra.inRoom,roomId:extra.roomId,gameId:extra.gameId,roomType:extra.roomType});old.expiresAt=Date.now()+ttlMs;return true;
+      Object.assign(old.primary,{hasJoined:Boolean(old.primary.hasJoined||old.primary.inRoom||extra.inRoom),inRoom:extra.inRoom,roomId:extra.roomId,gameId:extra.gameId,roomType:extra.roomType});old.expiresAt=Date.now()+ttlMs;return true;
     }
     if(action==='release'){
       if(!owns)return false;
@@ -177,7 +184,7 @@ export function createGameSessionStore({redis=null,backend=createInMemoryGameSes
       if(redis?.incr)return Number(await redis.incr('gogame:game-session-attempt:'+uid));
       const key='attempt:'+uid,next=(backend.sequences.get(key)||0)+1;backend.sequences.set(key,next);return next;
     },
-    async claim(session,{identity,allowPair=false,attempt=0}={}){return withAccountLock(session,()=>apply('claim',session,{identity,allowPair,attempt,roomId:Number(session.roomId),gameId:String(session.gameId||''),roomType:Number(session.roomType)||0}));},
+    async claim(session,{identity,allowPair=false,requirePair=false,attempt=0}={}){return withAccountLock(session,()=>apply('claim',session,{identity,allowPair,requirePair,attempt,hasJoined:Boolean(session.hasJoined||session.inRoom),roomId:Number(session.roomId),gameId:String(session.gameId||''),roomType:Number(session.roomType)||0}));},
     verify:session=>apply('verify',session),renew:session=>apply('renew',session),
     async withSession(session,action){return withAccountLock(session,async()=>{
       if(!await apply('verify',session))return false;

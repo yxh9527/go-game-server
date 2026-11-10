@@ -1,0 +1,9 @@
+{
+  "source": "local gogames/data-center/dao/gogame_cash.go",
+  "upstreamAccountLimit": 64,
+  "simultaneousPayoutAccounts": 65,
+  "settlementCommitted": false,
+  "error": "invalid cash transaction size or id",
+  "modifiedUpstreamFiles": false,
+  "onlineServiceCalled": false
+}

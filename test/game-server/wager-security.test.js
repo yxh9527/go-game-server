@@ -15,6 +15,7 @@ import * as niuniu from '../../game-server/src/games/niuniu/engine.js';
 import * as blackjack from '../../game-server/src/games/blackjack/engine.js';
 import { transfer } from '../../game-server/src/games/mahjong/scoring.js';
 import { comparison } from '../../game-server/src/games/sss/engine.js';
+import {MAX_HUNDRED_BETTORS} from '../../shared/cash-limits.js';
 
 const games=await loadGames('all-wager-security'), rows=seedRooms();
 const invalid=[-1,0,NaN,Infinity,-Infinity,1.5,Number.MAX_SAFE_INTEGER+1,true,[],{},'', '0x64','1e309'];
@@ -144,4 +145,20 @@ test('sss server-computed settlement caps losses to opening chips',()=>{
 
 test('every registered game implementation has a wager or fixed-liability security check',()=>{
   assert.deepEqual(games.list.map(game=>game.id).filter(id=>!covered.has(id)),[]);
+});
+
+for(const game of games.list.filter(game=>game.kind==='hundred'))test('round cash-account capacity is checked before debit: '+game.id,async()=>{
+  const row=rows.find(row=>game.roomTypes.includes(Number(row.room_type))),f=await fixture(game,row);
+  await game.onMessage(f,SEND.ENTER,{roomType:f.table.roomType,roomId:f.table.roomId,vipTableMode:1});
+  game.engine?.beginRound?.(f.io,f.table,Date.now(),()=>.5);
+  f.table.state=game.engine?.PHASE?.BETTING??game.betState();f.table.phaseEndsAt=Date.now()+60000;
+  if(game.engine?.prepareHand&&!f.table.preparedHand)game.engine.prepareHand(f.io,f.table);
+  const options=game.betOptions(f.table),area=options.areas.find(a=>a.odds>0)||options.areas[0],amount=options.minBet;
+  for(let i=0;i<MAX_HUNDRED_BETTORS;i++)f.table.playerBets.set(100000+i,[{areaId:area.areaId,total:amount}]);
+  const body={roomType:f.table.roomType,roomId:f.table.roomId,params:[{areaId:area.areaId,total:amount}]};
+  assert.equal(await game.placeBet(f,body),false);assert.equal(f.session.wallet,10000);
+  assert.equal(f.table.playerBets.has(f.session.userId),false);
+  f.table.playerBets.delete(100000);
+  assert.equal(await game.placeBet(f,body),true,'a released round slot permits a new bettor');
+  assert.equal(await game.placeBet(f,body),true,'an existing bettor does not consume another account slot');
 });

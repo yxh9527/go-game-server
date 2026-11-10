@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { captureGameState } from './transaction-state.js';
+import {MAX_CASH_ACCOUNTS,MAX_CASH_STEPS} from '../../../shared/cash-limits.js';
 
 const ownerKey = Symbol.for('gogame.authoritative.cash');
 const memberKey = Symbol.for('gogame.cash.carry.member');
@@ -10,9 +11,28 @@ const accountOf = s => ({ agentId:Number(s.agentId),userId:Number(s.userId),curr
 const tableKey = t => `${Number(t.agentId)}:${t.gameId}:${Number(t.roomId)}`;
 const fail = message => Object.assign(new Error(message),{code:'CARRY_CONFLICT',status:409});
 const validMoney = n => { if (!Number.isSafeInteger(n) || n < 0) throw new Error('Invalid wallet amount'); };
+const uncertainCommit = error => ![3,5,7,8,9,12,16].includes(Number(error?.code))
+  && ([1,2,4,13,14].includes(Number(error?.code))||[502,503,504].includes(error?.status)
+    ||['ECONNRESET','ETIMEDOUT','EPIPE'].includes(error?.code));
 
 export function createAuthoritativeWallet(rpc) {
   const state = rpc.common[ownerKey] ||= { context:new AsyncLocalStorage(),accounts:new Map(),members:new Set(),tail:Promise.resolve() };
+  // Safety state only, not a journal or a pending-payment/replay mechanism.
+  // A successful balance read cannot prove which timed-out command committed.
+  state.unconfirmedAccounts ||= new Set();
+  const assertConfirmed=session=>{if(state.unconfirmedAccounts.has(identity(session)))
+    throw Object.assign(new Error('资金提交结果待核验，已暂停该账户资金操作，请联系管理员'),{code:'CASH_CONFIRMATION_REQUIRED',status:503});};
+  function retainedSessions(table){
+    const list=[...(table.playerSessions?.values()||[])];
+    const participants=[...(table.members||[]),...(table.hand?.participants||[]),...(table.hand?.statsPlayers||[])].map(p=>p.member||p);
+    for(const member of participants)if(member[memberKey])list.push(member[memberKey].session);
+    for(const member of state.members)if(member[memberKey]?.table===table)list.push(member[memberKey].session);
+    for(const bankers of [table.hundredBankers,table.casinoBankers]){
+      for(const entry of bankers?.entries||[])list.push(entry.session);
+      for(const refund of bankers?.refunds||[])list.push(refund.session||refund.e?.session);
+    }
+    return list.filter(s=>s&&!s.bot&&s.userId&&s.agentId);
+  }
   function tx() { const t=state.context.getStore(); return t && !t.closed ? t : null; }
   function requireTransaction() { if(!tx())throw Object.assign(new Error('Authoritative money requires a managed game transaction'),{code:'WALLET_UNAVAILABLE'}); }
   function view(session) {
@@ -38,8 +58,11 @@ export function createAuthoritativeWallet(rpc) {
     });
   }
   function stage(session,kind,amount,options={}) {
+    assertConfirmed(session);
     const t=tx();if(!t)throw Object.assign(new Error('Authoritative money requires a managed game transaction'),{code:'WALLET_UNAVAILABLE'});
     const value=view(session), key=identity(session);
+    if(t.steps.length>=MAX_CASH_STEPS||!t.keys.has(key)&&t.keys.size>=MAX_CASH_ACCOUNTS)
+      throw Object.assign(new Error('资金事务容量超限，未提交本批操作'),{code:'CASH_CAPACITY_EXCEEDED',status:413});
     if(!t.keys.has(key))t.keys.set(key,t.keys.size+1);
     const step={id:'op-'+randomUUID(),account:t.keys.get(key),kind,amount,...options.fields};
     t.steps.push(step);return value;
@@ -66,6 +89,21 @@ export function createAuthoritativeWallet(rpc) {
     member.carryMode='reservation';return binding;
   }
   function publish(result,t) {
+    const invalid=()=>{throw Object.assign(new Error('Authoritative cash commit response is incomplete or inconsistent'),
+      {code:'CASH_COMMIT_RESPONSE_INVALID',status:503});};
+    if(!Array.isArray(result?.accounts)||result.accounts.length!==t.request.accounts.length)invalid();
+    const expected=new Map(t.request.accounts.map(a=>[identity(a),a])),seen=new Set();
+    for(const account of result.accounts){
+      const key=identity(account),before=expected.get(key),draft=t.accounts.get(key);
+      if(!before||seen.has(key)||!Number.isSafeInteger(account.balance)||account.balance<0
+        ||account.balance!==draft.balance||!Number.isSafeInteger(account.revision)||account.revision!==before.revision+1)invalid();
+      const carry=account.carry;
+      if(Boolean(carry)!==Boolean(draft.carry)||carry&&['amount','revision','token','tableKey'].some(field=>carry[field]!==draft.carry[field]))invalid();
+      if(carry!=null&&(!Number.isSafeInteger(carry.amount)||carry.amount<0||carry.amount>account.balance
+        ||!Number.isSafeInteger(carry.revision)||carry.revision<0||typeof carry.token!=='string'||!carry.token
+        ||typeof carry.tableKey!=='string'||!carry.tableKey||!Number.isFinite(account.ttlMs)||account.ttlMs<=0))invalid();
+      seen.add(key);
+    }
     for (const a of result.accounts || []) state.accounts.set(identity(a),{...a,expiresAt:a.carry ? Date.now()+a.ttlMs : 0});
     t.closed=true;
     for(const deliver of t.deliveries)deliver();
@@ -75,9 +113,11 @@ export function createAuthoritativeWallet(rpc) {
   }
   async function execute(action,runtime) {
     const attached=new Map();
-    for(const s of runtime.registry.sessions.values())if(s.authenticated!==false && s.userId && s.agentId)attached.set(identity(s),s);
-    for(const table of runtime.registry.tables.values())for(const m of table.members || [])if(m[memberKey])attached.set(identity(m[memberKey].session),m[memberKey].session);
-    await Promise.all([...attached.values()].map(read));
+    const include=s=>{if(s&&!s.bot&&s.userId&&s.agentId)attached.set(identity(s),s);};
+    for(const s of runtime.registry.sessions.values())if(s.authenticated!==false)include(s);
+    for(const member of state.members)include(member[memberKey]?.session);
+    for(const table of runtime.registry.tables.values())for(const s of retainedSessions(table))include(s);
+    await Promise.all([...attached.values()].filter(s=>!state.unconfirmedAccounts.has(identity(s))).map(read));
     const boundBefore=[...state.members], restoreEngine=captureGameState(runtime,[state,...state.accounts.values()]);
     const restore=()=>{restoreEngine();state.members.clear();for(const m of boundBefore)state.members.add(m);};
     const t={accounts:new Map(),keys:new Map(),steps:[],deliveries:[],closed:false};
@@ -91,6 +131,11 @@ export function createAuthoritativeWallet(rpc) {
       catch(error){
         t.closed=true;
         restore();
+        if(uncertainCommit(error)){
+          for(const key of t.keys.keys())state.unconfirmedAccounts.add(key);
+          error.cashTransactionId=t.request.id;
+          runtime.log?.error?.('cash commit confirmation lost; affected accounts paused',t.request.id);
+        }
         throw error;
       }
       return result;
@@ -122,7 +167,12 @@ export function createAuthoritativeWallet(rpc) {
       if(!old)bind(session,member,table,token);return {ok:true,balance:value.balance,carry:value.carry.amount};
     },
     releaseCarry(session,member,amount=member?.point || 0,keepOwner=false){
-      const l=lease(member,false);if(!l)return Boolean(member?.[memberKey]);
+      const l=lease(member,false);
+      if(!l){
+        const binding=member?.[memberKey];
+        if(binding){binding.released=true;state.members.delete(member);}
+        return Boolean(binding);
+      }
       validMoney(amount);if(amount>l.carry.amount)throw fail('带出超过带入值');
       stage(l.binding.session,'release',amount,{fields:{...fields(l.binding,l.carry),keepOwner}});
       l.carry.amount-=amount;l.carry.revision++;l.value.expiresAt=Date.now()+TTL;
@@ -135,6 +185,14 @@ export function createAuthoritativeWallet(rpc) {
       stage(l.binding.session,'renew',0,{fields:fields(l.binding,l.carry)});l.value.expiresAt=Date.now()+TTL;
     },
     guardCashTable(table){
+      const responsible=new Set([...(table.members||[]),...(table.hand?.participants||[]),...(table.hand?.statsPlayers||[])]
+        .map(p=>Number(p.uid??p.member?.uid)));
+      for(const [uid,bets]of table.playerBets||[])if(bets.length)responsible.add(Number(uid));
+      for(const bankers of [table.hundredBankers,table.casinoBankers]){
+        for(const e of bankers?.entries||[])responsible.add(Number(e.uid));
+        for(const r of bankers?.refunds||[])responsible.add(Number((r.session||r.e?.session)?.userId));
+      }
+      for(const s of retainedSessions(table))if(responsible.has(Number(s.userId)))assertConfirmed(s);
       const members=new Set([...(table.members || []),...(table.hand?.participants || []),...(table.hand?.statsPlayers || []).map(p=>p.member || p)]);
       for(const m of members)if(m[memberKey])this.renewCarry(m);
     },

@@ -46,6 +46,7 @@ async function main() {
 
   const reload = watchHot({
     dir: here,
+    extraDirs:[path.resolve(here,'../../shared')],
     entry: path.join(here, "create-app.js"),
     skip: (rel) => rel.endsWith("boot.js") || rel.endsWith(".test.js") || rel.endsWith("hot.js"),
     onReload: apply,

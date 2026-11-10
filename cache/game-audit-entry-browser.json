@@ -1,0 +1,22 @@
+{
+  "roomId": 25010000,
+  "inning": 13,
+  "nativeLogins": 2,
+  "overlayEnabled": false,
+  "queries": [
+    {
+      "code": 200,
+      "cards": 52
+    },
+    {
+      "code": 200,
+      "cards": 52
+    },
+    {
+      "code": 200,
+      "cards": 52
+    }
+  ],
+  "kickouts": 0,
+  "scriptErrors": 0
+}

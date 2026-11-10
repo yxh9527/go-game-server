@@ -72,3 +72,82 @@ test('all other wagers use wallet minus carry and cannot issue unscoped money wr
   await f.wallet.run(()=>{assert.equal(f.wallet.debit(f.session,201).ok,false);assert.equal(f.wallet.debit(f.session,200).ok,true);},f.runtime);
   assert.equal(f.session.wallet,800);assert.equal(f.session.carryAmount,800);
 });
+
+test('departed bettors and bankers refresh authoritative revisions before deferred payouts',async()=>{
+  for(const retained of ['playerSessions','hundredBankers','casinoBankers']){
+    const f=await fixture();f.runtime.registry.sessions.clear();f.table.members=[];
+    if(retained==='playerSessions')f.table.playerSessions=new Map([[42,f.session],[91000001,{userId:91000001,agentId:7,bot:true}]]);
+    else f.table[retained]={entries:[],refunds:[{session:f.session,e:{session:f.session},amount:100}]};
+    f.stored.balance+=50;f.stored.revision++;
+    await f.wallet.run(()=>f.wallet.credit(f.session,100),f.runtime);
+    assert.equal(f.session.wallet,1150);assert.equal(f.stored.balance,1150);
+    assert.equal(f.requests[0].accounts[0].revision,1,'offline account must not keep its old revision');
+  }
+});
+
+test('releasing an expired reservation drops its strong member reference without changing money',async()=>{
+  const f=await fixture();await f.wallet.run(()=>f.wallet.reserveCarry(f.session,f.member,f.table,500),f.runtime);
+  const state=f.common[Symbol.for('gogame.authoritative.cash')];assert.equal(state.members.size,1);
+  f.stored.carry=null;f.stored.revision++;
+  await f.wallet.run(()=>f.wallet.releaseCarry(f.session,f.member),f.runtime);
+  assert.equal(state.members.size,0);assert.equal(f.session.wallet,1000);assert.equal(f.requests.length,1,'expired release must not generate another monetary operation');
+});
+
+test('lost acknowledgement after a committed payout cannot credit the same game result again',async()=>{
+  const f=await fixture(),apply=f.common.cashApply;
+  f.common.cashApply=async request=>{await apply(request);throw Object.assign(new Error('reply timed out after commit'),{status:504});};
+  const settle=()=>{if(!f.table.paid){f.wallet.credit(f.session,200,{key:'same-round'});f.table.paid=true;}};
+  await assert.rejects(f.wallet.run(settle,f.runtime),/reply timed out/);
+  assert.equal(f.stored.balance,1200);assert.equal(f.table.paid,undefined);
+  await assert.rejects(f.wallet.run(settle,f.runtime),{code:'CASH_CONFIRMATION_REQUIRED'});
+  assert.equal(f.stored.balance,1200);assert.equal(f.requests.length,1,'no replay or second monetary write after an uncertain commit');
+  f.table.playerSessions=new Map([[42,f.session]]);
+  assert.throws(()=>f.wallet.guardCashTable(f.table),{code:'CASH_CONFIRMATION_REQUIRED'});
+  const hot=createAuthoritativeWallet({common:f.common});
+  await assert.rejects(hot.run(()=>hot.credit(f.session,200),{...f.runtime,wallet:hot}),{code:'CASH_CONFIRMATION_REQUIRED'},'hot updates cannot silently unlock an uncertain account');
+});
+
+test('confirmed transaction rejection still permits a corrected subsequent operation',async()=>{
+  const f=await fixture();f.reject(Object.assign(new Error('version conflict'),{code:9,status:409}));
+  await assert.rejects(f.wallet.run(()=>f.wallet.credit(f.session,100),f.runtime),/version conflict/);
+  f.reject(null);await f.wallet.run(()=>f.wallet.credit(f.session,100),f.runtime);assert.equal(f.stored.balance,1100);
+});
+
+test('an uncertain account does not prevent unrelated accounts from completing their own transactions',async()=>{
+  const balances=new Map([[42,{balance:1000,revision:0,carry:null}],[43,{balance:5000,revision:0,carry:null}]]),requests=[];
+  const common={async cashRead(a){return {...balances.get(a.userId)};},async cashApply(r){
+    requests.push(r);const a=r.accounts[0],stored=balances.get(a.userId);assert.equal(a.revision,stored.revision);
+    for(const step of r.steps)stored.balance+=step.amount;stored.revision++;
+    if(a.userId===42)throw Object.assign(new Error('lost reply'),{status:504});
+    return {accounts:[{...a,...stored}]};
+  }};
+  const wallet=createAuthoritativeWallet({common}),registry=createRegistry(),a={userId:42,agentId:7},b={userId:43,agentId:7};
+  registry.bind({},a);registry.bind({},b);await wallet.load(a);await wallet.load(b);
+  const runtime={registry,wallet};
+  await assert.rejects(wallet.run(()=>wallet.credit(a,100),runtime),/lost reply/);
+  await wallet.run(()=>wallet.credit(b,200),runtime);assert.equal(b.wallet,5200);
+  assert.equal(balances.get(42).balance,1100);assert.equal(requests.length,2);
+  const spectatorRoom={members:[],playerBets:new Map(),playerSessions:new Map([[42,a]])};
+  assert.doesNotThrow(()=>wallet.guardCashTable(spectatorRoom),'watching an unrelated room cannot pause its games');
+  spectatorRoom.playerBets.set(42,[{areaId:1,total:100}]);
+  assert.throws(()=>wallet.guardCashTable(spectatorRoom),{code:'CASH_CONFIRMATION_REQUIRED'});
+});
+
+test('malformed or inconsistent successful commit replies never publish success or permit a repeated payout',async()=>{
+  for(const corrupt of [
+    ()=>({accounts:[]}),
+    r=>({accounts:[{...r.accounts[0],balance:null}]}),
+    r=>({accounts:[{...r.accounts[0],balance:999999}]}),
+    r=>({accounts:[{...r.accounts[0],userId:999}]}),
+    r=>({accounts:[{...r.accounts[0],revision:0}]}),
+    r=>({accounts:[{...r.accounts[0],carry:{amount:1,revision:0,token:'unexpected',tableKey:'unexpected'},ttlMs:300000}]}),
+  ]){
+    const f=await fixture(),apply=f.common.cashApply,delivered=[];
+    f.common.cashApply=async request=>corrupt(await apply(request));
+    await assert.rejects(f.wallet.run(()=>{f.wallet.credit(f.session,100);f.wallet.deliver(()=>delivered.push('success'));},f.runtime),
+      {code:'CASH_COMMIT_RESPONSE_INVALID'});
+    assert.deepEqual(delivered,[]);assert.equal(f.stored.balance,1100);
+    await assert.rejects(f.wallet.run(()=>f.wallet.credit(f.session,100),f.runtime),{code:'CASH_CONFIRMATION_REQUIRED'});
+    assert.equal(f.requests.length,1);
+  }
+});

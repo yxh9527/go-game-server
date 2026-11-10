@@ -37,8 +37,10 @@ try{
       const text=m.params.args.map(a=>a.value??a.description??'').join(' ');
       if(m.params.type==='error'&&/TypeError:|ReferenceError:|SyntaxError:/.test(text))errors.push({text});
       if(m.params.type==='error')diagnostics.push(text.slice(0,800));
+      if(process.argv.includes('--trace-exit')&&text.includes('[GOGAME-')){diagnostics.push(text.slice(0,800));if(diagnostics.length>100)diagnostics.shift();}
+      if(/onclose|reconnect|socket_reconn|close\.\.\./i.test(text)){diagnostics.push(text.slice(0,800));if(diagnostics.length>100)diagnostics.shift();}
     }else if(m.method==='Network.webSocketFrameReceived'||m.method==='Network.webSocketFrameSent'){
-      try{const f=decodeFrame(Buffer.from(m.params.response.payloadData,'base64'));if([1203,2201,2206,3260,6124,6225,9999].includes(f?.msgid))frames.push({direction:m.method.endsWith('Sent')?'sent':'received',id:f.msgid,activeRoom,roomId:f.payload?.roomId,roomType:f.payload?.roomType,confRoomType:f.payload?.conf?.roomType});}catch{}
+      try{const f=decodeFrame(Buffer.from(m.params.response.payloadData,'base64'));if([1105,1203,2201,2206,3260,6124,6225,9999].includes(f?.msgid))frames.push({direction:m.method.endsWith('Sent')?'sent':'received',id:f.msgid,activeRoom,reason:f.payload?.reason,auxiliary:f.payload?.auxiliary,roomId:f.payload?.roomId,roomType:f.payload?.roomType,confRoomType:f.payload?.conf?.roomType});}catch{}
     }
   });
   const ev=async(expression,sessionId)=>{
@@ -106,14 +108,26 @@ try{
       assert.equal(await ev('cc.director.getScene().name',session),scene);
       console.log('PASS_SEAT_MENU_POLICY',JSON.stringify({scene,nativeBlocked:true,serverBlocked:true,stoodAsObserver:true}));
     }
+    if(process.argv.includes('--trace-exit')){
+      await ev("(()=>{window.__closeTrace=[];for(const name of ['RoomSocket','RoomSocket2']){const holder=__require(name).default.ins,raw=holder._socket;if(!raw)continue;const original=raw.onclose;raw.onclose=function(event){window.__closeTrace.push({name,phase:'before-native',code:event.code,reason:event.reason,connected:holder._isConnected,isBack:__require('GlobalGameData').default.isBack});return original?.call(this,event);};raw.addEventListener('close',event=>window.__closeTrace.push({name,phase:'closed',code:event.code,reason:event.reason,connected:holder._isConnected,hasContext:!!holder._rawDomainList}));}return true;})()",session);
+      console.log('EXIT_BEFORE',JSON.stringify(await ev("(()=>{const r=cc.app.gameRoom;return {scene:cc.director.getScene().name,observer:r.getIsOb(),hasMember:!!r.getMyMemberInfo(),isBack:__require('GlobalGameData').default.isBack};})()",session)));
+    }
     if(process.argv.includes('--hundred-cleanup')){
       const cleanup=await ev("(async()=>{await new Promise((resolve,reject)=>cc.assetManager.loadBundle('BairenMultyBet',error=>error?reject(error):resolve()));const h=__require('BairenMultyBetHelper').default;window.__gogameCleanupVm=h.vm;window.__gogameBairenExit=__require('BairenHelper').default.vm;let connected=false,readyState,isConnected;try{const s=h.roomSocket;connected=s.getRoomSocketIsOpen();readyState=s._socket?.readyState;isConnected=s._isConnected;}catch{}let timer;try{return {connected,readyState,isConnected,result:await Promise.race([h.vm.sendUnregRoomsReq(),new Promise(resolve=>{timer=setTimeout(()=>resolve('cleanup acknowledgement timed out'),5000);})])};}finally{clearTimeout(timer);}})()",session);
       assert.equal(cleanup.result,0,JSON.stringify(cleanup));console.log('PASS_CLEANUP_BEFORE_EXIT',JSON.stringify({scene,...cleanup}));
     }
     activeRoom=false;
+    const exitStart=frames.length;
     await ev("(()=>{const menu=window.__gogameOldMenu;if(typeof menu.onExitRoomClick==='function')menu.onExitRoomClick();else menu.mExitBtn.OnClick();return true;})()",session);
-    await until(()=>ev("(()=>{const frame=document.querySelector('iframe');return !frame||getComputedStyle(frame.parentElement).visibility==='hidden';})()"),'hall return '+scene);
+    try{
+      await until(()=>ev("(()=>{const frame=document.querySelector('iframe');return !frame||getComputedStyle(frame.parentElement).visibility==='hidden';})()"),'hall return '+scene);
+    }catch(error){
+      if(process.argv.includes('--trace-exit'))console.log('EXIT_AFTER',JSON.stringify(await ev("(()=>{const r=cc.app.gameRoom;return {scene:cc.director.getScene().name,hasRoom:!!r?.getRoomInfo?.(),observer:r?.getIsOb?.(),hasMember:!!r?.getMyMemberInfo?.(),isBack:__require('GlobalGameData').default.isBack,closeTrace:window.__closeTrace,dialogs:cc.director.getScene().getComponentsInChildren(cc.Component).filter(c=>c.node.activeInHierarchy&&/alert|kick|tip/i.test(cc.js.getClassName(c))).map(c=>cc.js.getClassName(c)).slice(0,20)};})()",session)));
+      throw error;
+    }
+    if(process.argv.includes('--trace-exit'))console.log('EXIT_TRACE',JSON.stringify(await ev('window.__closeTrace',session)));
     await delay(800);
+    assert.equal(frames.slice(exitStart).some(f=>f.id===1105),false,'normal auxiliary retirement cannot reconnect after returning to the hall');
     // An event queued by the previous scene must be harmless after teardown.
     const late=await ev("(()=>{const menu=window.__gogameOldMenu,room=cc.app.gameRoom;if(menu&&typeof menu.onShowBtnsClick==='function'&&(!room||!room.getRoomInfo?.())){menu.onShowBtnsClick();return 'checked';}return 'separate-menu-or-room-retained';})()",session);
     if(process.argv.includes('--hundred-cleanup')){
@@ -125,8 +139,8 @@ try{
   const failures=errors.filter(e=>e.exception?.value!=='--------------------> Promise manually interrupted!! <--------------------');
   console.log('SCRIPT_ERRORS',JSON.stringify(failures));
   assert.equal(failures.length,0);
-  assert.equal(frames.filter(f=>f.id===1203&&(!process.argv.includes('--hundred-cleanup')&&!allSeatMenus||f.activeRoom)).length,0,'auxiliary connections never kick the active player during reentry');
+  assert.equal(frames.filter(f=>f.id===1203&&!(f.reason==='primary-closed'&&f.auxiliary===true)).length,0,'normal teardown never reports an account replacement');
   const shot=await send('Page.captureScreenshot');fs.writeFileSync(allSeatMenus?'cache/all-seat-exit-browser.png':'cache/room-ui-reentry.png',Buffer.from(shot.data,'base64'));
   console.log('PASS_ROOM_UI_REENTRY');
-}catch(error){console.log('FAIL_ROOM_UI',JSON.stringify({error:error.stack,errors,frames:frames.slice(-12),diagnostics:diagnostics.slice(-12)}));throw error;}
+}catch(error){console.log('FAIL_ROOM_UI',JSON.stringify({error:error.stack,errors,frames:frames.slice(-20),diagnostics:diagnostics.slice(-40)}));throw error;}
 finally{socket?.close();browser.kill();}

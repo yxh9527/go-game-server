@@ -59,3 +59,17 @@ test('specials follow original image scores and prohibit ghost substitutions', (
   assert.equal(special([2,3,4],[18,19,20,21,22],[32,33,34,35,36]).typeId, 3);
   assert.equal(special([2,3,4],[18,19,20,21,22],[32,33,34,35,36]).water, 20);
 });
+
+test('eight physical ghosts reuse equivalent evaluations without changing recommendation order or ownership',()=>{
+  const hole=[52,53,52,53,52,53,52,53,0,2,3,4,5],before=hole.slice();
+  const options=arrange(hole);
+  assert.deepEqual(options.map(({front,middle,back,frontType,middleType,backType})=>({front,middle,back,frontType,middleType,backType})),[
+    {front:[53,52,0],middle:[53,2,3,4,5],back:[52,53,52,53,52],frontType:120,middleType:8,backType:9},
+    {front:[53,52,53],middle:[0,2,3,4,5],back:[52,53,52,53,52],frontType:120,middleType:5,backType:9},
+    {front:[2,3,4],middle:[52,53,52,53,5],back:[52,53,52,53,0],frontType:0,middleType:9,backType:9},
+  ]);
+  for(const option of options){assert.ok(validArrangement(hole,option.front,option.middle,option.back));assert.equal(evaluate(option.front,option.middle,option.back).isWater,false);}
+  assert.deepEqual(hole,before);
+  options[0].front[0]=-1;
+  assert.notDeepEqual(arrange(hole)[0].front,options[0].front,'recommendations do not retain caller mutations');
+});

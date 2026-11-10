@@ -175,7 +175,7 @@ test('native handler routes 6121 correctly and every scratch wallet push is nume
   for (const type of [61, 63]) {
     const f = fixture(type, 0), registry = createRegistry(), received = [];
     const ws = { readyState: 1, send(frame) { received.push(decodeFrame(frame)); } };
-    const row = { room_id: f.table.roomId, game_room_config_id: type === 61 ? 6101 : 6301, game_type: 1004, room_type: type, room_index: 26 };
+    const row = { room_id: f.table.roomId, game_room_config_id: Math.floor(f.table.roomId/10000), game_type: 1004, room_type: type, room_index: 26 };
     const runtime = { ...f.runtime, registry, configs: [row], findConfig: () => row, hotVersion: 'scratch-handler-' + type,
       gateway: { async getUserInfo() { return { userId: 9, agentId: 1, nickName: 'scratch-player' }; } } };
     const handler = await createHandler(runtime);

@@ -36,6 +36,35 @@ test('distributed lease store fences replacements and only admits a matching hun
  await a.release(primary);assert.equal(await b.verify(replacement),true);
 });
 
+test('require-pair claims do not become primaries or revoke a different owner across nodes',async()=>{
+  const backend=createInMemoryGameSessionBackend(),a=createGameSessionStore({backend,instanceId:'owner'}),b=createGameSessionStore({backend,instanceId:'aux'});
+  const main={agentId:7,userId:42,roomId:700000,gameId:'holdem',roomType:19,inRoom:true,loginId:'main',socketId:'main'};
+  await a.claim(main,{identity:'real-owner',attempt:await a.beginAttempt(42)});await a.updateRoom(main,{roomType:19});
+  const aux={...main,inRoom:false,loginId:'aux',socketId:'aux'};
+  assert.equal((await b.claim(aux,{identity:'stale-device',allowPair:true,requirePair:true})).auxiliaryAbsent,true);
+  assert.equal(await a.verify(main),true);
+  const pair=await b.claim(aux,{identity:'real-owner',allowPair:true,requirePair:true});
+  assert.equal(pair.role,'hundred');assert.equal(await a.verify(main),true);
+  await a.release(main);
+  assert.equal((await b.claim({...aux,loginId:'late',socketId:'late'},{identity:'real-owner',allowPair:true,requirePair:true})).auxiliaryAbsent,true);
+  assert.equal(backend.records.size,0);await a.close();await b.close();
+});
+
+test('explicit auxiliary hints can attach to configured hundred/slots primaries during setup, never to retired ones',async()=>{
+  for(const roomType of [19,30,58,59,61,63]){
+    const backend=createInMemoryGameSessionBackend(),store=createGameSessionStore({backend,instanceId:'setup'});
+    const owner={agentId:7,userId:42,roomId:700000,roomType,inRoom:false,hasJoined:false,loginId:'main',socketId:'main'};
+    await store.claim(owner,{identity:'same',attempt:await store.beginAttempt(42)});
+    const aux={...owner,loginId:'aux',socketId:'aux'};
+    const paired=await store.claim(aux,{identity:'same',allowPair:true,requirePair:true});assert.equal(paired.role,'hundred',String(roomType));
+    aux.loginId=paired.loginId;await store.release(aux);
+    owner.inRoom=true;await store.updateRoom(owner,{roomType});
+    owner.inRoom=false;await store.updateRoom(owner,{roomType});
+    assert.equal((await store.claim({...aux,loginId:'late',socketId:'late'},{identity:'same',allowPair:true,requirePair:true})).auxiliaryAbsent,true);
+    assert.equal(await store.verify(owner),true);await store.close();
+  }
+});
+
 test('closing an auxiliary keeps the primary owner and permits a replacement auxiliary on another node',async()=>{
  const backend=createInMemoryGameSessionBackend(),a=createGameSessionStore({backend,instanceId:'a'}),b=createGameSessionStore({backend,instanceId:'b'});
  const primary={agentId:7,userId:42,roomId:700001,gameId:'holdem',inRoom:true,loginId:'primary',socketId:'p'};

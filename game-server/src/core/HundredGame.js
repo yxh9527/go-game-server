@@ -3,6 +3,7 @@ const version = new URL(import.meta.url).searchParams.get('v') || '0';
 const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', version);
 const { debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', version);
 const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel(import.meta.url, './wager.js', version);
+const {canAddHundredBettor}=await rel(import.meta.url,'../../../shared/cash-limits.js',version);
 const { GameBase } = await rel(import.meta.url, './GameBase.js', version);
 const robots = await rel(import.meta.url, './robot.js', version);
 
@@ -91,6 +92,10 @@ export class HundredGame extends GameBase {
   }
 
   placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
+    if(!canAddHundredBettor(ctx.table,ctx.session.userId)){
+      ctx.send(responseId,{roomType:ctx.table.roomType,roomId:ctx.table.roomId,code:1,points:ctx.session.wallet,
+        customData:body?.customData??2,myBets:ctx.table.playerBets.get(ctx.session.userId)||[]});return false;
+    }
     body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const { table, session, send } = ctx;
     const customData = Number(body?.customData ?? 2);
