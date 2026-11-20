@@ -38,6 +38,31 @@ async function fixture(type,count,patch={}){
   return {type,game,table,wallet,runtime,sessions,authority,messages,io,run:fn=>wallet.run(fn,runtime)};
 }
 
+test('Jinhua repeated authoritative buy-in and post-hand stand clears the original carry each round',async()=>{
+  const f=await fixture(25),session=f.sessions[0];
+  for(let cycle=0;cycle<12;cycle++){
+    if(cycle){
+      await f.run(()=>{
+        const member=f.game.sit(f.table,session,{wallet:f.wallet},{buyIn:0,pos:0});assert.ok(member);
+        f.game.onCarryScore({runtime:f.runtime,table:f.table,session,body:{carryIn:100},io:f.io,send(){}});
+        assert.equal(member.point,10000);
+      });
+    }
+    const member=f.table.members.find(m=>m.uid===session.userId);member.standAfterRound=true;
+    await f.run(()=>zjh.beginHand(f.io,f.table));
+    assert.ok(f.table.hand,JSON.stringify({cycle,members:f.table.members.map(m=>({uid:m.uid,point:m.point,folded:m.folded,state:m.state})),carry:f.wallet.carryRecord(session)}));
+    const actor=f.sessions.find(s=>s.userId===f.table.hand.actorUid);
+    await f.run(()=>zjh.onZjhAction(f.io,f.table,actor,{operation:ZJH_OP.FOLD}));
+    await f.run(()=>f.game.afterRound({runtime:f.runtime,table:f.table,session,io:f.io}));
+    assert.equal(f.table.members.includes(member),false,'seat retained '+cycle);
+    assert.equal(f.wallet.carryRecord(session),null,'carry retained '+cycle);
+    assert.ok(f.messages.filter(m=>m.id===9212).every(m=>Number.isFinite(m.data)),'post-hand balance must be numeric');
+    // Keep the other player's funds sufficient without changing wallet money.
+    const other=f.table.members.find(m=>m.uid!==session.userId);
+    if(!other)await f.run(()=>{const s=f.sessions[1],m=f.game.sit(f.table,s,{wallet:f.wallet},{buyIn:0,pos:1});f.wallet.reserveCarry(s,m,f.table,10000);});
+  }
+});
+
 for(const type of [19,25])test(type+': actual forced wagers, fold settlement and cash-out use one authoritative seat balance',async()=>{
   const f=await fixture(type);
   await f.run(()=>type===19?holdem.beginHand(f.io,f.table):zjh.beginHand(f.io,f.table));

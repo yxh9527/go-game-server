@@ -223,8 +223,9 @@ export async function createHandler(runtime) {
   }
 
   function pushPoint(ws, session) {
-    send(ws, PUSH.GAME_POINT_UPDATE, gameOf(runtime.registry.getTable(session.roomId, session.agentId, session.gameId)?.roomType)?.kind === 'slots'
-      ? Number(session.wallet) : { uid: session.userId, point: session.wallet });
+    // The shared native model assigns 9212 directly to walletAmount, including
+    // ordinary seat games. A uid/point envelope corrupts its numeric balance.
+    send(ws, PUSH.GAME_POINT_UPDATE, Number(session.wallet));
   }
 
   function sendWalletPoint(ws, session) {

@@ -6,9 +6,12 @@ import { encodeFrame, decodeFrame } from '../../game-server/src/codec.js';
 import { seedRooms } from '../../cache/rpc/seed.js';
 import { LocalWallet } from '../../cache/wallet/LocalWallet.js';
 import * as niuniu from '../../game-server/src/games/niuniu/engine.js';
+import {ZJH_SEND,ZJH_OP} from '../../game-server/src/games/zjh/messages.js';
+import {createRpcWallet} from '../../game-server/src/wallet/rpcWallet.js';
+import {CommonRpcDev} from '../../cache/rpc/commonRpcDev.js';
 
-async function fixture() {
-  const registry = createRegistry(), configs = seedRooms(), wallet = new LocalWallet({ localBalance: 100000 });
+async function fixture(rpcWallet=false) {
+  const registry = createRegistry(), configs = seedRooms(), wallet = rpcWallet?createRpcWallet({common:new CommonRpcDev()}):new LocalWallet({ localBalance: 100000 });
   const runtime = { env: 'dev', registry, configs, wallet, findConfig, hotVersion: 'room-change-1',
     gateway: { async getLoginData(uid) { return { userId: uid, agentId: 7, userName: 'player' }; } },
     log: { info() {}, error() {} } };
@@ -31,6 +34,36 @@ async function fixture() {
   return { runtime, registry, messages, wallet, ws, request, session, row, join, carry,
     get handler() { return handler; }, async reload() { runtime.hotVersion = 'room-change-2'; handler = await createHandler(runtime); } };
 }
+
+test('repeated idle carry and next-round stand allows a fresh funded seat each time',async()=>{
+  for(const type of [19,25,24,27,31,32,26,28,30])for(const rpcWallet of [false,true]){
+    const f=await fixture(rpcWallet),table=await f.join(type),balance=f.session.wallet;
+    await f.request(2111,{});
+    for(let cycle=0;cycle<15;cycle++){
+      await f.carry(table);
+      assert.ok(f.messages.filter(m=>m.msgid===9212).every(m=>Number.isFinite(m.payload)),'native wallet balance became an object: '+type);
+      await f.request(5007,{});
+      assert.equal(table.members.some(m=>m.uid===f.session.userId),false,'still seated '+type+' cycle '+cycle);
+      assert.equal(f.session.wallet,balance);
+      assert.equal(f.wallet.carryRecord(f.session),null);
+      assert.equal(f.messages.filter(m=>m.msgid===9212).at(-1).payload,balance);
+    }
+  }
+});
+
+test('repeated funded Jinhua hands can stand after settlement and buy in again',async()=>{
+  const f=await fixture(),table=await f.join(25),game=f.handler.games.byRoomType.get(25);
+  const opponent={uid:990001,name:'opponent',pos:1,point:1000000,state:1,totalBet:0,bot:true};table.members.push(opponent);
+  for(let cycle=0;cycle<12;cycle++){
+    await f.carry(table);const member=table.members.find(m=>m.uid===f.session.userId);assert.ok(member);
+    table.phase='starting';table.startAt=0;await f.handler.tick();assert.ok(table.hand,'hand '+cycle);
+    await f.request(5007,{});assert.equal(member.standAfterRound,true);
+    // Fold the current actor using the real engine, without waiting for timers.
+    game.onMessage({runtime:f.runtime,table,session:{userId:table.hand.actorUid},body:{},io:{wallet:f.wallet,env:'dev',broadcast(){},forEachPlayer(){},sessionFor:uid=>uid===f.session.userId?f.session:null},send(){}},ZJH_SEND.ACTION,{operation:ZJH_OP.FOLD});
+    await f.handler.tick();
+    assert.equal(table.hand,null);assert.equal(table.members.includes(member),false,'stand '+cycle);assert.equal(f.wallet.carryRecord(f.session),null,'lease '+cycle);
+  }
+});
 
 test('cash games reject another cash entry until carry is released, then enter as observer', async () => {
   for (const type of [19, 25, 24, 27, 31, 32, 26, 28, 30]) {

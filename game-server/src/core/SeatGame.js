@@ -363,7 +363,7 @@ export class SeatGame extends GameBase {
       }
       delete table.partialCarryOut;
       io.sendUser?.(payout.member.uid, PUSH.CARRY_OUT_RES, { status: 1, point: payout.member.point });
-      io.sendUser?.(payout.member.uid, PUSH.GAME_POINT_UPDATE, { uid: payout.member.uid, point: payout.session.wallet });
+      io.sendUser?.(payout.member.uid, PUSH.GAME_POINT_UPDATE, Number(payout.session.wallet));
       this.pushRoomSnapshot(ctx);
     })();
     table.partialCarryOutTask = task;
@@ -445,9 +445,7 @@ export class SeatGame extends GameBase {
         }
         payout.removed = true;
         io.broadcast(PUSH.USER_STANDUP_ROOM, member.uid);
-        if (!member.bot) io.sendUser?.(member.uid, PUSH.GAME_POINT_UPDATE, {
-          uid: member.uid, point: payout.session.wallet,
-        });
+        if (!member.bot) io.sendUser?.(member.uid, PUSH.GAME_POINT_UPDATE, Number(payout.session.wallet));
       }
       table.admissionCheckedInning = check.inning;
       delete table.roundAdmission;
