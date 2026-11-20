@@ -19,7 +19,8 @@ export function bindWalletSeat(member, session) {
 export function fundWager(io, table, member, amount) {
   const session = member.casinoWalletSession;
   if (!session) return false;
-  const result = debit(session, amount, io);
+  const finance=walletOf(io).lotteryFor?.(table);
+  const result = debit(session, amount, io,finance?{finance:{kind:'bet',table,round:table.hand,bets:[{areaId:'casino-seat',amount}]}}:undefined);
   if (!result.ok) {
     if (Number.isSafeInteger(result.balance) && result.balance >= 0) session.wallet = result.balance;
     return false;
@@ -28,6 +29,28 @@ export function fundWager(io, table, member, amount) {
   const previous = table.casinoWalletDirty.get(member.uid);
   table.casinoWalletDirty.set(member.uid, { session, revision: (previous?.revision || 0) + 1 });
   return true;
+}
+
+export function settleFinance(io,table,results,bankerResults){
+ const wallet=walletOf(io);if(!isCasino(table)||!wallet.lotteryFor?.(table))return;
+ const financial=[];
+ for(const result of results){
+  const member=table.members.find(m=>m.uid===result.uid)||table.hand.players.find(p=>p.uid===result.uid)?.member,session=member?.casinoWalletSession;
+  if(!session||member.bot)continue;
+  const bet=result.xiaZhuData,payout=bet+result.score;
+  if(bet===0&&payout===0)continue;
+  if(!Number.isSafeInteger(payout)||payout<0||member.point!==payout)throw new Error('Casino payout does not match funded wager');
+  // Casino seats never carry a persistent stack: the unified settlement pays
+  // the account immediately, and the display uses account funds thereafter.
+  member.point=0;wallet.credit(session,payout,{finance:{kind:'payout',table,round:table.hand},table});
+  financial.push({session,payout,record:JSON.parse(JSON.stringify(result))});
+ }
+ const byUid=new Map();
+ for(const b of table.hand.bankers||[]){
+  const value=byUid.get(b.uid)||{session:b.entry.session,member:b.entry.collateralMember,score:0,cap:0};value.score+=b.score;value.cap+=b.cap;byUid.set(b.uid,value);
+ }
+ for(const value of byUid.values())financial.push(wallet.bankerResult(table,value,true));
+ wallet.settleLottery(table,table.hand,financial,{roomId:table.roomId,inning:table.currentInning,playMode:1,results:JSON.parse(JSON.stringify(results)),bankers:JSON.parse(JSON.stringify(bankerResults))});
 }
 export function flushWalletFunding(ctx) {
   const { table } = ctx;

@@ -1,6 +1,7 @@
+import {importHotModule} from "../../../shared/hot-import.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectSeatMessage, restoreSeatRequest, needsSeatViewRefresh } from '../../../game-server/src/core/seat-view.js';
+const { projectSeatMessage, restoreSeatRequest, needsSeatViewRefresh }=await importHotModule(new URL("../../../game-server/src/core/seat-view.js",import.meta.url).href,"core-helper-selected-test/game-server/core/seat-view.test.js");
 
 for (const gameId of ['zjh', 'niuniu']) {
   test(`${gameId}: sparse spectator seats and all position pushes use the same projection`, () => {

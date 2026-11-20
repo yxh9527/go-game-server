@@ -1,3 +1,4 @@
+import {zjhRecordActions,blackjackRecordActions,seatChoiceRecordActions,arrangementRecordActions,mahjongRecordActions} from './native-player-actions.js';
 const DAY=86400000,OFFSET=8*3600000;
 const raises=new Set([3,4,5,8,9,12,13,14,15]);
 const isRaise=a=>Number(a.operate??a.operationType)===9?a.isRaise===true:raises.has(Number(a.operate??a.operationType));
@@ -45,9 +46,39 @@ function betRates(records,uid){
     flip4BetRate:complete?percent(four,fourChance):'--',flip4BetNum:complete?four:'--',
     postFlop3BetRate:complete?percent(postThree,postChance):'--',postFlop3BetNum:complete?postThree:'--'};
 }
-export function playerPanelStatistics(records,{targetId,roomId,now=Date.now(),complete=true}={}){
+export function playerPanelStatistics(records,{targetId,roomId,roomType=19,now=Date.now(),complete=true}={}){
   const windows=playerPanelWindows(now),own=records.filter(r=>Number(r.userId)===Number(targetId));
-  const recent=own.filter(r=>r.endedAt>=windows.sevenDays&&r.endedAt<=now),basic=rates(own,targetId),table=rates(own.filter(r=>Number(r.roomId)===Number(roomId)),targetId);
+  const recent=own.filter(r=>r.endedAt>=windows.sevenDays&&r.endedAt<=now);
+  function zjhRates(rows){
+    const facts=rows.map(row=>zjhRecordActions(row,Number(targetId))),known=facts.filter(row=>row.known).length;
+    return {voluntary:known===rows.length?percent(facts.filter(row=>row.voluntary).length,rows.length):'--',raised:known===rows.length?percent(facts.filter(row=>row.raised).length,rows.length):'--'};
+  }
+  function nativeRates(rows){
+    if(Number(roomType)===25)return zjhRates(rows);
+    if(Number(roomType)===31){const facts=rows.map(row=>blackjackRecordActions(row,Number(targetId)));return {voluntary:facts.every(row=>row.known)?percent(facts.filter(row=>row.manualBet).length,rows.length):'--',raised:'--'};}
+    if([24,26,27,28,30,32].includes(Number(roomType)))return {voluntary:'--',raised:'--'};
+    return rates(rows,targetId);
+  }
+  const basic=nativeRates(own),table=nativeRates(own.filter(r=>Number(r.roomId)===Number(roomId)));
+  const blackjack=Number(roomType)===31?own.map(row=>blackjackRecordActions(row,Number(targetId))):null,blackjackStats={};
+  if(complete&&blackjack?.every(row=>row.known))for(const [key,field,rate]of [['manualBet','manualBetHands','manualBetPercent'],['doubled','doubleHands','doublePercent'],['split','splitHands','splitPercent'],['insuranceBuy','insuranceBuyHands','insuranceBuyPercent']]){
+    const count=blackjack.filter(row=>row[key]).length;Object.assign(blackjackStats,{[field]:count,[rate]:percent(count,own.length)});
+  }
+  const choices=[24,32].includes(Number(roomType))?own.map(row=>seatChoiceRecordActions(row,Number(targetId))):null,choiceStats={};
+  if(complete&&choices?.every(row=>row.known)){
+    const opportunities=choices.filter(row=>row.betOpportunity).length,manual=choices.filter(row=>row.manualBet).length,above=choices.filter(row=>row.aboveMinimumBet).length;
+    Object.assign(choiceStats,{betOpportunityHands:opportunities,manualBetHands:manual,manualBetPercent:percent(manual,opportunities),aboveMinimumBetHands:above,aboveMinimumBetPercent:percent(above,opportunities)});
+    if(Number(roomType)===24){const grab=choices.filter(row=>row.manualGrab).length,positive=choices.filter(row=>row.positiveGrab).length;Object.assign(choiceStats,{manualGrabHands:grab,manualGrabPercent:percent(grab,own.length),positiveGrabHands:positive,positiveGrabPercent:percent(positive,own.length)});}
+  }
+  const arrangements=Number(roomType)===27?own.map(row=>arrangementRecordActions(row,Number(targetId))):null,arrangementStats={};
+  if(complete&&arrangements?.every(row=>row.known)){
+    const submitted=arrangements.filter(row=>row.clientSubmitted).length,extended=arrangements.filter(row=>row.extended).length;
+    Object.assign(arrangementStats,{clientArrangementHands:submitted,clientArrangementPercent:percent(submitted,own.length),serverArrangementHands:own.length-submitted,serverArrangementPercent:percent(own.length-submitted,own.length),extendedArrangementHands:extended,extendedArrangementPercent:percent(extended,own.length)});
+  }
+  const discards=[26,28,30].includes(Number(roomType))?own.map(row=>mahjongRecordActions(row,Number(targetId))):null,discardStats={};
+  if(complete&&discards?.every(row=>row.known))for(const key of ['clientDiscard','serverDiscard']){
+    const count=discards.filter(row=>row[key]).length;Object.assign(discardStats,{[key+'Hands']:count,[key+'Percent']:percent(count,own.length)});
+  }
   const peers=new Map();
   for(const record of recent)for(const player of parseList(record.players)){
     const uid=Number(player.uid);if(uid===Number(targetId)||!uid)continue;
@@ -55,12 +86,14 @@ export function playerPanelStatistics(records,{targetId,roomId,now=Date.now(),co
     data.records.push(record);peers.set(uid,data);
   }
   const tableMateRateList=[...peers.values()].map(p=>({uid:p.uid,nickName:p.nickName,rate:percent(p.records.length,recent.length),
-    ...betRates(p.records,targetId)})).sort((a,b)=>b.rate-a.rate||a.uid-b.uid);
+    ...(Number(roomType)===19?betRates(p.records,targetId):{flip3BetRate:'--',flip3BetNum:'--',flip4BetRate:'--',flip4BetNum:'--',postFlop3BetRate:'--',postFlop3BetNum:'--'})})).sort((a,b)=>b.rate-a.rate||a.uid-b.uid);
   const sum=rows=>rows.reduce((n,r)=>n+r.net,0);
+  const nativeWins=complete&&Number(roomType)!==19?own.filter(r=>r.net>0).length:undefined;
   return {totalHands:complete?own.length:'--',flipManualBetPercent:complete?basic.raised:'--',joinPercent:complete?basic.voluntary:'--',
     tableJoinPercent:complete?table.voluntary:'--',todayScore:sum(recent.filter(r=>r.endedAt>=windows.today)),
     oneWeekScore:sum(recent.filter(r=>r.endedAt>=windows.week)),oneWeekHands:recent.length,
-    tableMateRateList:complete?tableMateRateList:[],userFillingRate:complete?betRates(own,targetId):{flip3BetRate:'--',flip3BetNum:'--',flip4BetRate:'--',flip4BetNum:'--'}};
+    ...(nativeWins!==undefined?{netWinHands:nativeWins,winPercent:percent(nativeWins,own.length)}:{}),...blackjackStats,...choiceStats,...arrangementStats,...discardStats,
+    tableMateRateList:complete?tableMateRateList:[],userFillingRate:complete&&Number(roomType)===19?betRates(own,targetId):{flip3BetRate:'--',flip3BetNum:'--',flip4BetRate:'--',flip4BetNum:'--'}};
 }
 
 export function publicPlayerHand(record,viewerId){
@@ -76,7 +109,12 @@ export function publicPlayerHand(record,viewerId){
 }
 
 export function playerPanelPersistedRecords(records){
-  return records.filter(r=>Number(r.roomType)===19&&Number(r.userId)>0&&Number(r.userId)<90000000).map(r=>{
+  const supported=new Set([19,24,25,26,27,28,30,31,32]);
+  return records.filter(r=>!r.replayOnly&&supported.has(Number(r.roomType))&&Number.isSafeInteger(Number(r.userId))&&Number(r.userId)>0&&Number(r.userId)<90000000).map(r=>{
+    if(Number(r.roomType)!==19){const actions=zjhRecordActions(r,Number(r.userId)),blackjack=blackjackRecordActions(r,Number(r.userId)),choices=seatChoiceRecordActions(r,Number(r.userId)),arrangement=arrangementRecordActions(r,Number(r.userId)),discards=mahjongRecordActions(r,Number(r.userId));return {id:r.id,agentId:r.agentId,userId:r.userId,currency:r.currency,roomType:Number(r.roomType),
+      roomId:r.roomId,inning:r.inning,endedAt:r.endedAt,net:r.net,effectiveBet:r.effectiveBet||0,playMode:r.playMode||0,
+      players:[],raised:actions.raised,voluntary:choices.known?choices.manualBet:blackjack.known?blackjack.manualBet:actions.voluntary,countersKnown:actions.known||blackjack.known||choices.known||arrangement.known||discards.known,
+      ...(discards.known?{behaviorVersion:5,mahjongDiscards:{clientDiscard:discards.clientDiscard,serverDiscard:discards.serverDiscard}}:arrangement.known?{behaviorVersion:4,arrangementChoices:{clientSubmitted:arrangement.clientSubmitted,extended:arrangement.extended}}:choices.known?{behaviorVersion:3,seatChoices:{betOpportunity:choices.betOpportunity,manualBet:choices.manualBet,aboveMinimumBet:choices.aboveMinimumBet,manualGrab:choices.manualGrab,positiveGrab:choices.positiveGrab}}:blackjack.known?{behaviorVersion:2,blackjackActions:{manualBet:blackjack.manualBet,doubled:blackjack.doubled,split:blackjack.split,insuranceBuy:blackjack.insuranceBuy}}:actions.known?{behaviorVersion:1}:{})};}
     const players=parseList(r.detail?.firstGameList).map(p=>({uid:Number(p.uid),userName:p.userName||p.name||p.userInfo?.name||String(p.uid),
       userIcon:p.userIcon||p.icon||p.userInfo?.icon||'',score:Number(p.score)||0,isWin:Boolean(p.isWin),
       handPais:parseList(p.handPais).slice(0,2),showCards:parseList(p.showCards).slice(0,2),
@@ -86,7 +124,7 @@ export function playerPanelPersistedRecords(records){
         ...(Number.isInteger(a.replayOrder)?{replayOrder:a.replayOrder}:{})})):undefined}));
     const own=players.find(p=>p.uid===Number(r.userId)),pre=(own?.operateList||[]).filter(a=>a.gameState===4&&a.bet>0);
     const events=players.flatMap(p=>p.operateList||[]).filter(a=>Number.isInteger(a.replayOrder)).sort((a,b)=>a.replayOrder-b.replayOrder);
-    return {id:r.id,agentId:r.agentId,userId:r.userId,currency:r.currency,roomId:r.roomId,inning:r.inning,endedAt:r.endedAt,
+    return {id:r.id,agentId:r.agentId,userId:r.userId,currency:r.currency,roomType:19,roomId:r.roomId,inning:r.inning,endedAt:r.endedAt,
       net:r.net,effectiveBet:r.effectiveBet||0,playMode:r.playMode||0,players,commonCards:parseList(r.detail?.commonCards),
       events:events.length?events:undefined,countersKnown:Array.isArray(own?.operateList)&&!pre.some(a=>a.operate===9&&typeof a.isRaise!=='boolean'),
       raised:pre.some(isRaise),voluntary:pre.some(a=>a.operate===7||raises.has(a.operate))};

@@ -8,7 +8,7 @@ const pricing = await rel(import.meta.url, './odds.js', v);
 const owner = await rel(import.meta.url, '../../core/hundred-table-owner.js', v);
 const bankers = await rel(import.meta.url, '../../core/hundred-banker.js', v);
 const history = await rel(import.meta.url, '../../core/hundred-card-history.js', v);
-const { settleCardBets } = await rel(import.meta.url, '../../core/hundred-card-payout.js', v);
+const { settleCardBets,reserveCardBets } = await rel(import.meta.url, '../../core/hundred-card-payout.js', v);
 
 export function makeShoe(decks = 1) {
   if (decks !== 1) throw new Error('Dragon-tiger uses exactly one 52-card deck');
@@ -120,6 +120,7 @@ export function applyCycle(io, table, cycle) {
   } else if (cycle === 3) {
     table.state = 3;
     bankers.lock(table, table.preparedHand || prepareHand(io, table), table.config.bankerAreas, currentOdds(table));
+    bankers.registerFinance(io,table);
     bankers.push(io, table, table.config.bankerAreas);
   } else if (cycle === 4) {
     table.state = 4;
@@ -131,6 +132,7 @@ export function applyCycle(io, table, cycle) {
     table.lastResult = { ...result, areaOdds: hand.areaOdds,
       showdownPokers: { dragon: [hand.dragon], tiger: [hand.tiger] },
       showdownTypes: { dragon: result.d, tiger: result.t } };
+    reserveCardBets(io,table,payoutAdapter(table));
     table.shoeHands = (table.shoeHands || 0) + 1;
     table.ways[1] = [{ result: result.result, winArea: result.areas.slice() }, ...(table.ways[1] || [])].slice(0, 180);
     io.broadcast(PUSH.SHOWDOWN_POKERS, { roomId: table.roomId, roomType: table.roomType,
@@ -140,17 +142,7 @@ export function applyCycle(io, table, cycle) {
     table.state = 6;
     const result = table.lastResult;
     if (!result) return;
-    return result.settlementTask ||= settleCardBets(io, table, {
-      calculate(table, result, mine) {
-        const areaWinningScores = {}, betOdds = {}; let realScore = 0, stake = 0;
-        for (const bet of mine) {
-          const price = result.areaOdds[bet.areaId]?.oddsList[0];
-          const net = netScore(bet, result, price);
-          realScore += net; stake += bet.total; areaWinningScores[bet.areaId] = net; betOdds[bet.areaId] = price / 100;
-        }
-        return { realScore, areaWinningScores, betOdds, payout: stake + realScore, credited: false, notified: false };
-      }, snapshot: multiRoomSnapshot, resultPayload, record: history.record, bankerAreas: table.config.bankerAreas,
-    }).finally(() => { result.settlementTask = null; });
+    return result.settlementTask ||= Promise.resolve(settleCardBets(io,table,payoutAdapter(table))).finally(() => { result.settlementTask = null; });
   } else if (cycle === 7) {
     table.state = 7; table.collectCardCount = table.dealCardCount;
   } else if (cycle === 80) {
@@ -167,3 +159,15 @@ export function applyCycle(io, table, cycle) {
     table.baccaratFlying = false; owner.beforeRound(io, table);
   } else throw new Error('Unsupported dragon-tiger cycle');
 }
+
+function payoutAdapter(table){return {
+      calculate(table, result, mine) {
+        const areaWinningScores = {}, betOdds = {}; let realScore = 0, stake = 0;
+        for (const bet of mine) {
+          const price = result.areaOdds[bet.areaId]?.oddsList[0];
+          const net = netScore(bet, result, price);
+          realScore += net; stake += bet.total; areaWinningScores[bet.areaId] = net; betOdds[bet.areaId] = price / 100;
+        }
+        return { realScore, areaWinningScores, betOdds, payout: stake + realScore, credited: false, notified: false };
+      }, snapshot: multiRoomSnapshot, resultPayload, record: history.record, bankerAreas: table.config.bankerAreas,
+    };}

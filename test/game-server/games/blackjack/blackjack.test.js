@@ -25,6 +25,15 @@ function fixture(deck = [9, 6, 7, 20, 2, 3, 9, 9], members = 1) {
   engine.begin(io, table, 1000, [...deck, ...makeShoe()]);
   return { game, table, messages, io };
 }
+test('terminal playTick returns its original asynchronous cleanup task and propagates cleanup rejection',async()=>{
+  for(const failed of [false,true]){
+    const f=fixture();finish(f);assert.equal(f.table.hand.settled,true);const deadline=f.table.hand.deadline;let resolve,reject;
+    const task=new Promise((done,fail)=>{resolve=done;reject=fail;});let calls=0;f.game.afterRound=()=>{calls++;return task;};
+    const pending=f.game.playTick({table:f.table,io:f.io},deadline);assert.equal(pending,task);assert.equal(f.table.hand,null);assert.equal(calls,1);
+    if(failed){const rejected=assert.rejects(pending,/terminal cleanup failed/);reject(Error('terminal cleanup failed'));await rejected;}else{resolve();await pending;}
+  }
+});
+
 function advance(f) { engine.tick(f.io, f.table, f.table.hand.deadline); }
 function toPlayer(f) { advance(f); advance(f); if (f.table.hand.state === STATE.INSURANCE) {
   for (const p of f.table.hand.players) engine.act(f.io, f.table, p.uid, SEND.INSURANCE, { buyInsurance: false }, f.table.hand.deadline - 1);

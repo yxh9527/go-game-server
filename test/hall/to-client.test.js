@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MATCH_STATE_DRAFT, MATCH_STATE_REGISTERING, isListedMatch, toClientMatch } from "../../hall/src/to-client.js";
+import {importHotModule} from '../../shared/hot-import.js';
+const {MATCH_STATE_DRAFT,MATCH_STATE_REGISTERING,isListedMatch,toClientMatch}=await importHotModule(
+  new URL('../../hall/src/to-client.js',import.meta.url).href,'hall-client-loader-tests');
 
 test("draft matches stay out of hall list", () => {
   assert.equal(isListedMatch({ state: MATCH_STATE_DRAFT }), false);

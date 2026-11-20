@@ -58,6 +58,7 @@ export function outcomeProbabilities(shoe, exposed = null) {
 }
 
 const baseProbabilities = new Map();
+const MAX_BASE_PROBABILITIES = 8;
 export function configuredOdds(config) {
   return Object.fromEntries(Object.keys(config.odds).map(Number).map(id => [id,
     { id, oddsList: (config.sideOdds?.[id] || [config.odds[id]]).map(n => Math.round(n * 100)) }]));
@@ -65,9 +66,12 @@ export function configuredOdds(config) {
 
 export function brightOdds(shoe, exposed, config) {
   const decks = config.decks || 8;
-  if (!baseProbabilities.has(decks)) baseProbabilities.set(decks,
-    outcomeProbabilities(Array.from({ length: decks * 52 }, (_, i) => i % 52)));
-  const base = baseProbabilities.get(decks), conditional = outcomeProbabilities(shoe, exposed);
+  let base=baseProbabilities.get(decks);
+  if(!base)base=outcomeProbabilities(Array.from({ length: decks * 52 }, (_, i) => i % 52));
+  else baseProbabilities.delete(decks);
+  baseProbabilities.set(decks,base);
+  while(baseProbabilities.size>MAX_BASE_PROBABILITIES)baseProbabilities.delete(baseProbabilities.keys().next().value);
+  const conditional = outcomeProbabilities(shoe, exposed);
   const odds = configuredOdds(config);
   for (let id = 1; id <= 9; id++) {
     odds[id].oddsList = odds[id].oddsList.map((price, tier) => {

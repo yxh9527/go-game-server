@@ -4,6 +4,7 @@ const { SeatGame } = await rel(import.meta.url, '../../core/SeatGame.js', v);
 const { default: config, roomRules } = await rel(import.meta.url, './config.js', v);
 const { SEND, PUSH } = await rel(import.meta.url, './messages.js', v);
 const engine = await rel(import.meta.url, './engine.js', v);
+const {queryNativeHistory}=await rel(import.meta.url,'../../core/game-history.js',v);
 const casino = await rel(import.meta.url, './casino.js', v);
 const banker = await rel(import.meta.url, './banker.js', v);
 const features = await rel(import.meta.url, '../../core/room-features.js', v);
@@ -124,7 +125,7 @@ export class BlackjackGame extends SeatGame {
     if (banker.request(ctx, id, body)) return true;
     if (super.onMessage(ctx, id, body)) return true;
     if (id === SEND.START) { this.queueStart(ctx.table); return true; }
-    if (id === SEND.HISTORY) { ctx.send(PUSH.HISTORY, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
+    if (id === SEND.HISTORY) { if(ctx.runtime?.env==='prod')return queryNativeHistory(ctx,body).then(data=>{ctx.send(PUSH.HISTORY,data);return true;}); ctx.send(PUSH.HISTORY, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
     if (Object.values(SEND).includes(id)) {
       const ok = engine.act(ctx.io, ctx.table, ctx.session.userId, id, body);
       if (!ok && id === SEND.BET && casino.isCasino(ctx.table))
@@ -139,20 +140,22 @@ export class BlackjackGame extends SeatGame {
     // Shared tick can reach startRound after scheduling on this same tick.
     // Complete the casino boundary before engine.begin freezes liability.
     if (!banker.ready(ctx.table)) return;
-    engine.begin(ctx.io, ctx.table);
+    return engine.begin(ctx.io, ctx.table);
   }
   playTick(ctx, now) {
     const hand = ctx.table.hand;
-    engine.tick(ctx.io, ctx.table, now);
+    const ticking=engine.tick(ctx.io, ctx.table, now);
     // END has consumed the round interval. Reuse common payout, admission and
     // lifecycle guards now instead of adding another one-second server tick.
-    if (hand && !ctx.table.hand) {
+    const finished=()=>{if (hand && !ctx.table.hand) {
       const pending = this.afterRound(ctx);
-      // create-handler also awaits the resident wallet task after tick. This
-      // local probe must handle its chain while that caller owns the retry.
-      if (pending) pending.catch(() => {});
-      else super.tick(ctx);
-    }
+      // Return the original admission task so the common tick and its wallet
+      // transaction cannot finish before cleanup or swallow its rejection.
+      if (pending) return pending;
+      return super.tick(ctx);
+    }};
+    if(ticking?.then)return Promise.resolve(ticking).then(finished);
+    return finished();
   }
 }
 export default new BlackjackGame();

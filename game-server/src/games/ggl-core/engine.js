@@ -79,13 +79,13 @@ export async function scratchRequest(ctx, method, body = {}) {
         count = items.length * (book ? 20 : 1);
       }
       const wallet = walletOf(ctx);
-      if (!validWager(value * count, wallet.available(session))) throw Object.assign(new Error('Insufficient available balance'), { code: ERROR.BALANCE });
+      if (!ctx.runtime?.scratchTickets?.authoritative&&!validWager(value * count, wallet.available(session))) throw Object.assign(new Error('Insufficient available balance'), { code: ERROR.BALANCE });
     }
     const result = await service(ctx)[method](ctx, body);
     if (!result || typeof result !== 'object' || !Number.isInteger(result.code)) throw new Error('Scratch service returned no valid result');
-    if(method==='reveal'&&result.code===0&&typeof result.serialFull==='string'&&result.serialFull.length>0&&Number.isSafeInteger(result.faceValue)&&result.faceValue>0&&Number.isSafeInteger(result.winAmount)){
+    if(method==='reveal'&&!(ctx.runtime?.scratchTickets?.authoritative&&result.finalReportStored===true)&&result.code===0&&typeof result.serialFull==='string'&&result.serialFull.length>0&&Number.isSafeInteger(result.faceValue)&&result.faceValue>0&&Number.isSafeInteger(result.winAmount)){
       table.recordUserCenter?.([{uid:session.userId,score:result.winAmount-result.faceValue,xiaZhuData:result.faceValue,walletAmount:result.walletAmount}],
-        {key:result.serialFull,inning:1,publicResult:{serialFull:result.serialFull,faceValue:result.faceValue,winAmount:result.winAmount,huMask:result.huMask||[],huCount:result.huCount,multiplier:result.multiplier,
+        {key:result.serialFull,inning:1,originRoomId:result.purchaseRoomId,endedAt:result.claimedAt,publicResult:{serialFull:result.serialFull,faceValue:result.faceValue,winAmount:result.winAmount,huMask:result.huMask||[],huCount:result.huCount,multiplier:result.multiplier,
           winInfo:{serialNo:result.serialFull,faceValue:result.faceValue,amount:result.winAmount-result.faceValue,huMask:result.huMask||[],huCount:result.huCount,multiplier:result.multiplier}}});
     }
     return { ...base(table, session), ...result };
@@ -100,6 +100,7 @@ export async function scratchRequest(ctx, method, body = {}) {
 export function scratchState(table, session, ctx = {}) { return scratchRequest({ ...ctx, table, session }, 'state'); }
 export function buyTicket(table, session, body, ctx = {}) { return scratchRequest({ ...ctx, table, session }, 'reveal', body); }
 export async function scratchHistory(ctx) {
+  if(ctx.runtime?.scratchTickets?.authoritative)return {gameRoomId:ctx.table.gameRoomId,winInfo:await service(ctx).history(ctx)};
   if (local && ctx.runtime?.env !== 'prod') return { gameRoomId: ctx.table.gameRoomId, winInfo: await service(ctx).history(ctx) };
   return history.list(ctx);
 }

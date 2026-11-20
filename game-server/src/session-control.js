@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {ensureSessionRevocations} from '../../shared/session-revocation-listener.js';
 
 export function createSessionControl(runtime, { send, close, kickId }) {
   const state = runtime.sessionControl ||= { sequence: 0, latest: new Map(), queues: new Map(), sockets: new WeakMap() };
@@ -54,13 +55,7 @@ export function createSessionControl(runtime, { send, close, kickId }) {
     runtime.log?.info?.(`[game-server] session revoked login=${loginId} reason=${reason}`);
   }
   state.revokeLogin=revokeLogin;
-  if(distributed&&state.distributed!==distributed){
-    state.unsubscribe?.();state.distributed=distributed;
-    state.unsubscribe=distributed.subscribe(message=>{
-      try{const event=typeof message==='string'?JSON.parse(message):message;if(event?.event==='revoke')state.revokeLogin(event.loginId,event.reason);}
-      catch(error){runtime.log?.error?.('invalid distributed session event',error.message);}
-    });
-  }
+  ensureSessionRevocations(state,distributed,runtime.log);
   function peers(session, ws) {
     return [...runtime.registry.sessions].filter(([other, s]) => other !== ws
       && accountKey(s) === accountKey(session) && (s.authenticated !== false || s.superseded));

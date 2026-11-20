@@ -5,17 +5,14 @@ import { seedRooms } from '../../cache/rpc/seed.js';
 import { createWallet } from '../../game-server/src/wallet/index.js';
 import { createRegistry } from '../../game-server/src/registry.js';
 import { SEND } from '../../game-server/src/messages.js';
-import { scoreAmount, validWager, checkedTotal } from '../../game-server/src/core/wager.js';
-import * as holdem from '../../game-server/src/games/holdem/engine.js';
+const { scoreAmount, validWager, checkedTotal }=await importHotModule(new URL("../../game-server/src/core/wager.js",import.meta.url).href,"core-helper-selected-test/game-server/wager-security.test.js");
+import {importHotModule} from '../../shared/hot-import.js';
 import { OP } from '../../game-server/src/games/holdem/op.js';
-import * as zjh from '../../game-server/src/games/zjh/engine.js';
 import { ZJH_OP } from '../../game-server/src/games/zjh/messages.js';
-import * as sgay from '../../game-server/src/games/sgay/engine.js';
-import * as niuniu from '../../game-server/src/games/niuniu/engine.js';
-import * as blackjack from '../../game-server/src/games/blackjack/engine.js';
 import { transfer } from '../../game-server/src/games/mahjong/scoring.js';
-import { comparison } from '../../game-server/src/games/sss/engine.js';
 import {MAX_HUNDRED_BETTORS} from '../../shared/cash-limits.js';
+const [holdem,zjh,sgay,niuniu,blackjack,{comparison}]=await Promise.all(
+  ['holdem','zjh','sgay','niuniu','blackjack','sss'].map(game=>importHotModule(new URL('../../game-server/src/games/'+game+'/engine.js',import.meta.url).href,'wager-security-engines')));
 
 const games=await loadGames('all-wager-security'), rows=seedRooms();
 const invalid=[-1,0,NaN,Infinity,-Infinity,1.5,Number.MAX_SAFE_INTEGER+1,true,[],{},'', '0x64','1e309'];

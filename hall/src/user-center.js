@@ -1,28 +1,36 @@
 import { rel } from './rel.js';
-import fs from 'node:fs';
+import {importHotModule} from '../../shared/hot-import.js';
+import {nextProjectionGeneration,ensureProjectionWatch} from './projection-watch.js';
 const version = new URL(import.meta.url).searchParams.get('v') || '0';
+const generation=nextProjectionGeneration();
 const { requestRoomPool } = await rel(import.meta.url, './room-pool.js', version);
 const { projectUserCenter } = await rel(import.meta.url, '../../shared/user-center.js', version);
 const { userInfoOf } = await rel(import.meta.url, '../../game-server/src/core/member.js', version);
+const {queryHistory}=await rel(import.meta.url,'../../shared/history-query.js',version);
 
 async function currentProjection(runtime) {
   const state=runtime.userCenterProjection ||= {version,project:projectUserCenter,dirty:false,loading:null};
-  if(state.version!==version){state.version=version;state.project=projectUserCenter;}
-  if(!state.watcher){
-    state.watcher=fs.watch(new URL('../../shared/',import.meta.url),(_event,file)=>{
-      if(String(file)==='user-center.js')state.dirty=true;
-    });
-    state.watcher.on('error',error=>runtime.log?.error?.('user-center projection watcher failed',error.message));
-    state.watcher.unref();
+  // Requests that began on an older handler may finish after its replacement.
+  // Only a newer module generation can adopt the runtime's current projector.
+  if(!Number.isSafeInteger(state.generation)||generation>state.generation){
+    state.generation=generation;state.version=version;state.project=projectUserCenter;
   }
-  if(state.dirty&&!state.loading){
-    state.dirty=false;
-    state.loading=rel(import.meta.url,'../../shared/user-center.js',version+'-'+Date.now())
-      .then(mod=>{state.project=mod.projectUserCenter;})
-      .catch(error=>{state.dirty=true;throw error;})
-      .finally(()=>{state.loading=null;});
+  ensureProjectionWatch(new URL('../../shared/',import.meta.url),state,runtime.log);
+  while(state.dirty||state.loading){
+    if(!state.loading){
+      state.dirty=false;
+      const owner=state.generation,change=state.change||0;
+      state.reloadSerial=(state.reloadSerial||0)+1;
+      // File-change refresh intentionally resolves today's source. rel() is
+      // pinned to its original graph and must remain so for ordinary callers.
+      const task=importHotModule(new URL('../../shared/user-center.js',import.meta.url).href,'user-center-projection-'+owner+'-'+state.reloadSerial)
+        .then(mod=>{if(state.generation===owner&&(state.change||0)===change)state.project=mod.projectUserCenter;})
+        .catch(error=>{if(state.generation===owner&&(state.change||0)===change){state.dirty=true;throw error;}})
+        .finally(()=>{if(state.loading===task)state.loading=null;});
+      state.loading=task;
+    }
+    await state.loading;
   }
-  if(state.loading)await state.loading;
   return state.project;
 }
 const failure = (code,message) => Object.assign(new Error(message),{code});
@@ -74,7 +82,9 @@ export async function userCenterResponse(runtime,op,params) {
       const response=await fetch(new URL('/internal/v1/tournament',base),{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({action:'history',userId,token,query}),signal:AbortSignal.timeout(5000)});
       const body=await response.json();if(!response.ok||body.code!==0)throw failure(body.code||503,body.msg||'Tournament history unavailable');source=body.data;
-    }else source=runtime.env==='dev'?await requestRoomPool(runtime,{userId,token},'user-center',query):await gateway.getUserCenter(query);
+    }else source=runtime.env==='dev'?await requestRoomPool(runtime,{userId,token},'user-center',query):await queryHistory(runtime,query,{
+      rollingEnd:(params.endTime==null||params.endTime==='')&&Number(params.endDateDiff||0)===0,
+    });
     if(!source || typeof source!=='object')throw failure(503,'User-center source unavailable');
     const project=await currentProjection(runtime);
     const data=project(source,query);

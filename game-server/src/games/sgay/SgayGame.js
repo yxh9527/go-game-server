@@ -4,6 +4,7 @@ const { SeatGame } = await rel(import.meta.url, '../../core/SeatGame.js', v);
 const { default: config, roomRules } = await rel(import.meta.url, './config.js', v);
 const { SEND, PUSH } = await rel(import.meta.url, './messages.js', v);
 const engine = await rel(import.meta.url, './engine.js', v);
+const {queryNativeHistory}=await rel(import.meta.url,'../../core/game-history.js',v);
 
 export class SgayGame extends SeatGame {
   constructor() { super(config); }
@@ -51,7 +52,7 @@ export class SgayGame extends SeatGame {
       return engine.show(ctx.io, ctx.table, ctx.session.userId, body);
     }
     if (id === SEND.START) { this.queueStart(ctx.table); return true; }
-    if (id === SEND.HISTORY) { ctx.send(PUSH.HISTORY, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
+    if (id === SEND.HISTORY) { if(ctx.runtime?.env==='prod')return queryNativeHistory(ctx,body).then(data=>{ctx.send(PUSH.HISTORY,data);return true;}); ctx.send(PUSH.HISTORY, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
     if (id === 3174) {
       const p = ctx.table.hand?.players.find(p => p.uid === ctx.session.userId);
       ctx.send(3282, { handCard: p ? engine.visibleCards(ctx.table, p, ctx.session.userId) : [], commonCard: [] });
@@ -59,7 +60,7 @@ export class SgayGame extends SeatGame {
     }
     return false;
   }
-  startRound(ctx) { engine.begin(ctx.io, ctx.table); }
-  playTick(ctx, now) { engine.tick(ctx.io, ctx.table, now); }
+  startRound(ctx) { return engine.begin(ctx.io, ctx.table); }
+  playTick(ctx, now) { return engine.tick(ctx.io, ctx.table, now); }
 }
 export default new SgayGame();

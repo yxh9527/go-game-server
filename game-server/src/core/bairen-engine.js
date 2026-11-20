@@ -6,6 +6,7 @@ const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel
 const { PUSH } = await rel(import.meta.url, '../messages.js', v);
 const { hundredWalletContext } = await rel(import.meta.url, './robot.js', v);
 const {canAddHundredBettor}=await rel(import.meta.url,'../../../shared/cash-limits.js',v);
+const {wagerFinance,creditFinance,financeRound,usesLottery}=await rel(import.meta.url,'./hundred-finance.js',v);
 const history = env.isDev ? await rel(import.meta.url, '../../../cache/game-server/hundred-history.js', v) : null;
 
 export const PHASE = Object.freeze({ IDLE: 0, DEALING: 1, BETTING: 2, SHOWDOWN: 4, SETTLING: 5, STATS: 6, ENDED: 7 });
@@ -141,7 +142,7 @@ export function createBairenEngine(adapter) {
       result(1);
       return false;
     }
-    const debited = debit(session, requested * balanceFactor, ctx);
+    const debited = debit(session, requested * balanceFactor, ctx,wagerFinance(walletOf(ctx),table,normalized,balanceFactor));
     if (!debited?.ok) { result(1); return false; }
     for (const row of normalized) {
       const existing = current.find(item => item.areaId === row.areaId);
@@ -174,6 +175,7 @@ export function createBairenEngine(adapter) {
     }
     const ids = new Set(body.areaIds.map(Number)), current = table.playerBets.get(uid) || [];
     const canceled = current.filter(b => ids.has(b.areaId));
+    if(usesLottery(walletOf(ctx),table)&&canceled.length!==current.length){respond(100085);return true;}
     const refund = canceled.reduce((sum, bet) => sum + bet.total * (hand.betReserveFactor || 1), 0);
     if (!refund) { respond(0); return true; }
     const pending = hand.pendingCancel;
@@ -186,7 +188,8 @@ export function createBairenEngine(adapter) {
     // Block phase advancement until wallet and aggregate bets agree.
     const task = Promise.resolve().then(async () => {
       const result = await credit(session, refund, hundredWalletContext(ctx, session),
-        { operation, key: 'hundred-cancel:' + table.agentId + ':' + table.roomId + ':' + table.inning + ':' + uid + ':' + operation.serial });
+        { operation, key: 'hundred-cancel:' + table.agentId + ':' + table.roomId + ':' + table.inning + ':' + uid + ':' + operation.serial,
+          ...creditFinance(walletOf(ctx),table,'cancel') });
       if (result?.ok === false) { delete hand.pendingCancel; respond(100085); return; }
       table.playerBets.set(uid, current.filter(b => !ids.has(b.areaId)));
       for (const bet of canceled) table.totalBetsByArea[bet.areaId] -= bet.total;
@@ -232,6 +235,7 @@ export function createBairenEngine(adapter) {
       }
       const ways = roadSnapshot(table);
       const settlements = hand.settlements ||= new Map();
+      const financeResults=[];
       table.systemInningScore = 0;
       for (const [uid, bets] of table.playerBets) {
         const session = table.playerSessions.get(uid) || io.sessionFor?.(uid);
@@ -240,11 +244,13 @@ export function createBairenEngine(adapter) {
         table.systemInningScore -= net;
         const reserved = bets.reduce((sum, bet) => sum + bet.total * (hand.betReserveFactor || 1), 0);
         const payout = reserved + net;
+        if(usesLottery(walletOf(ctx),table)&&!session.bot)financeResults.push({session,payout,record:{roomId:table.roomId,inning:table.inning,bets,scores,net}});
         if (!Number.isSafeInteger(payout) || payout < 0) throw new Error('Invalid hundred settlement payout for user ' + uid);
         if (!settlements.has(Number(uid))) {
           if (payout > 0) {
             const paid = await credit(session, payout, hundredWalletContext(ctx, session),
-              { operation: hand, key: 'bairen:' + table.agentId + ':' + table.roomType + ':' + table.roomId + ':' + table.inning + ':' + uid });
+              { operation: hand, key: 'bairen:' + table.agentId + ':' + table.roomType + ':' + table.roomId + ':' + table.inning + ':' + uid,
+                ...creditFinance(walletOf(ctx),table,'payout') });
             if (paid?.ok === false) throw new Error('Hundred settlement credit rejected for user ' + uid);
           }
           settlements.set(Number(uid), { areaWinningScores: scores, realScore: net, points: session.wallet });
@@ -252,12 +258,15 @@ export function createBairenEngine(adapter) {
         io.sendUser?.(uid, PUSH.PLAYER_BALANCE_UPDATE, { points: session.wallet });
       }
       table.hundredSettledInning = table.inning;
+      if(usesLottery(walletOf(ctx),table))walletOf(ctx).settleLottery(table,financeRound(table),financeResults,
+        {inning:table.inning,cards,rankTypes,lostAreas,extraResult,winningAreas:hand.winningAreas,tieAreas:hand.tieAreas});
       hand.settled = true;
       table.recordUserCenter?.([...settlements].map(([uid,r])=>({uid,score:r.realScore,
         xiaZhuData:(table.playerBets.get(uid)||[]).reduce((sum,b)=>sum+b.total,0)})),
         {inning:table.inning,publicResult:{showdownPokers:cards,showdownTypes:rankTypes,...outcome(hand),...extraResult},
           details:Object.fromEntries([...settlements].map(([uid,r])=>[uid,{areaWinningScores:r.areaWinningScores,
-            betDetailTableMap:Object.fromEntries((table.playerBets.get(uid)||[]).map(b=>[b.areaId,{areaId:b.areaId,betScore:b.total,realScore:r.areaWinningScores[b.areaId]}]))}]))});
+            betDetailTableMap:Object.fromEntries((table.playerBets.get(uid)||[]).map(b=>[b.areaId,{areaId:b.areaId,betScore:b.total,realScore:r.areaWinningScores[b.areaId],
+              score:b.total*(hand.betReserveFactor||1)+r.areaWinningScores[b.areaId],tax:0,odds:(hand.areaOdds||table.rules.betAreaOdds)[b.areaId]}]))}]))});
       const viewers = new Map();
       io.forEachPlayer?.(session => viewers.set(Number(session.userId), session));
       for (const [uid, session] of table.playerSessions) viewers.set(Number(uid), session);
@@ -291,6 +300,22 @@ export function createBairenEngine(adapter) {
     }
   }
 
+  function reserveBeforeReveal(ctx){
+    const {table,io}=ctx,wallet=walletOf(ctx);
+    if(!usesLottery(wallet,table))return;
+    const hand=table.hand;hand.tieAreas=outcome(hand).tieAreas;
+    const results=[];
+    for(const [uid,bets]of table.playerBets){
+      const session=table.playerSessions.get(uid)||io.sessionFor?.(uid);
+      if(!session||session.bot||!bets.length)continue;
+      const {net,scores}=resultForBets(table,bets);
+      const payout=bets.reduce((sum,bet)=>sum+bet.total*(hand.betReserveFactor||1),0)+net;
+      results.push({session,payout,record:{roomId:table.roomId,inning:table.inning,bets,scores,net}});
+    }
+    wallet.reserveLottery(table,financeRound(table),results,{inning:table.inning,cards:resultCards(hand),rankTypes:adapter.showdownTypes(hand),
+      lostAreas:outcome(hand).lostAreas,extraResult:adapter.resultFields?.(table,hand)||{},winningAreas:hand.winningAreas,tieAreas:hand.tieAreas});
+  }
+
   function tick(io, table, now = Date.now(), ctx = {}) {
     if (table.hand?.cancelTask) return;
     const pendingCancel = table.hand?.pendingCancel;
@@ -322,6 +347,7 @@ export function createBairenEngine(adapter) {
       table.state = PHASE.SHOWDOWN;
       table.phaseEndsAt = now + (adapter.revealSeconds?.(table) || table.config.revealSeconds || 3) * 1000;
       const cards = resultCards(table.hand);
+      reserveBeforeReveal({...ctx,table,io});
       io.broadcast(PUSH.SHOWDOWN_POKERS, { roomType: table.roomType, roomId: table.roomId, inning: table.inning,
         showdownPokers: cards, showdownTypes: adapter.showdownTypes(table.hand),
         ...outcome(table.hand), ...adapter.resultFields?.(table, table.hand),

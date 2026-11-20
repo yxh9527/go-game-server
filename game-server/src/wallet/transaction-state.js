@@ -2,6 +2,7 @@
 // other. Replacing them with JSON copies would break hot-reload recovery.
 export function captureGameState(runtime, ignored = []) {
   const skip = new Set([runtime, runtime.wallet, ...ignored, ...runtime.registry.sessions.keys()]);
+  const sessions = new Set(runtime.registry.sessions.values());
   const records = [], seen = new Set();
   function visit(value) {
     if (!value || typeof value !== 'object' || skip.has(value) || seen.has(value) || Object.isFrozen(value)) return;
@@ -18,9 +19,16 @@ export function captureGameState(runtime, ignored = []) {
       if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) return;
       const descriptors = Object.getOwnPropertyDescriptors(value);
       records.push(() => {
-        for (const key of Reflect.ownKeys(value)) if (!(key in descriptors) && Object.getOwnPropertyDescriptor(value,key).configurable) delete value[key];
+        // Distributed eviction can revoke an existing connection while an
+        // unrelated financial request awaits its reply. Game rollback cannot
+        // reinstate that session's permission to act.
+        const superseded=sessions.has(value)&&value.superseded===true;
+        const unauthenticated=sessions.has(value)&&descriptors.authenticated?.value===true&&value.authenticated===false;
+        for (const key of Reflect.ownKeys(value)) if (!Object.hasOwn(descriptors,key) && Object.getOwnPropertyDescriptor(value,key).configurable) delete value[key];
         for (const key of Reflect.ownKeys(descriptors)) if (key !== 'length') Object.defineProperty(value,key,descriptors[key]);
         if (descriptors.length) Object.defineProperty(value,'length',descriptors.length);
+        if(superseded)value.superseded=true;
+        if(superseded||unauthenticated)value.authenticated=false;
       });
       for (const key of Reflect.ownKeys(descriptors)) if ('value' in descriptors[key]) visit(descriptors[key].value);
     }
@@ -28,5 +36,17 @@ export function captureGameState(runtime, ignored = []) {
   visit(runtime.registry.tables); visit(runtime.registry.roomManager);
   // Session registry keys are sockets, intentionally excluded from traversal.
   visit(runtime.registry.sessions);
-  return () => { for (let i=records.length-1;i>=0;i--) records[i](); };
+  let finished=false;
+  const discard=()=>{
+    finished=true;records.length=0;skip.clear();seen.clear();sessions.clear();
+  };
+  const restore=()=>{
+    if(finished)return;
+    try{for(let i=records.length-1;i>=0;i--)records[i]();}
+    finally{discard();}
+  };
+  // A retained completion callback must not keep a completed transaction's
+  // entire room graph alive, or roll it back again after later game actions.
+  restore.discard=discard;
+  return restore;
 }

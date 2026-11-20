@@ -25,7 +25,7 @@ test('backoffice publishes agent-owned matches and schedules; foreign reads and 
   assert.equal((await request('/matches?agent_id=22')).status,403);
   assert.equal((await request('/matches',{headers:{'X-Agent-Id':'22'}})).status,403);
   assert.equal((await request('/matches',{method:'POST',body:{...spec,agent_id:22}})).status,403);
-  for(const [method,path,body] of [['GET','/'+b.data.id],['GET','/'+b.data.id+'/runtime'],['PUT','/'+b.data.id,{championship_name:'bad'}],['PUT','/'+b.data.id+'/state',{state:4}]]){
+  for(const [method,path,body] of [['GET','/'+b.data.id],['GET','/'+b.data.id+'/runtime'],['PUT','/'+b.data.id,{championship_name:'bad'}],['PUT','/'+b.data.id+'/state',{state:4}],['POST','/'+b.data.id+'/terminate',{reason:'foreign stop'}],['PUT','/'+b.data.id+'/pause',{paused:true}],['POST','/'+b.data.id+'/archive',{}],['DELETE','/'+b.data.id]]){
     assert.equal((await request('/matches'+path,{method,body})).status,404);
   }
   assert.equal((await request('/matches/'+a.data.id,{method:'PUT',body:{agent_id:22}})).status,403);
@@ -49,6 +49,18 @@ test('backoffice publishes agent-owned matches and schedules; foreign reads and 
   assert.equal((await request('/blinds',{token:'agent-eleven'})).status,403);
   await assert.rejects(()=>app.locals.tournaments.update(a.data.id,{agent_id:22}),/所属代理/);
   await assert.rejects(()=>app.locals.tournaments.saveSchedule(sa.data.id,{...daily,agent_id:22}),/所属代理/);
+  runtime.tournamentTables={start:async(_r,players)=>[{room_id:81000000,players:players.map(p=>p.userId)}],invalidate:async()=>({invalidated:true,released:true})};
+  for(const userId of [10001,10002])await app.locals.tournaments.register(a.data.id,{userId,agentId:11,name:String(userId)});
+  now+=60000;await app.locals.tournaments.tick();assert.equal((await runtime.store.getMatch(a.data.id)).state,2);
+  assert.equal((await request('/matches/'+a.data.id+'/terminate',{method:'POST',body:{}})).status,400);
+  const terminated=await request('/matches/'+a.data.id+'/terminate',{method:'POST',body:{reason:'maintenance stop',actor:{kind:'platform',agentId:22,token:'forged'}}});
+  assert.equal(terminated.code,0);assert.equal(terminated.data.state,4);assert.equal(terminated.data.refundsPending,0);
+  const audit=(await request('/matches/'+a.data.id+'/runtime')).data.state.termination;
+  assert.deepEqual(audit.actor,{agentId:11,kind:'agent'});assert.equal(audit.reason,'maintenance stop');assert.equal(JSON.stringify(audit).includes('forged'),false);
+  const retried=await request('/matches/'+a.data.id+'/state',{method:'PUT',body:{state:4,reason:'maintenance stop'}});
+  assert.equal(retried.code,0);assert.equal(retried.data.terminationAt,audit.at);
+  await request('/matches/'+a.data.id+'/state',{method:'PUT',body:{state:4}});
+  assert.equal((await request('/matches/'+a.data.id+'/runtime')).data.state.cancelReason,'admin_terminated');
 });
 
 test('production admin routes fail closed without configured credentials',async t=>{

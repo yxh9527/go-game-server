@@ -4,6 +4,7 @@ const version=new URL(import.meta.url).searchParams.get('v')||'0';
 const {userInfoOf}=await rel(import.meta.url,'./member.js',version);
 const {playerPanelStatistics,playerPanelWindows}=await rel(import.meta.url,'../../../shared/player-panel.js',version);
 const {roomPlayerPanelRecords,playerPanelHandRow,panelRoomNames}=await rel(import.meta.url,'./player-panel-records.js',version);
+const {queryHistory}=await rel(import.meta.url,'../../../shared/history-query.js',version);
 const error=(status,message)=>Object.assign(new Error(message),{status});
 const integer=(value,label)=>{const n=Number(value);if(!Number.isSafeInteger(n)||n<=0)throw error(400,'Invalid '+label);return n;};
 const seatRoomTypes=new Set([19,24,25,26,27,28,30,31,32]);
@@ -59,9 +60,53 @@ export async function createPlayerPanel(runtime){
     if(Number(table.roomType)!==19){
       const window=playerPanelWindows(),query={userId:uid,agentId:session.agentId,currency:session.currency||'CNY',kind:'hands',roomType:table.roomType,
         roomId:0,inning:0,page:1,size:1,endTime:window.now,sortDesc:true};
-      const [today,week,seven]=await Promise.all([window.today,window.week,window.sevenDays].map(startTime=>gateway.getUserCenter({...query,startTime})));
-      return {records:[],complete:false,statistics:{totalHands:'--',todayScore:today.totalScore,oneWeekScore:week.totalScore,oneWeekHands:seven.total,
-        flipManualBetPercent:'--',joinPercent:'--',tableJoinPercent:'--'}};
+      const [lifetime,today,week,seven]=await Promise.all([gateway.playerPanel('read',{...scope(session,uid),roomId:table.roomId,roomType:Number(table.roomType)}),
+        ...[window.today,window.week,window.sevenDays].map(startTime=>queryHistory(runtime,{...query,startTime},{rollingEnd:true}))]);
+      const totals=lifetime?.statistics;
+      if(!Number.isSafeInteger(totals?.totalHands)||totals.totalHands<0)throw error(503,'玩家累计手数数据源暂不可用');
+      const effective={};
+      if(totals.effectiveBetHands!==undefined||totals.effectiveBetHandPercent!==undefined){
+        const count=totals.effectiveBetHands,percent=totals.effectiveBetHandPercent;
+        const expected=totals.totalHands?Math.round(count/totals.totalHands*10000)/100:0;
+        if(!Number.isSafeInteger(count)||count<0||count>totals.totalHands||!Number.isFinite(percent)||percent<0||percent>100||Math.abs(percent-expected)>0.000001)
+          throw error(503,'玩家有效下注手数数据源暂不可用');
+        Object.assign(effective,{effectiveBetHands:count,effectiveBetHandPercent:percent});
+      }
+      if(totals.netWinHands!==undefined||totals.winPercent!==undefined){
+        const count=totals.netWinHands,percent=totals.winPercent;
+        const expected=totals.totalHands?Math.round(count/totals.totalHands*10000)/100:0;
+        if(!Number.isSafeInteger(count)||count<0||count>totals.totalHands||!Number.isFinite(percent)||percent<0||percent>100||Math.abs(percent-expected)>0.000001)
+          throw error(503,'玩家净盈利局数数据源暂不可用');
+        Object.assign(effective,{netWinHands:count,winPercent:percent});
+      }
+      if([24,25,26,27,28,30,31,32].includes(Number(table.roomType))&&totals.behaviorHands!==undefined){
+        const {totalHands:total,behaviorHands:known,voluntaryHands:voluntary,raisedHands:raised,tableHands:tableTotal,tableBehaviorHands:tableKnown,tableVoluntaryHands:tableVoluntary}=totals;
+        if(![known,voluntary,raised,tableTotal,tableKnown,tableVoluntary].every(Number.isSafeInteger)||known<0||known>total||voluntary<0||voluntary>known||raised<0||raised>voluntary||tableTotal<0||tableTotal>total||tableKnown<0||tableKnown>Math.min(tableTotal,known)||tableVoluntary<0||tableVoluntary>Math.min(tableKnown,voluntary))throw error(503,'玩家行为统计数据源暂不可用');
+        const ratio=(count,n)=>n?Math.round(count/n*10000)/100:0;
+        Object.assign(effective,{behaviorHands:known,voluntaryHands:voluntary,raisedHands:raised,
+          joinPercent:[25,31].includes(Number(table.roomType))&&known===total?ratio(voluntary,total):'--',flipManualBetPercent:Number(table.roomType)===25&&known===total?ratio(raised,total):'--',tableJoinPercent:[25,31].includes(Number(table.roomType))&&tableKnown===tableTotal?ratio(tableVoluntary,tableTotal):'--'});
+        if(Number(table.roomType)===31){
+          if(raised!==0||![totals.doubleHands,totals.splitHands,totals.insuranceBuyHands].every(count=>Number.isSafeInteger(count)&&count>=0&&count<=known))throw error(503,'二十一点动作统计数据源暂不可用');
+          if(known===total)Object.assign(effective,{manualBetHands:voluntary,manualBetPercent:ratio(voluntary,total),doubleHands:totals.doubleHands,doublePercent:ratio(totals.doubleHands,total),splitHands:totals.splitHands,splitPercent:ratio(totals.splitHands,total),insuranceBuyHands:totals.insuranceBuyHands,insuranceBuyPercent:ratio(totals.insuranceBuyHands,total)});
+        }
+        if(Number(table.roomType)===27){
+          const submitted=totals.clientArrangementHands,extended=totals.extendedArrangementHands;
+          if(voluntary!==0||raised!==0||![submitted,extended].every(count=>Number.isSafeInteger(count)&&count>=0&&count<=known))throw error(503,'十三水理牌统计数据源暂不可用');
+          if(known===total)Object.assign(effective,{clientArrangementHands:submitted,clientArrangementPercent:ratio(submitted,total),serverArrangementHands:total-submitted,serverArrangementPercent:ratio(total-submitted,total),extendedArrangementHands:extended,extendedArrangementPercent:ratio(extended,total)});
+        }
+        if([26,28,30].includes(Number(table.roomType))){
+          if(voluntary!==0||raised!==0||![totals.clientDiscardHands,totals.serverDiscardHands].every(count=>Number.isSafeInteger(count)&&count>=0&&count<=known))throw error(503,'麻将出牌来源统计数据源暂不可用');
+          if(known===total)for(const key of ['clientDiscard','serverDiscard'])Object.assign(effective,{[key+'Hands']:totals[key+'Hands'],[key+'Percent']:ratio(totals[key+'Hands'],total)});
+        }
+        if([24,32].includes(Number(table.roomType))){
+          const opportunities=totals.betOpportunityHands,above=totals.aboveMinimumBetHands,grab=totals.manualGrabHands,positive=totals.positiveGrabHands;
+          if(raised!==0||![opportunities,above,grab,positive].every(Number.isSafeInteger)||opportunities<voluntary||opportunities>known||above<0||above>voluntary||grab<0||grab>known||positive<0||positive>grab||Number(table.roomType)===32&&(opportunities!==known||grab!==0||positive!==0))throw error(503,'座位游戏动作统计数据源暂不可用');
+          if(known===total){Object.assign(effective,{betOpportunityHands:opportunities,manualBetHands:voluntary,manualBetPercent:ratio(voluntary,opportunities),aboveMinimumBetHands:above,aboveMinimumBetPercent:ratio(above,opportunities)});
+            if(Number(table.roomType)===24)Object.assign(effective,{manualGrabHands:grab,manualGrabPercent:ratio(grab,total),positiveGrabHands:positive,positiveGrabPercent:ratio(positive,total)});}
+        }
+      }
+      return {records:[],complete:false,statistics:{totalHands:totals.totalHands,...effective,todayScore:today.totalScore,oneWeekScore:week.totalScore,oneWeekHands:seven.total,
+        flipManualBetPercent:effective.flipManualBetPercent??'--',joinPercent:effective.joinPercent??'--',tableJoinPercent:effective.tableJoinPercent??'--'}};
     }
     const result=await gateway.playerPanel('read',{...scope(session,uid),roomId:table.roomId});
     if(!result||!Array.isArray(result.records))throw error(503,'玩家统计数据源暂不可用');return result;
@@ -73,7 +118,7 @@ export async function createPlayerPanel(runtime){
       (session.playerPanelNotes ||= new Map()).set(uid,note);
       const bot=Boolean(member.bot)||uid>=90000000;
       const source=bot?{records:roomPlayerPanelRecords(table,uid),complete:true}:await data(session,table,uid);
-      const stats=playerPanelStatistics(source.records,{targetId:uid,roomId:table.roomId,complete:source.complete!==false});
+      const stats=playerPanelStatistics(source.records,{targetId:uid,roomId:table.roomId,roomType:table.roomType,complete:source.complete!==false});
       const recentRecordCount=bot?source.records.length:Number(source.statistics?.oneWeekHands??stats.oneWeekHands);
       return {playerId:uid,name:info.name,imageUrl:info.icon,regionCode:info.regionCode,...stats,...source.statistics,
         ...(bot?{...robot(table,member),oneWeekHands:recentRecordCount,isRobot:true}:{}),
@@ -114,8 +159,8 @@ export async function createPlayerPanel(runtime){
       const source=bot?{records:roomPlayerPanelRecords(table,targetId)}:dev?await data(session,table,Number(targetId))
         :Number(table.roomType)===19?await gateway.playerPanel('records',{
           ...scope(session,Number(targetId)),roomId:table.roomId,page,size,
-        }):await gateway.getUserCenter({userId:Number(targetId),agentId:session.agentId,currency:session.currency||'CNY',kind:'hands',
-          roomType:Number(table.roomType),roomId:0,inning:0,page,size,startTime:window.sevenDays,endTime:window.now,sortDesc:true});
+        }):await queryHistory(runtime,{userId:Number(targetId),agentId:session.agentId,currency:session.currency||'CNY',kind:'hands',
+          roomType:Number(table.roomType),roomId:0,inning:0,page,size,startTime:window.sevenDays,endTime:window.now,sortDesc:true},{rollingEnd:true});
       const records=source.records.filter(r=>bot||r.endedAt>=window.sevenDays&&r.endedAt<=window.now)
         .map(r=>({...r,roomType:r.roomType||table.roomType,players:r.detail?.firstGameList||r.players||[]}))
         .sort((a,b)=>b.endedAt-a.endedAt||b.inning-a.inning);

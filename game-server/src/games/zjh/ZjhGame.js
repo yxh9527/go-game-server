@@ -6,6 +6,7 @@ const { ZJH_SEND } = await rel(import.meta.url, "./messages.js", v);
 const { default: config, roomRules } = await rel(import.meta.url, "./config.js", v);
 const { SeatGame } = await rel(import.meta.url, "../../core/SeatGame.js", v);
 const engine = await rel(import.meta.url, "./engine.js", v);
+const {queryNativeHistory}=await rel(import.meta.url,'../../core/game-history.js',v);
 
 export class ZjhGame extends SeatGame {
   constructor() {
@@ -91,6 +92,7 @@ export class ZjhGame extends SeatGame {
       return true;
     }
     if (msgid === ZJH_SEND.GAME_BACK) {
+      if(ctx.runtime?.env==='prod')return queryNativeHistory(ctx,payload||{}).then(data=>{ctx.send(3746,data);return true;});
       ctx.send(3746, engine.historyPayload(ctx.runtime?.env === "dev" ? ctx.table
         : { ...ctx.table, history: [] }, payload || {}, ctx.session.userId));
       return true;
@@ -99,11 +101,11 @@ export class ZjhGame extends SeatGame {
   }
 
   startRound(ctx) {
-    engine.beginHand(ctx.io, ctx.table);
+    return engine.beginHand(ctx.io, ctx.table);
   }
 
   playTick(ctx, now) {
-    engine.tickPlaying(ctx.io, ctx.table, now);
+    return engine.tickPlaying(ctx.io, ctx.table, now);
   }
 
   abandonIfPlaying(ctx, member) {

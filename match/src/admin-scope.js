@@ -32,13 +32,17 @@ export function createAdminScope(runtime) {
       const scoped=/^\/(matches|schedules)(\/|$)/.test(req.path);
       // Shared financial/template configuration is platform-admin-only until
       // its authoritative schema supports ownership; agent keys cannot edit it.
-      if(!scoped){if(principal)throw fail(403,'此管理功能需要平台权限');return next();}
+      if(!scoped){
+        if(principal)throw fail(403,'此管理功能需要平台权限');
+        req.adminScope={kind:platform?'platform':'dev',agentId:req.get('X-Agent-Id')?agentId(req.get('X-Agent-Id')):0};return next();
+      }
       const requested=[req.get('X-Agent-Id'),req.query.agent_id,req.body?.agent_id,req.body?.match?.agent_id]
         .filter(value=>value!==undefined).map(agentId);
       const selected=principal?agentId(principal.agent_id):requested[0]??(local?1:0);
       if(!selected)throw fail(400,'请选择要管理的 agent_id');
       if(requested.some(id=>id!==selected))throw fail(403,'无权管理其他代理的比赛');
       req.adminAgentId=selected;
+      req.adminScope={agentId:selected,kind:principal?'agent':platform?'platform':'dev'};
       next();
     }catch(error){next(error);}
   };

@@ -3,6 +3,7 @@ const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { HundredGame } = await rel(import.meta.url, './HundredGame.js', v);
 const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', v);
 const { configuredHundredRooms } = await rel(import.meta.url, './hundred-subscriptions.js', v);
+const {queryHundredHistory}=await rel(import.meta.url,'./game-history.js',v);
 
 export class BairenGame extends HundredGame {
   constructor(config, engine, roomRules) { super(config); this.engine = engine; this.rulesForRoom = roomRules; }
@@ -100,6 +101,13 @@ export class BairenGame extends HundredGame {
       return true;
     }
     if (id === SEND.REQUEST_100_RECORD || id === SEND.REQUEST_ONE_RECORD) {
+      if(runtime.env==='prod')return (async()=>{
+        if(id===SEND.REQUEST_ONE_RECORD){
+          const detail=await queryHundredHistory(ctx,Number(body.currInning));
+          if(detail){ctx.send(PUSH.RETURN_ONE_RECORD,detail);return true;}
+        }
+        ctx.send(PUSH.RETURN_100_RECORD,await queryHundredHistory(ctx));return true;
+      })();
       if (id === SEND.REQUEST_ONE_RECORD) {
         const detail = this.engine.historyDetail(table, session.userId, Number(body.currInning));
         if (detail) { ctx.send(PUSH.RETURN_ONE_RECORD, detail); return true; }
@@ -167,10 +175,16 @@ export class BairenGame extends HundredGame {
 
   tick(ctx) {
     const table = ctx.table;
+    if(table.hundredCycleTask)return table.hundredCycleTask;
     // New rounds adopt current public game policy, while each hand keeps its
     // already accepted reserve factor and odds through settlement retries.
     table.config = this.config;
     const ticking = this.engine.tick(ctx.io, table, Date.now(), { ...ctx, gameConfig: this.config });
+    if(ticking?.then){
+      const task=Promise.resolve(ticking).then(()=>this.tickRobots(ctx))
+        .finally(()=>{if(table.hundredCycleTask===task)table.hundredCycleTask=null;});
+      table.hundredCycleTask=task;return task;
+    }
     this.tickRobots(ctx);
     return ticking;
   }

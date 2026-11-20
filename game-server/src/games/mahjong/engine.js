@@ -209,7 +209,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   if (!tiles.validDeck(deck, r)) throw new Error('Invalid Mahjong wall');
   table.currentInning++; table.phase = 'playing'; table.roomState = 3;
   const bankerPos = members.some(m => m.pos === table.dealerPos) ? table.dealerPos : members[0].pos;
-  const h = table.hand = { rules: structuredClone(r), deck, index: 0, tailIndex: deck.length, bankerPos,
+  const h = table.hand = { rules: structuredClone(r), behaviorVersion:1, deck, index: 0, tailIndex: deck.length, bankerPos,
     // The original Changsha help draws birds from a separate deck. Fix them
     // before play; bird draws must not consume the main wall or its sea tile.
     birdCards: r.family === 'csmj' ? tiles.shuffled(tiles.deckFor(r)).slice(0, 2) : [],
@@ -217,7 +217,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     players: members.map(m => { m.state = 3; m.totalBet = 0; return { uid: m.uid, pos: m.pos, bot: m.bot, member: m, name: m.name, icon: m.icon,
       openingPoint: m.point, handCards: [], indices: [], groupCards: [], playCards: [], flowers: 0,
       huRecord: [], details: [], delta: 0, totalFan: 0, roots: 0, redKongs: 0,
-      ting: false, queType: 0, drawCount: 0, discardCount: 0, passedHu: false, claimedSmalls: [] }; }),
+      ting: false, queType: 0, drawCount: 0, discardCount: 0, clientDiscard:false, serverDiscard:false, passedHu: false, claimedSmalls: [] }; }),
     events: [], publicIndices: new Set(), discardCount: 0, winners: [], offers: {}, responses: {},
     viewers: new Set([...(table.observers || []), ...members].map(m => Number(m.uid))) };
   // Commit the entire physical wall before dealing. Repeated faces have
@@ -496,7 +496,7 @@ function smallAward(io, table, p, types, now, anchorPos = p.pos) {
   h.events.push({ uid: p.uid, pos: p.pos, type: types[0] > 100 ? OP.MID_HU : OP.FIRST, huTypes: types, cards: show,
     paiList: p.handCards.slice(), groupCards: structuredClone(p.groupCards), inningRound: h.discardCount, time: now });
 }
-export function action(io, table, uid, body = {}, now = Date.now()) {
+export function action(io, table, uid, body = {}, now = Date.now(), automatic=false) {
   const h = table.hand, p = player(table, uid), type = body.type, card = body.card;
   if (!h || h.settled || !p || now >= h.deadline || !Number.isInteger(type) || (body.uid != null && Number(body.uid) !== p.uid)) return false;
   const r = h.rules;
@@ -561,6 +561,9 @@ export function action(io, table, uid, body = {}, now = Date.now()) {
     p.ting = true; p.heavenTing = type === OP.FIRST;
   }
   const index = remove(p, [card])[0]; h.publicIndices.add(index);
+  // Source is an internal argument. A client-supplied isAuto flag cannot
+  // relabel accepted discards as server decisions. Ting declarations discard too.
+  if(automatic)p.serverDiscard=true;else p.clientDiscard=true;
   p.playCards.push(card); p.discardCount++; h.discardCount++; h.lastOut = { uid: p.uid, card };
   closeOp(io, table, p, type);
   // The client indexes its rendered concealed hand, not the discard pile.
@@ -718,12 +721,12 @@ export function tick(io, table, now = Date.now()) {
     else if (['gang', 'sea'].includes(h.stage) && h.actorUid === p.uid) {
       const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family,
         context: p.bot ? robot.decisionContext(table, p) : null }) : { type: OP.PASS };
-      action(io, table, p.uid, chosen, at);
+      action(io, table, p.uid, chosen, at, true);
     }
     else if ((h.stage === 'response' || h.stage === 'first') && h.offers[p.uid] && !h.responses[p.uid]) {
       const chosen = auto ? robot.chooseAction({ cards: p.handCards.slice(), options: options(table, p), family: h.rules.family,
         context: p.bot ? robot.decisionContext(table, p) : null }) : { type: OP.PASS };
-      action(io, table, p.uid, { ...chosen, isAuto: true }, at);
+      action(io, table, p.uid, { ...chosen, isAuto: true }, at, true);
     } else if (h.stage === 'turn' && h.actorUid === p.uid) {
       const chosen = lockedHand && (due || autoDiscard) && p.handCards.includes(p.drawn)
         ? { type: OP.DISCARD, card: p.drawn }
@@ -735,7 +738,7 @@ export function tick(io, table, now = Date.now()) {
       // Declaration buttons in Jsmj require the actual discard, not the
       // entire list of candidate discards returned with the hint.
       if ([OP.TING, OP.FIRST].includes(chosen.type) && chosen.card == null) chosen.card = chosen.cards?.[0];
-      action(io, table, p.uid, { ...chosen, isAuto: true }, at);
+      action(io, table, p.uid, { ...chosen, isAuto: true }, at, true);
       p.actionAt = now + Math.min(robot.thinkTime(), Math.max(100, h.deadline - now - 250));
     }
   }

@@ -1,10 +1,11 @@
+import {importHotModule} from "../../../shared/hot-import.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BaccaratGame } from '../../../game-server/src/games/baccarat/BaccaratGame.js';
+const { BaccaratGame }=await importHotModule(new URL("../../../game-server/src/games/baccarat/BaccaratGame.js",import.meta.url).href,"pricing-selected-test/game-server/games/baccarat.test.js");
 import config from '../../../game-server/src/games/baccarat/config.js';
-import * as engine from '../../../game-server/src/games/baccarat/engine.js';
+const engine=await importHotModule(new URL("../../../game-server/src/games/baccarat/engine.js",import.meta.url).href,"pricing-selected-test/game-server/games/baccarat.test.js");
 import * as rules from '../../../game-server/src/games/baccarat/rules.js';
-import * as pricing from '../../../game-server/src/games/baccarat/odds.js';
+const pricing=await importHotModule(new URL("../../../game-server/src/games/baccarat/odds.js",import.meta.url).href,"pricing-selected-test/game-server/games/baccarat.test.js");
 import * as owner from '../../../game-server/src/games/baccarat/table-owner.js';
 import * as history from '../../../game-server/src/games/baccarat/history.js';
 import { seedRooms } from '../../../cache/rpc/seed.js';
@@ -226,32 +227,23 @@ test('Baccarat VIP early deal never discards bets; repeated peek completion cann
   f.game.tickRobots(f.ctx);assert.equal(f.table.hundredRobots,undefined);
 });
 
-test('Baccarat production history uses scoped Redis then data-center and verifies ownership', async () => {
-  const f=fixture(), cache=new Map(), calls=[];
-  const payload={gameRoomId:f.table.roomId,currInning:5,showdownPokers:{other:[1,2],banker:[3,4]},showdownTypes:{other:5,banker:9},winAreaIds:[2,9],betDetailTableMap:{}};
-  const row={userId:71,agentId:7,gameId:58,hash:'safe-hash',init:JSON.stringify(payload)};
-  const gateway={async getRecords(q){calls.push(['list',q]);return {data:[row,{...row,userId:72,hash:'foreign',init:JSON.stringify({...payload,currInning:6})},{...row,agentId:8,hash:'foreign-agent'}]};},
-    async getRecordDetail(q){calls.push(['detail',q]);return {found:true,data:row};}};
-  f.ctx.runtime={env:'prod',rpc:{gateway,bus:{async getCache(k){return cache.get(k)},async setCache(k,value,ttl){assert.ok(k.startsWith('baccarat:7:700001:'));assert.ok([30,300].includes(ttl));cache.set(k,value)}}}};
-  assert.deepEqual((await history.list(f.ctx)).list,[5]);await history.list(f.ctx);
-  assert.equal(calls.filter(c=>c[0]==='list').length,1);
-  assert.equal(await history.detail(f.ctx,6),null);assert.equal(await history.detail(f.ctx,-1),null);
-  assert.deepEqual(await history.detail(f.ctx,5),payload);await history.detail(f.ctx,5);
-  assert.equal(calls.filter(c=>c[0]==='detail').length,1);
-  const query=calls[0][1];assert.equal(query.size,100);assert.equal(query.page,1);assert.equal(query.endTime-query.startTime,8*3600000);
-  f.ctx.session={userId:72};assert.equal(await history.detail(f.ctx,5),null);
-  const dev=fixture();history.record(dev.table,{player:[1,2],banker:[3,4],areas:[2],p:5,b:9,settlements:new Map()},new Map([[71,dev.session]]),{env:'prod'});
-  assert.equal(dev.table.hundredHistory,undefined);
+test('Baccarat production history reads unified settlement details with scoped three-minute query caching',async()=>{
+ const f=fixture(),cache=new Map(),calls=[];
+ f.ctx.session={...f.ctx.session,agentId:7,currency:'CNY'};f.table.agentId=7;
+ const payload={gameRoomId:f.table.roomId,currInning:5,showdownPokers:{other:[1,2],banker:[3,4]},showdownTypes:{other:5,banker:9},winAreaIds:[2,9],betDetailTableMap:{}};
+ const row={userId:71,agentId:7,currency:'CNY',roomType:58,roomId:f.table.roomId,inning:5,detail:payload};
+ f.ctx.runtime={env:'prod',rpc:{gateway:{getUserCenter:async q=>{calls.push(q);return {records:[row,{...row,userId:72,inning:6}]};},getRecords:()=>assert.fail('old financial ID query'),getRecordDetail:()=>assert.fail('old detail parser')},
+ bus:{getCache:async k=>cache.get(k),setCache:async(k,v,ttl)=>{assert.equal(ttl,180);cache.set(k,v);}}}};
+ assert.deepEqual((await history.list(f.ctx)).list,[5]);assert.deepEqual(await history.detail(f.ctx,5),payload);
+ assert.equal(await history.detail(f.ctx,6),null);assert.equal(await history.detail(f.ctx,-1),null);assert.equal(calls.length,2);
+ assert.equal(calls[1].inning,6,'an omitted latest-page inning needs an exact original query');
+ assert.equal(calls[0].roomType,58);assert.equal(calls[0].userId,71);assert.equal(calls[0].agentId,7);
+ assert.equal(await history.detail({...f.ctx,session:{...f.ctx.session,userId:99}},5),null);
 });
 
-test('Baccarat coalesces concurrent record requests and validates cached detail ownership',async()=>{
-  const f=fixture(),payload={gameRoomId:f.table.roomId,currInning:9,showdownPokers:{other:[1,2],banker:[3,4]},showdownTypes:{other:5,banker:9},winAreaIds:[2,9],betDetailTableMap:{}};
-  const row={userId:71,agentId:7,gameId:58,hash:'own',init:JSON.stringify(payload)};
-  let lists=0,details=0;
-  const gateway={async getRecords(){lists++;await new Promise(r=>setTimeout(r,5));return {data:[row]}},
-    async getRecordDetail(){details++;await new Promise(r=>setTimeout(r,5));return {found:true,data:{...row,userId:72}}}};
-  f.ctx.runtime={env:'prod',rpc:{gateway,bus:{async getCache(){return null},async setCache(){}}}};
-  const result=await Promise.all(Array.from({length:20},()=>history.detail(f.ctx,9)));
-  assert.equal(lists,1);assert.equal(details,1);assert.ok(result.every(r=>r===null));
-  assert.equal(f.table.baccaratRecordDetailTasks.size,0);assert.equal(f.table.baccaratRecordListTasks.size,0);
+test('Baccarat concurrent reviews coalesce and cannot expose a different account payload',async()=>{
+ const f=fixture();f.ctx.session={...f.ctx.session,agentId:7,currency:'CNY'};f.table.agentId=7;let reads=0;
+ f.ctx.runtime={env:'prod',rpc:{gateway:{getUserCenter:async()=>{reads++;await new Promise(r=>setTimeout(r,5));return {records:[{userId:72,agentId:7,currency:'CNY',roomType:58,roomId:f.table.roomId,inning:9,detail:{currInning:9}}]};}},bus:{getCache:async()=>null,setCache:async()=>{}}}};
+ const result=await Promise.all(Array.from({length:20},()=>history.detail(f.ctx,9)));
+ assert.equal(reads,2,'latest and exact lookups each coalesce across concurrent requests');assert.ok(result.every(r=>r===null));assert.equal(f.ctx.runtime.historyQueries.pending.size,0);
 });

@@ -1,7 +1,7 @@
 import { rel } from '../../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { PUSH } = await rel(import.meta.url, '../../messages.js', v);
-const { settleCardBets } = await rel(import.meta.url, '../../core/hundred-card-payout.js', v);
+const { settleCardBets,reserveCardBets } = await rel(import.meta.url, '../../core/hundred-card-payout.js', v);
 const { makeDeck, shuffle } = await rel(import.meta.url, '../holdem/cards.js', v);
 const { baccaratValue, drawBaccarat, winningAreas, winningOdds, pointStages, supplyState } = await rel(import.meta.url, './rules.js', v);
 const { default: gameConfig } = await rel(import.meta.url, './config.js', v);
@@ -241,6 +241,7 @@ export function applyCycle(io, table, cycle) {
   } else if (cycle === 3) {
     table.state = 3;
     bankers.lock(table, table.preparedHand || prepareHand(io, table), table.config.bankerAreas || gameConfig.bankerAreas, currentOdds(table));
+    bankers.registerFinance(io,table);
     bankers.push(io, table, table.config.bankerAreas || gameConfig.bankerAreas);
   } else if (cycle === 4) {
     if (table.lastResult) return;
@@ -258,6 +259,7 @@ export function applyCycle(io, table, cycle) {
     const { areas, p, b } = winningAreas(dealt.player, dealt.banker);
     table.supplyState = supplyState(dealt.player, dealt.banker);
     table.lastResult = { player: dealt.player, banker: dealt.banker, areas, p, b, areaOdds: dealt.areaOdds };
+    reserveCardBets(io,table,payoutAdapter(table));
     table.shoeHands = (table.shoeHands || 0) + 1;
     table.ways[1] = [{ winArea: areas.slice(), isLiPai: false, p, b }, ...table.ways[1]].slice(0, 104);
     io.broadcast(PUSH.SHOWDOWN_POKERS, {
@@ -280,7 +282,7 @@ export function applyCycle(io, table, cycle) {
     table.state = 6;
     const result = table.lastResult;
     if (!result) return;
-    return result.settlementTask ||= settleBets(io, table).finally(() => { result.settlementTask = null; });
+    return result.settlementTask ||= Promise.resolve(settleBets(io, table)).finally(() => { result.settlementTask = null; });
   } else if (cycle === 7) {
     table.state = 7;
     table.collectCardCount = table.dealCardCount;
@@ -312,8 +314,7 @@ export function tickBaccarat(io, table) {
   });
 }
 
-async function settleBets(io, table) {
-  return settleCardBets(io, table, {
+function payoutAdapter(table){return {
     calculate(table, result, mine) {
       const areaWinningScores = {}, betOdds = {};
       let realScore = 0, stake = 0;
@@ -334,5 +335,5 @@ async function settleBets(io, table) {
     resultPayload(table, result) { return { showdownPokers: { other: result.player, banker: result.banker },
       showdownPoints: { other: pointStages(result.player), banker: pointStages(result.banker) }, ...owner.snapshot(table) }; },
     snapshot: enterSnapshot, record: history.record, bankerAreas: table.config.bankerAreas || gameConfig.bankerAreas,
-  });
-}
+  };}
+async function settleBets(io,table){return settleCardBets(io,table,payoutAdapter(table));}

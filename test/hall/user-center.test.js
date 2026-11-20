@@ -1,8 +1,9 @@
+import {importHotModule} from '../../shared/hot-import.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {userCenterQuery,userCenterResponse,userCenterProfileResponse} from '../../hall/src/user-center.js';
-import {projectUserCenter} from '../../shared/user-center.js';
-import {userCenterMatch} from '../../shared/user-center-matches.js';
+const {userCenterQuery,userCenterResponse,userCenterProfileResponse}=await importHotModule(new URL('../../hall/src/user-center.js',import.meta.url).href,'hall-user-center-regression');
+const {projectUserCenter}=await importHotModule(new URL('../../shared/user-center.js',import.meta.url).href,'player-service-regression');
+const {userCenterMatch}=await importHotModule(new URL('../../shared/user-center-matches.js',import.meta.url).href,'player-service-regression');
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,6 +58,36 @@ test('history requests authenticate before querying and reject uid spoofing',asy
  assert.equal(reads,0);assert.equal((await userCenterResponse(runtime,27,{userId:42,token:'ok',roomType:19})).data.totalSize,1);
  runtime.gateway.getUserCenter=async()=>{throw Object.assign(new Error('source offline'),{code:14,status:503});};const failure=await userCenterResponse(runtime,39,{userId:42,token:'ok'});assert.equal(failure.msgCode,503);assert.equal(failure.data,null);
 });
+
+test('hall default current-time filters share a fixed three-minute result cache while authentication and calendar scope remain fresh',async t=>{
+  let clock=Date.UTC(2026,10,12,3),reads=0,auths=0,profiles=0;const cache=new Map(),writes=[];
+  t.mock.method(Date,'now',()=>clock);
+  const runtime={env:'prod',log:{error(){}},gateway:{authenticate:async token=>{auths++;return {success:token==='ok',userId:42};},
+    getLoginData:async()=>{profiles++;return {userId:42,agentId:7,currency:{symbol:'CNY'}};},
+    getUserCenter:async()=>{reads++;return {records:[]};}},bus:{getCache:async key=>{const v=cache.get(key);return v&&clock<v.until?v.raw:null;},
+      setCache:async(key,raw,ttl)=>{writes.push({key,ttl});cache.set(key,{raw,until:clock+ttl*1000});}}};
+  const params={userId:42,token:'ok',roomType:19};
+  assert.equal((await userCenterResponse(runtime,27,params)).msgCode,200);
+  clock+=1234;assert.equal((await userCenterResponse(runtime,27,{...params,pageNum:'1',endTime:'',endDateDiff:'0'})).msgCode,200);
+  clock+=178765;await userCenterResponse(runtime,27,params);assert.equal(reads,1);assert.equal(writes.length,1);
+  clock++;await userCenterResponse(runtime,27,params);assert.equal(reads,2);assert.equal(writes[0].ttl,180);
+  assert.equal(auths,4);assert.equal(profiles,4,'cache must not bypass current account authorization');
+  const before=reads;assert.equal((await userCenterResponse(runtime,27,{...params,token:'bad'})).msgCode,401);assert.equal(reads,before);
+  const priorKey=writes.at(-1).key;
+  clock=Date.UTC(2026,10,12,16)+1;await userCenterResponse(runtime,27,params);
+  assert.notEqual(writes.at(-1).key,priorKey,'China calendar-day rollover needs a distinct default interval');
+});
+
+test('explicit historical end times remain distinct and are never normalized into a moving end',async t=>{
+  t.mock.method(Date,'now',()=>now);const keys=[],cache=new Map();let reads=0;
+  const runtime={env:'prod',log:{error(){}},gateway:{authenticate:async()=>({success:true,userId:42}),getLoginData:async()=>({userId:42,agentId:7,currency:{symbol:'CNY'}}),
+    getUserCenter:async()=>{reads++;return {records:[]};}},bus:{getCache:async k=>cache.get(k),setCache:async(k,v)=>{keys.push(k);cache.set(k,v);}}};
+  const params={userId:42,token:'ok',startTime:'2026-11-07 00:00:00'};
+  await userCenterResponse(runtime,27,{...params,endTime:'2026-11-07 12:00:00'});
+  await userCenterResponse(runtime,27,{...params,endTime:'2026-11-07 13:00:00'});
+  await userCenterResponse(runtime,27,{...params,endTime:'2026-11-07 12:00:00'});
+  assert.equal(reads,2);assert.equal(new Set(keys).size,2);
+});
 test('championship display counts only confirmed prizes and real participation',()=>{
  const row={id:9,agent_id:7,currency:'CNY',start_time:now-10000,end_time:now,state:3,championship_name:'event',current_player:2};
  const state={registrations:{42:{userId:42,name:'me',rank:1,status:'winner',receipt:{paidGold:100,paidService:10}},43:{userId:43,name:'other',rank:2,status:'eliminated'}},
@@ -83,10 +114,12 @@ test('resident hall refreshes a changed shared projection without restarting or 
  t.after(async()=>{runtime?.userCenterProjection?.watcher?.close();await fs.rm(root,{recursive:true,force:true});});
  for(const dir of ['hall/src','shared','game-server/src/core'])await fs.mkdir(path.join(root,dir),{recursive:true});
  await fs.writeFile(path.join(root,'package.json'),'{"type":"module"}');
- for(const file of ['hall/src/user-center.js','hall/src/rel.js'])await fs.copyFile(file,path.join(root,file));
+ for(const file of ['hall/src/user-center.js','hall/src/rel.js','hall/src/projection-watch.js'])await fs.copyFile(file,path.join(root,file));
+ await fs.writeFile(path.join(root,'shared/hot-import.js'),'export const importHotModule=(location,version)=>{const url=new URL(location);url.searchParams.set("v",version);return import(url.href);};');
  await fs.writeFile(path.join(root,'hall/src/room-pool.js'),'export const requestRoomPool=()=>{throw new Error("prod must use gateway");};');
  await fs.writeFile(path.join(root,'game-server/src/core/member.js'),'export const userInfoOf=()=>({});');
  const sharedFile=path.join(root,'shared/user-center.js');
+ await fs.copyFile('shared/history-query.js',path.join(root,'shared/history-query.js'));
  await fs.writeFile(sharedFile,'export const projectUserCenter=source=>({infoList:source.records.map(r=>r.detail)});');
  const mod=await import(pathToFileURL(path.join(root,'hall/src/user-center.js')).href+'?v=resident');
  const oldRecord=record({endedAt:Date.now()-1000,roomType:25,detail:{firstGameList:[

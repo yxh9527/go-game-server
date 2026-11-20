@@ -1,5 +1,8 @@
 import express from "express";
 import { rel } from "../../shared/hot-import.js";
+import {installHotSourcePins} from '../../shared/hot-source-pins.js';
+import {ensureTournamentScheduler} from './scheduler-loop.js';
+installHotSourcePins();
 
 export async function createApp(runtime) {
   const v = runtime.hotVersion;
@@ -10,6 +13,7 @@ export async function createApp(runtime) {
   const { createMatchService } = await rel(import.meta.url, "./services/match.js", v);
   const { createMetaService } = await rel(import.meta.url, "./services/meta.js", v);
   const { createAdminScope } = await rel(import.meta.url, './admin-scope.js', v);
+  const {adminPage}=await rel(import.meta.url,'./admin-page.js',v);
   const matches = await createMatchService(runtime);
   const meta = await createMetaService(runtime);
   const { createTournaments } = await rel(import.meta.url, './tournaments.js', v);
@@ -21,6 +25,7 @@ export async function createApp(runtime) {
   }
 
   const app = express();
+  app.get('/admin',(_req,res)=>res.set('Cache-Control','no-store').type('html').send(adminPage));
   app.locals.tournaments=tournaments;
   app.use(express.json({ limit: "2mb" }));
   app.get("/health", (_req, res) => {
@@ -42,7 +47,7 @@ export async function createApp(runtime) {
   }));
 
   admin.get("/matches", wrap(async (req, res) => {
-    res.json({ code: 0, msg: "ok", data: (await matches.list()).filter(row=>Number(row.agent_id)===req.adminAgentId) });
+    res.set('Cache-Control','no-store').json({ code: 0, msg: "ok", data: await tournaments.listAdmin(req.adminAgentId) });
   }));
   admin.get("/matches/:id", wrap(async (req, res) => {
     res.json({ code: 0, msg: "ok", data: req.adminMatch });
@@ -57,12 +62,20 @@ export async function createApp(runtime) {
   admin.put("/matches/:id/state", wrap(async (req, res) => {
     const to = Number(req.body?.state);
     if (to === 4) {
-      res.json({ code: 0, msg: 'ok', data: await tournaments.cancel(Number(req.params.id)) });
+      const terminating=Number(req.adminMatch.state)===2||Number(req.adminMatch.state)===4&&req.body?.reason!==undefined;
+      const data=terminating?await tournaments.terminate(Number(req.params.id),req.adminScope,req.body?.reason):await tournaments.cancel(Number(req.params.id));
+      res.json({ code: 0, msg: 'ok', data });
       return;
     }
     if (to !== 1) throw Object.assign(new Error('开赛、比赛结束由调度与真实牌局结果驱动'), { status: 409 });
     res.json({ code: 0, msg: "ok", data: await tournaments.openRegistration(Number(req.params.id)) });
   }));
+  admin.post('/matches/:id/terminate',wrap(async(req,res)=>{
+    res.json({code:0,msg:'ok',data:await tournaments.terminate(Number(req.params.id),req.adminScope,req.body?.reason)});
+  }));
+  admin.put('/matches/:id/pause',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await tournaments.setPause(Number(req.params.id),req.body?.paused,req.adminScope)})));
+  admin.post('/matches/:id/archive',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await tournaments.archive(Number(req.params.id),req.adminScope)})));
+  admin.delete('/matches/:id',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await tournaments.removeDraft(Number(req.params.id))})));
 
   admin.get('/schedules', wrap(async (req,res) => res.json({code:0,msg:'ok',data:(await tournaments.listSchedules()).filter(row=>Number(row.agent_id)===req.adminAgentId)})));
   admin.post('/schedules', wrap(async (req,res) => res.json({code:0,msg:'ok',data:await tournaments.saveSchedule(0,{...req.body,agent_id:req.adminAgentId})})));
@@ -77,7 +90,8 @@ export async function createApp(runtime) {
     if(body.action==='history'){
       res.set('Cache-Control','no-store').json({code:0,msg:'ok',data:await tournaments.history(user,body.query)});return;
     }
-    if(body.action==='register') await tournaments.register(body.matchId,user);
+    if(body.action==='register') await tournaments.register(body.matchId,user,body.paymentType??2);
+    else if(body.action==='reenter') await tournaments.reenter(body.matchId,user,body.paymentType??2);
     else if(body.action==='unregister') await tournaments.unregister(body.matchId,user);
     else if(body.action!=='snapshot') throw Object.assign(new Error('unknown tournament action'),{status:400});
     const data = await tournaments.snapshot(user);
@@ -98,6 +112,8 @@ export async function createApp(runtime) {
   admin.put("/tickets/:id", wrap(async (req, res) => {
     res.json({ code: 0, msg: "ok", data: await meta.updateTicket(Number(req.params.id), req.body || {}) });
   }));
+  admin.delete('/tickets/:id',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await meta.deleteTicket(Number(req.params.id))})));
+  admin.post('/tickets/:id/issue',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await meta.issueTickets(Number(req.params.id),req.body||{},req.adminScope)})));
   admin.get("/ticket-rates", wrap(async (_req, res) => {
     res.json({ code: 0, msg: "ok", data: await meta.listRates() });
   }));
@@ -122,6 +138,7 @@ export async function createApp(runtime) {
   admin.put("/blinds/:id", wrap(async (req, res) => {
     res.json({ code: 0, msg: "ok", data: await meta.updateBlinds(Number(req.params.id), req.body || {}) });
   }));
+  admin.delete('/blinds/:id',wrap(async(req,res)=>res.json({code:0,msg:'ok',data:await meta.deleteBlinds(Number(req.params.id))})));
 
   app.use("/admin/v1", admin);
   app.use((err, _req, res, _next) => {
@@ -135,11 +152,7 @@ export async function createApp(runtime) {
   if (typeof runtime.store?.listMatches === 'function' && runtime.config.tournament_scheduler !== false) {
     const loop=runtime.tournamentLoop ||= {busy:false};
     loop.work=()=>tournaments.tick();
-    if(!loop.timer){loop.timer=setInterval(async()=>{
-      if(loop.busy)return;loop.busy=true;
-      try{await loop.work();}catch(error){runtime.log.error('tournament scheduler failed',error.message);}
-      finally{loop.busy=false;}
-    },1000);loop.timer.unref?.();}
+    ensureTournamentScheduler(loop,runtime.log);
   }
   return app;
 }

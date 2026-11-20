@@ -1,4 +1,4 @@
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, randomBytes,createHash } from "node:crypto";
 import { rel } from "../rel.js";
 
 const version = new URL(import.meta.url).searchParams.get("v") || "0";
@@ -27,7 +27,6 @@ function notify(record) {
 export function beginFairHand(io, table, players, holeCount) {
   // Production must obtain commitments/keys from its authoritative lottery
   // provider. Local proofs are a development adapter, not an on-chain claim.
-  if (io.env === "prod") return;
   const hand = table.hand;
   if (!hand?.deck?.length) return;
   const currentInning = Number(table.currentInning);
@@ -60,6 +59,14 @@ export function beginFairHand(io, table, players, holeCount) {
     revealed: new Set(), boardCount: 0, pokerList,
     notarizationCode: pokerList.map((card) => card.encryptedStr).join(""),
   };
+  if(io.env==='prod'){
+    const proof=table.fairPersistence||={pending:new Map(),messages:[],bytes:0,task:null};
+    record.proofId=createHash('sha256').update([table.agentId,table.gameId,table.roomId,table.createdAt||table.userCenterCreatedAt||record.createdAt,currentInning].join(':')).digest('hex');
+    record.agentId=Number(table.agentId);record.gameId=table.gameId;record.version=1;
+    proof.write=io.writeFairProof;proof.pending.set(currentInning,record);
+    const start=()=>void flushFairProof(table);
+    if(io.wallet?.deliver)io.wallet.deliver(start);else start();
+  }
   records(table).set(currentInning, record);
   records(table);
   io.broadcast(PUSH.DZPK_PUSH_BLOCKCHAIN_NOTIFY, notify(record));
@@ -67,7 +74,7 @@ export function beginFairHand(io, table, players, holeCount) {
 
 export function watchFairHand(table, uid) {
   const record = records(table).get(Number(table.currentInning));
-  if (record && !record.finishedAt) record.viewers.add(Number(uid));
+  if (record && !record.finishedAt&&!record.viewers.has(Number(uid))) {record.viewers.add(Number(uid));queueFairProof(table,record);}
 }
 
 export function currentFairCode(table, uid) {
@@ -97,6 +104,36 @@ export function finishFairHand(table, results) {
         && result.showCards?.includes(JSON.parse(card.pokerInfo).index)) record.revealedCards.add(card.deckIndex);
     }
   }
+  queueFairProof(table,record);
+}
+
+function queueFairProof(table,record){
+  if(!table.fairPersistence)return;
+  record.version=(record.version||0)+1;table.fairPersistence.pending.set(record.currentInning,record);
+}
+function serializeProof(record){return {...record,viewers:[...record.viewers],revealed:[...record.revealed],revealedCards:[...(record.revealedCards||[])]};}
+export function restoreFairProof(record){return {...record,viewers:new Set(record.viewers||[]),revealed:new Set(record.revealed||[]),revealedCards:new Set(record.revealedCards||[])};}
+export async function flushFairProof(table,at=Date.now()){
+ const p=table.fairPersistence;if(!p?.pending.size||p.task)return p?.task;
+ if(p.retryAt>at)return;
+ if(typeof p.write!=='function')return;
+ const task=(async()=>{
+  for(const [inning,record]of p.pending){
+   const version=record.version;await p.write(serializeProof(record));
+   if(record.version===version)p.pending.delete(inning);
+  }
+  if(!p.pending.size){
+   p.failures=0;delete p.retryAt;delete p.lastError;
+   if(table.hand&&p.blockedAt){const duration=Date.now()-p.blockedAt;for(const key of ['deadline','aofNextAt'])if(Number.isFinite(table.hand[key]))table.hand[key]+=duration;}delete p.blockedAt;
+   const messages=p.messages.splice(0);p.bytes=0;for(const deliver of messages)deliver();
+  }
+ })().catch(error=>{p.lastError=String(error.message);p.failures=(p.failures||0)+1;p.retryAt=at+Math.min(30000,1000*2**Math.min(5,p.failures));});
+ p.blockedAt||=Date.now();p.task=task;try{await task}finally{if(p.task===task)p.task=null}
+}
+export function deliverAfterFairProof(table,ws,frame,send){
+ const p=table?.fairPersistence;if(!p?.pending.size){send();return}
+ if(p.messages.length>=2000||p.bytes+frame.length>4*1024*1024){ws.close?.(1013,'Fair proof storage pending');return;}
+ p.bytes+=frame.length;p.messages.push(send);
 }
 
 export function fairCodeList(table, uid) {

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import {productionFinanceConfig} from '../shared/finance-policy.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const services = ["hall", "client-web", "game-server", "match"];
@@ -60,6 +61,7 @@ export async function buildProduction({ outputDir = path.join(root, "dist/produc
       const config = yaml.load(await fs.readFile(path.join(root, service, "config.yaml"), "utf8"));
       config.env = "prod";
       if (config.wallet) { config.wallet.mode = "online"; delete config.wallet.local_balance; }
+      if(service==='game-server')config.finance=productionFinanceConfig(config.finance);
       await write(service + "/config.yaml", yaml.dump(config));
     }
   }

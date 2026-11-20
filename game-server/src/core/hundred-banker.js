@@ -2,6 +2,7 @@ import { rel } from '../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { debit, credit, walletOf } = await rel(import.meta.url, '../wallet/index.js', v);
 const { userInfoOf } = await rel(import.meta.url, './member.js', v);
+const {financeRound}=await rel(import.meta.url,'./hundred-finance.js',v);
 
 export const REQUESTS = [6133, 6134, 6135];
 const state = table => table.hundredBankers ||= { entries: [], refunds: [], history: [[], []], order: 0 };
@@ -36,6 +37,7 @@ export function request(ctx, id, body, groups, enabled = true) {
   if (!REQUESTS.includes(id)) return false;
   const { table, session, send, io } = ctx, uid = Number(session.userId), s = state(table);
   const reply = (code, msg) => send(id + 107, { code, msg });
+  if(walletOf(ctx).lotteryFor?.(table)&&!walletOf(ctx).bankerNetEnabled){reply(1,'当前房间尚未启用真人上庄资金接口');return true;}
   if (!body || typeof body !== 'object' || Array.isArray(body)
     || body.roomId != null && Number(body.roomId) !== Number(table.roomId)) { reply(1, '上庄请求无效'); return true; }
   if (!enabled || session.bot) { reply(1, '当前房间不支持上庄'); return true; }
@@ -78,7 +80,10 @@ async function flushRefunds(ctx) {
   const s = state(ctx.table);
   for (const r of [...s.refunds]) {
     if (!r.credited) {
-      const receipt = r.amount > 0 ? await credit(r.e.session, r.amount, ctx, { operation: r }) : { ok: true };
+      const wallet=walletOf(ctx);
+      const receipt = wallet.lotteryFor?.(ctx.table)
+        ?(wallet.releaseCarry(r.e.session,r.e.collateralMember,r.amount),{ok:true})
+        :r.amount > 0 ? await credit(r.e.session, r.amount, ctx, { operation: r }) : { ok: true };
       if (receipt?.ok === false) throw new Error('Hundred banker refund rejected');
       r.credited = true;
     }
@@ -86,6 +91,7 @@ async function flushRefunds(ctx) {
     ctx.io.sendUser?.(r.e.uid, 3680, { uid: r.e.uid, status: 1, carryOutAmount: r.amount, point: r.e.amount });
     ctx.io.sendUser?.(r.e.uid, 6210, { points: r.e.session.wallet });
     if (r.remove && s.entries.includes(r.e)) s.entries.splice(s.entries.indexOf(r.e), 1);
+    if(r.remove&&!s.entries.some(e=>e.uid===r.e.uid))s.collaterals?.delete(r.e.uid);
     s.refunds.splice(s.refunds.indexOf(r), 1);
   }
 }
@@ -106,7 +112,14 @@ export function boundary(ctx, groups) {
       }
       const next = e.pendingChange || e, target = next.amount ?? e.amount;
       const delta = target - (e.onBanker ? e.amount : 0);
-      if (delta > 0 && !debit(e.session, delta, ctx).ok) {
+      const wallet=walletOf(ctx);
+      // A player may own both banker areas. One authoritative carry retains
+      // their combined collateral and cannot be spent at another table.
+      s.collaterals||=new Map();
+      let member=s.collaterals.get(e.uid);
+      if(wallet.lotteryFor?.(table)&&!member){member={uid:e.uid,point:0};s.collaterals.set(e.uid,member);}
+      e.collateralMember=member;
+      if (delta > 0 && !(wallet.lotteryFor?.(table)?wallet.reserveCarry(e.session,member,table,delta):debit(e.session, delta, ctx)).ok) {
         tip(io, e.uid, '余额不足，上庄带入失败');
         if (!e.onBanker) s.entries.splice(s.entries.indexOf(e), 1);
         delete e.pendingChange; continue;
@@ -148,6 +161,32 @@ export function lock(table, hand, groups, prices) {
     }
   }
 }
+export function registerFinance(io,table){
+  const wallet=walletOf(io);if(!wallet.lotteryFor?.(table))return;
+  const hand=table.preparedHand,byUid=new Map();
+  for(const b of hand?.bankers||[]){const value=byUid.get(b.entry.uid)||{session:b.entry.session,member:b.entry.collateralMember,cap:0};value.cap+=b.cap;byUid.set(b.entry.uid,value);}
+  for(const value of byUid.values())wallet.registerBanker(table,financeRound(table),value.session,value.member,value.cap);
+}
+export function plannedPayments(table,result,groups){
+  const hand=table.preparedHand;if(!hand?.bankers)return [];
+  const nets=groups.map(ids=>-[...result.settlements.values()].reduce((sum,p)=>sum+ids.reduce((n,id)=>n+(p.areaWinningScores[id]||0),0),0));
+  return hand.bankers.map(b=>{
+    const net=nets[b.bankerType-1];
+    if(!Number.isSafeInteger(net)||!Number.isSafeInteger(b.cap)||!Number.isSafeInteger(b.denominator))throw new Error('Invalid hundred banker exposure');
+    const score=b.denominator?Number(BigInt(net)*BigInt(b.cap)/BigInt(b.denominator)):0;
+    if(Math.abs(score)>b.cap||b.entry.amount+score<0||!Number.isSafeInteger(b.entry.amount+score)||!Number.isSafeInteger(b.entry.totalWinLoseAmount+score))throw new Error('Hundred banker exposure exceeded');
+    return {b,score};
+  });
+}
+export function financeResults(io,table,result,groups,apply=false){
+  const wallet=walletOf(io);if(!wallet.lotteryFor?.(table))return [];
+  const byUid=new Map();
+  for(const {b,score}of plannedPayments(table,result,groups)){
+    const uid=b.entry.uid,value=byUid.get(uid)||{session:b.entry.session,member:b.entry.collateralMember,score:0,cap:0};
+    value.score+=score;value.cap+=b.cap;byUid.set(uid,value);
+  }
+  return [...byUid.values()].map(value=>wallet.bankerResult(table,value,apply));
+}
 export function settle(io, table, result, groups) {
   if (result.bankersSettled) return;
   const hand = table.preparedHand;
@@ -157,14 +196,7 @@ export function settle(io, table, result, groups) {
   const byUid = new Map();
   // Validate the entire allocation before changing any escrow balance. A failed
   // validation must leave every banker unchanged so a retry cannot double-pay.
-  const payments = hand.bankers.map(b => {
-    const net = nets[b.bankerType - 1];
-    if (!Number.isSafeInteger(net) || !Number.isSafeInteger(b.cap) || !Number.isSafeInteger(b.denominator)) throw new Error('Invalid hundred banker exposure');
-    const score = b.denominator ? Number(BigInt(net) * BigInt(b.cap) / BigInt(b.denominator)) : 0;
-    if (Math.abs(score) > b.cap || b.entry.amount + score < 0
-      || !Number.isSafeInteger(b.entry.amount + score) || !Number.isSafeInteger(b.entry.totalWinLoseAmount + score)) throw new Error('Hundred banker exposure exceeded');
-    return { b, score };
-  });
+  const payments = plannedPayments(table,result,groups);
   for (const { b, score } of payments) {
     b.entry.amount += score; b.entry.totalBankerCount++; b.entry.totalWinLoseAmount += score;
     const data = byUid.get(b.entry.uid) || { score: 0, areas: [], normalTotalBet: 0, specialTotalBet: 0, normalProportion: 0, specialProportion: 0 };

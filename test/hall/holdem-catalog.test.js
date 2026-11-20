@@ -58,7 +58,7 @@ test('ordinary high-blind rooms inherit their captured category and special engi
   assert.deepEqual(holdemRoomSettings({payload:'null'}),holdemRoomSettings());
   assert.equal(game.createTable(700000,19,null).bigBlind,20);
   for(const row of rows.filter(r=>r.room_type===19)) {
-    if([0,2].includes(row.play_mode)) {
+    if([0,2,8].includes(row.play_mode)) {
       for(const table of [game.createTable(row.game_room_config_id*10000,19,row),createTexasTable(row.game_room_config_id*10000,19,row)]) {
         assert.equal(texasConf(table).roomClassification,JSON.parse(row.payload).roomClassification);
         assert.equal(table.forceShowCard,!!row.force_show_card); assert.equal(table.playMode,row.play_mode+1);
@@ -98,12 +98,13 @@ test('real op38/op45 list all tiers, allocate correct ordinary rooms and reject 
   assert.equal(registry.tables.size,0,'listing never creates rooms');
   for(const row of rows.filter(r=>r.room_type===19)) {
     const payload=JSON.parse(row.payload), before=registry.tables.size;const result=await query(45,payload);
-    if([0,2].includes(row.play_mode)){assert.equal(result.msgCode,200);assert.equal(result.data.gameRoomConfigId,row.game_room_config_id);
+    if([0,2,8].includes(row.play_mode)){assert.equal(result.msgCode,200);assert.equal(result.data.gameRoomConfigId,row.game_room_config_id);
       assert.equal(result.data.playMode,row.play_mode+1);assert.equal(result.data.key,payload.key);
       const table=registry.getTable(result.data.roomId,17,'holdem');assert.ok(table);assert.equal(table.members.length,0);
       assert.equal(table.cfg.game_room_config_id,row.game_room_config_id);assert.equal(table.roomClassification,payload.roomClassification);
     }else{assert.equal(result.msgCode,503);assert.match(result.errMsg,/尚未开放/);assert.equal(result.data,null);assert.equal(registry.tables.size,before);}
   }
-  await assert.rejects(requestRoomPool(hallRuntime,{userId:1717,token:'test-1717'},'allocate',{gameRoomConfigId:1927,roomType:19}),/AOF必推玩法尚未开放/);
-  assert.equal(registry.tables.size,15);assert.deepEqual(failures,[]);
+  const aof=await requestRoomPool(hallRuntime,{userId:1717,token:'test-1717'},'allocate',{gameRoomConfigId:1927,roomType:19});
+  assert.equal(registry.getTable(aof.roomId,17,'holdem').playMode,9);
+  assert.equal(registry.tables.size,19);assert.deepEqual(failures,[]);
 });

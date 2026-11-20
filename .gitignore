@@ -4,3 +4,17 @@ logs/
 .DS_Store
 .tmp*
 dist/
+
+# Keep local Node development sources; ignore generated cache artifacts.
+/cache/*
+!/cache/README.md
+!/cache/dev.js
+!/cache/client-web/
+!/cache/game-server/
+!/cache/hall/
+!/cache/holdem/
+!/cache/match/
+!/cache/niuniu/
+!/cache/rpc/
+!/cache/wallet/
+!/cache/zjh/

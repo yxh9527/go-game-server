@@ -6,9 +6,6 @@ const { requestRoomPool } = await rel(import.meta.url, './room-pool.js', version
 // Reuse the authenticated internal query transport on the existing listener.
 // This must never participate in player login ownership or room lifecycle.
 export async function requestFairCode(runtime, params) {
-  if (runtime.env !== "dev") return Promise.resolve({
-    msgCode: 501, errMsg: "正式环境公正码数据源尚未接入", data: null,
-  });
   const userId = Number(params.userId);
   const gameRoomId = Number(params.gameRoomId);
   const currentInning = Number(params.currentInning);

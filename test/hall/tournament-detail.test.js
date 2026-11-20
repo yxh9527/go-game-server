@@ -5,6 +5,17 @@ import { createApp } from '../../hall/src/create-app.js';
 import { createMatchStore, createRoomStore } from '../../hall/src/store.js';
 import { createMetaService } from '../../match/src/services/meta.js';
 import { createMemoryStore } from '../../cache/rpc/store.js';
+import {toClientMatch} from '../../hall/src/to-client.js';
+
+test('native hall rest state uses the cached authoritative clock and clears for finished matches',()=>{
+  const until=Date.now()+60000;
+  const row={id:99,state:2,tournament_clock:{index:1,currentBlindLv:1,bigBlind:100,restUntil:until,nextBlindAt:until},
+    blind_config:[{min:50,max:100,interval:180},{min:0,max:0,type:3,interval:60},{min:100,max:200,interval:0}]};
+  const detail=toClientMatch(row);
+  assert.equal(detail.rest,true);assert.equal(detail.blindLevel,1);assert.equal(detail.bigBlind,100);
+  assert.equal(detail.nextUpBlindTime,Math.floor(until/1000));assert.ok(detail.nextBlindLastTime>=59);
+  assert.equal(toClientMatch({...row,state:3}).rest,false);
+});
 
 test('native tournament detail serves all three tabs from resident caches without per-request data-center reads', async t => {
   const calls = { awards: 0, blinds: 0 }, matchStore = createMatchStore();
@@ -12,6 +23,7 @@ test('native tournament detail serves all three tabs from resident caches withou
   matchStore.replaceMatches([{ id: 8, agent_id: 11, state: 1, currency: 'CNY', award_id: 2, blinds_id: 3 }]);
   matchStore.replacePlayers([{ match_id: 8, player_id: 10001, name: 'registered', points: 5000, status: 1 }]);
   const runtime = { env: 'prod', hotVersion: 'detail-tabs', config: {}, log: { error() {} }, gateway, matchStore, roomStore: createRoomStore(), rpc: { gateway, lobby: {
+    async listFinanceGames(){return [];},
     async listAwards() { calls.awards++; return [{ id: 2, detail: '[{"rank":1,"items":[{"kind":"money","currency":"CNY","amount":"50000"}]}]' }]; },
     async listBlinds() { calls.blinds++; return [{ id: 3, data: '[{"min":50,"max":100,"interval":180}]' }]; },
   } } };
@@ -49,4 +61,23 @@ test('reward and blind edits publish configured values through the existing matc
   assert.ok(events.every(event => event.channel === 'match' && event.envelope.event === 'match_metadata'));
   assert.deepEqual(events.map(event => JSON.parse(event.envelope.data).kind), ['award', 'award', 'blinds', 'blinds']);
   assert.equal(JSON.parse(events[3].envelope.data).row.name, 'updated');
+});
+
+test('ticket rate configuration rejects zero, nondecimal and unsafe currency before persistence',async()=>{
+  const store=createMemoryStore(),service=await createMetaService({hotVersion:'ticket-rates',store});
+  for(const rate of ['0','-1','NaN','1e2','0.000000001'])await assert.rejects(()=>service.upsertRate({currency:'CNY',rate}),e=>e.status===400);
+  await assert.rejects(()=>service.upsertRate({currency:'bad',rate:'100'}),e=>e.status===400);
+  const saved=await service.upsertRate({currency:'CNY',rate:'100'});assert.equal(String(saved.rate),'100');
+});
+
+test('native ticket query verifies login and delegates only the authoritative player scope',async t=>{
+  const calls=[],gateway={authenticate:async(token,id)=>({success:token==='valid',userId:id}),getLoginData:async()=>({agentId:7,currency:{symbol:'CNY'}})};
+  const app=await createApp({env:'prod',hotVersion:'ticket-credit-query',config:{},log:{error(){}},gateway,
+    matchStore:createMatchStore(),roomStore:createRoomStore(),rpc:{gateway,lobby:{listFinanceGames:async()=>[]},common:{tournamentTickets:async scope=>{calls.push(scope);return [{id:5,num:20,ticketValue:1,ticketRate:'100'}];}}}});
+  const server=http.createServer(app);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
+  const request=async token=>(await fetch(`http://127.0.0.1:${server.address().port}/api/internal/v1/do?op=44&userId=42&token=${token}&agentId=999&currency=USD`)).json();
+  const valid=await request('valid');assert.equal(valid.msgCode,200);assert.equal(valid.data[0].num,20);assert.equal(valid.data[0].ticketValue,1);
+  assert.deepEqual(calls,[{userId:42,agentId:7,currency:'CNY'}]);
+  assert.equal((await request('invalid')).msgCode,401);assert.equal(calls.length,1);
 });

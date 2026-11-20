@@ -6,17 +6,14 @@ import { HundredZjhGame } from '../../../game-server/src/games/hundred-zjh/Hundr
 import { HundredNiuniuGame } from '../../../game-server/src/games/hundred-niuniu/HundredNiuniuGame.js';
 import { HundredBlackjackGame } from '../../../game-server/src/games/hundred-blackjack/HundredBlackjackGame.js';
 import { HundredMahjongGame } from '../../../game-server/src/games/hundred-mahjong/HundredMahjongGame.js';
-import * as mahjong from '../../../game-server/src/games/hundred-mahjong/engine.js';
-import * as blackjack from '../../../game-server/src/games/hundred-blackjack/engine.js';
-import * as niuniu from '../../../game-server/src/games/hundred-niuniu/engine.js';
+import {importHotModule} from '../../../shared/hot-import.js';
 import { betNet } from '../../../game-server/src/games/hundred-niuniu/hand.js';
-import * as zjh from '../../../game-server/src/games/hundred-zjh/engine.js';
 import { BaccaratGame } from '../../../game-server/src/games/baccarat/BaccaratGame.js';
-import * as holdem from '../../../game-server/src/games/hundred-holdem/engine.js';
-import * as baccarat from '../../../game-server/src/games/baccarat/engine.js';
-import { chooseHundredBet } from '../../../game-server/src/core/robot.js';
+const { chooseHundredBet }=await importHotModule(new URL('../../../game-server/src/core/robot.js',import.meta.url).href,'room-runtime-regression');
 import { PUSH } from '../../../game-server/src/messages.js';
 import { seedRooms } from '../../../cache/rpc/seed.js';
+const [mahjong,blackjack,niuniu,zjh,holdem,baccarat]=await Promise.all(
+  ['hundred-mahjong','hundred-blackjack','hundred-niuniu','hundred-zjh','hundred-holdem','baccarat'].map(game=>importHotModule(new URL('../../../game-server/src/games/'+game+'/engine.js',import.meta.url).href,'hundred-robot-engines')));
 
 const policy = { initialRobots: 2, targetRobots: 2, maxRobots: 2,
   joinProbability: 0, leaveProbability: 0, participationProbability: 1,

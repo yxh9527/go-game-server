@@ -108,22 +108,25 @@ export async function createMatchService(runtime) {
     row.game_type = row.game_type || constants.TEXAS_GAME_TYPE;
     row.room_type = row.room_type || constants.TEXAS_MATCH_ROOM;
     row.force_show_card=row.force_show_card??1;
-    row.refund_service_fee = 0; // Confirmed cancellation policy: retain service fee.
+    row.refund_service_fee = 1; // Refund both entry and service fees.
     row.agent_id=Number(row.agent_id || (runtime.env==='dev'?1:0));
     if(!Number.isSafeInteger(row.agent_id)||row.agent_id<=0)throw new AppError(400,'agent_id is required');
     if(row.start_time!==undefined){
       row.start_time=Number(row.start_time);
       if(!Number.isSafeInteger(row.start_time)||row.start_time<1000000000000)throw new AppError(400,'start_time must be epoch milliseconds');
     }
-    for (const key of ['register_gold','service_gold','register_ticket','init_point','min_player','max_player']) {
+    for (const key of ['register_gold','service_gold','register_ticket','init_point','min_player','max_player','delay_register_level','delay_register_time','rebuy_time']) {
       const value = Number(row[key] ?? (key === 'min_player' ? 2 : 0));
       if (!Number.isSafeInteger(value) || value < 0) throw new AppError(400, key + ' must be a nonnegative integer');
       row[key] = value;
     }
     if (row.min_player < 2 || row.max_player > 0 && row.max_player < row.min_player) throw new AppError(400,'invalid player limits');
+    if(row.register_ticket>1000)throw new AppError(400,'registration ticket count exceeds transaction limit');
+    if(row.register_ticket>0&&(!Number.isSafeInteger(Number(row.ticket_id))||Number(row.ticket_id)<=0))throw new AppError(400,'ticket_id is required for ticket registration');
     if(row.max_player>5000||row.min_player>5000)throw new AppError(400,'current tournament capacity is 5000 players');
     if (row.init_point <= 0) throw new AppError(400,'init_point is required');
     if(!Number.isSafeInteger(row.init_point*(row.max_player||5000)))throw new AppError(400,'total tournament chips exceed safe integer range');
+    if(row.rebuy_time>100||!Number.isSafeInteger(row.init_point*(row.max_player||5000)*(1+row.rebuy_time)))throw new AppError(400,'tournament rebuy count or total chips exceed transaction limits');
     if (Number(row.game_type) !== 19 || Number(row.room_type) !== 101) throw new AppError(400,'only Holdem tournaments are supported');
     await fillAward(row);
     try { validateAwardJSON(row.award_json); } catch(error) { throw new AppError(400,error.message); }

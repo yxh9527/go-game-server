@@ -97,7 +97,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   table.currentInning++;
   table.phase = 'playing';
   const handRules = structuredClone(rules(table));
-  table.hand = { rules: handRules, stage: 'grab', deck, laiZi, players: [], bankerUid: 0, bankerMultiple: 1, pot: 0,
+  table.hand = { rules: handRules, behaviorVersion:1, stage: 'grab', deck, laiZi, players: [], bankerUid: 0, bankerMultiple: 1, pot: 0,
     viewers: new Set([...(table.observers || []), ...members].map(p => Number(p.uid))),
     deadline: now + 1000 + rules(table).grabBankerTime + 500,
     earliest: now + 1000, botActAt: now + 1500 };
@@ -133,6 +133,7 @@ export function grab(io, table, uid, count, now = Date.now(), automatic = false)
     || hand.stage !== 'grab' || !beforeWagerDeadline(hand.deadline, now)
     || p.grab !== null || !Number.isSafeInteger(count) || count < 0 || count > grabMax(table, p)) return false;
   p.grab = count;
+  p.manualGrab=!automatic;
   io.broadcast(MSG.GRAB, [{ playerId: p.uid, count }]);
   return true;
 }
@@ -168,6 +169,7 @@ export function bet(io, table, uid, multiple, now = Date.now(), automatic = fals
     || !Number.isSafeInteger(table.ante * hand.bankerMultiple * multiple)
     || table.ante * hand.bankerMultiple * multiple <= 0
     || table.ante * hand.bankerMultiple * multiple > p.member.point) return false;
+  p.manualBet=!automatic;p.aboveMinimumBet=!automatic&&multiple>Math.min(...betOptions(table,p));
   p.bet = multiple;
   io.broadcast(MSG.BET, [{ playerId: p.uid, multiple, multipleAnte: table.ante * multiple,
     point: p.member.point }]);

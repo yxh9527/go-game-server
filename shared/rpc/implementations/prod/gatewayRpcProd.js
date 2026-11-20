@@ -2,15 +2,36 @@ import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
 import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
 import {playerPanelPersistedRecords} from '../../../player-panel.js';
 
+function check(response){
+  if(!response||!Number.isInteger(response.code))throw Object.assign(new Error('Invalid data-center response'),{status:503});
+  if(response.code!==0)throw Object.assign(new Error(response.message||'Data-center rejected request'),{code:response.code,status:response.code===3?503:403});
+  return response;
+}
+
 export class GatewayRpcProd {
+  async getScratchHistory(query){return (await getGogameStorageClient()).call('scratchHistory',query);}
+  async fairProof(action,input){return (await getGogameStorageClient()).call('fairProof'+action[0].toUpperCase()+action.slice(1),input);}
+  async smartTask(action,input){return (await getGogameStorageClient()).call('smartTask'+action[0].toUpperCase()+action.slice(1),input);}
   async playerPanel(action,input){return (await getGogameStorageClient()).call('playerPanel'+action[0].toUpperCase()+action.slice(1),input);}
   async getUserCenter(query) {
     return (await getGogameStorageClient()).call('userCenter',query);
   }
   async writeUserCenter(records) {
-    const storage=await getGogameStorageClient(),hands=playerPanelPersistedRecords(records);
-    if(hands.length)await storage.call('playerPanelWrite',{records:hands});
-    return storage.call('userCenterWrite',{records});
+    const storage=await getGogameStorageClient();
+    const confirm=(receipt,count)=>{if(receipt?.indexed!==true||receipt.durable!==true||receipt.stored!==count)throw Object.assign(new Error('data-center ES indexing acknowledgement missing'),{status:503});};
+    const replays=records.filter(r=>r.detail?.replay).map(({replayOnly,...record})=>record);
+    const attempts=[];
+    if(replays.length)attempts.push(async()=>confirm(await storage.call('holdemReplayWrite',{records:replays}),replays.length));
+    const cash=records.filter(r=>!r.replayOnly),hands=playerPanelPersistedRecords(cash);
+    if(cash.length)attempts.push(async()=>confirm(await storage.call('userCenterWrite',{records:cash}),cash.length));
+    if(hands.length)attempts.push(async()=>{
+      const receipt=await storage.call('playerPanelWrite',{records:hands});
+      if(receipt?.stored!==hands.length)throw Object.assign(new Error('data-center player statistics acknowledgement missing'),{status:503});
+    });
+    let failure;
+    for(const attempt of attempts){try{await attempt();}catch(error){failure||=error;}}
+    if(failure)throw failure;
+    return {stored:records.length,durable:true};
   }
   async authenticate(token, userId) {
     const client = await getDataCenterClient();
@@ -20,7 +41,7 @@ export class GatewayRpcProd {
       entryUserId: Number(userId) || 0,
     });
     return {
-      success: Boolean(resp.success),
+      success: resp.code===0&&Boolean(resp.success)&&Number(resp.userId)===Number(userId),
       userId: Number(resp.userId || 0),
       isReEnter: Boolean(resp.isReEnter),
       message: resp.message || "",
@@ -30,7 +51,9 @@ export class GatewayRpcProd {
   async getLoginData(userId) {
     const client = await getDataCenterClient();
     const resp = await client.getLoginData({ userId: Number(userId) || 0 });
-    const profile = resp.profile || {};
+    const profile = check(resp).profile;
+    if(!profile||Number(profile.userId)!==Number(userId)||!Number.isSafeInteger(Number(profile.agentId)))
+      throw Object.assign(new Error('Login profile identity mismatch'),{status:503});
     return {
       userId: Number(profile.userId || userId || 0),
       userName: profile.userName || "",
@@ -48,7 +71,8 @@ export class GatewayRpcProd {
       token: String(token || ""),
       userId: Number(userId) || 0,
     });
-    return Boolean(resp.valid);
+    if(resp.code===3)check(resp);
+    return resp.code===0&&Boolean(resp.valid);
   }
 
   async getRecords(query = {}) {

@@ -1,14 +1,15 @@
+import {createHash} from 'node:crypto';
 import { rel } from '../../rel.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
-const { getCachedRecords } = await rel(import.meta.url, '../../record-cache.js', v);
 const { prizeFromMask } = await rel(import.meta.url, './rules.js', v);
+const TTL_SECONDS=180,WINDOW_MS=31*86400000;
 function parse(value) { try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } }
-export function decodeRecord(row, table, uid) {
-  if (Number(row?.userId) !== uid || Number(row?.agentId) !== Number(table.agentId || 0) || Number(row?.gameId) !== Number(table.roomType)) return null;
-  const values = [parse(row.init), ...(Array.isArray(row.log) ? row.log.map(log => parse(log.sr)) : [])];
-  const record = values.find(data => data && Number(data.roomId) === table.roomId && Number(data.gameRoomId) === table.gameRoomId
-    && typeof data.serialNo === 'string' && Number.isSafeInteger(data.faceValue) && table.config.denominations.includes(data.faceValue));
-  if (!record) return null;
+function decodeRecord(row,table,account){
+  if(Number(row?.userId)!==account.userId||Number(row?.agentId)!==account.agentId||row?.currency!==account.currency)return null;
+  const record=parse(row.log);
+  if(Number(record?.roomType)!==table.roomType||Number(record?.roomId)!==table.roomId||Number(record?.gameRoomId)!==table.gameRoomId)return null;
+  if(!record||typeof record.serialNo!=='string'||!record.serialNo||!Number.isSafeInteger(record.faceValue)
+    ||!table.config.denominations.includes(record.faceValue))return null;
   try {
     const prize = prizeFromMask(record.huMask, table.config.winMultipliers);
     if (prize.huCount !== record.huCount || prize.multiplier !== record.multiplier || record.amount !== record.faceValue * (prize.multiplier - 1)) return null;
@@ -17,24 +18,40 @@ export function decodeRecord(row, table, uid) {
   } catch { return null; }
 }
 export async function list(ctx) {
-  const { table, session } = ctx, uid = Number(session.userId);
-  table.scratchHistoryTasks ||= new Map();
-  if (table.scratchHistoryTasks.has(uid)) return table.scratchHistoryTasks.get(uid);
-  const task = query(ctx).finally(() => table.scratchHistoryTasks.delete(uid));
-  table.scratchHistoryTasks.set(uid, task);
-  return task;
-}
-async function query(ctx) {
-  const { table, session, runtime } = ctx, uid = Number(session.userId), endTime = Math.ceil(Date.now() / 30000) * 30000;
-  const prefix = 'scratch:' + Number(table.agentId || 0) + ':' + table.roomType + ':' + table.roomId + ':';
-  const bus = { getCache: key => runtime.rpc.bus.getCache(prefix + key), setCache: (key, value, ttl) => runtime.rpc.bus.setCache(prefix + key, value, ttl) };
-  const response = await getCachedRecords({ gateway: runtime.rpc.gateway, bus, userId: uid,
-    query: { gameId: table.roomType, page: 1, size: 100, startTime: endTime - 8 * 3600000, endTime }, ttlSeconds: 30 });
-  const seen = new Set(), winInfo = [];
-  for (const row of response?.data || []) {
-    const data = decodeRecord(row, table, uid);
-    if (data && !seen.has(data.serialNo)) { seen.add(data.serialNo); winInfo.push(data); }
-  }
-  // data-center returns newest first; native panels open index length - 1.
-  return { gameRoomId: table.gameRoomId, winInfo: winInfo.reverse() };
+  const {table,session,runtime}=ctx;
+  const account={agentId:Number(session.agentId),userId:Number(session.userId),currency:String(session.currency||'')};
+  if(!Number.isSafeInteger(account.agentId)||account.agentId<0||account.agentId!==Number(table.agentId)
+    ||!Number.isSafeInteger(account.userId)||account.userId<=0||!account.currency
+    ||![61,63].includes(Number(table.roomType))||!Number.isSafeInteger(table.roomId)||table.roomId<=0)
+    throw new Error('Invalid trusted scratch history scope');
+  // Native 6121 has no paging/time filters. Canonical server-owned parameters
+  // give repeated requests one key; raw client objects never reach this key.
+  const gameId=Number(ctx.financialGameId??table.cfg?.finance_game_id??table.roomType);
+  const normalized={...account,gameId,roomType:table.roomType,roomId:table.roomId,
+    gameRoomId:table.gameRoomId,page:1,size:100,windowMs:WINDOW_MS,sortDesc:true};
+  const key='scratch-history:v3:'+createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+  const state=runtime.scratchHistoryReads||={pending:new Map()};
+  if(state.pending.has(key))return state.pending.get(key);
+  const bus=runtime.rpc?.bus,gateway=runtime.rpc?.gateway||runtime.gateway;
+  const task=(async()=>{
+    let cached;
+    try{cached=parse(await bus?.getCache(key));}catch{ /* Read ES if cache is unavailable. */ }
+    if(cached?.gameRoomId===table.gameRoomId&&Array.isArray(cached.winInfo))return cached;
+    if(!gateway?.getScratchHistory)throw new Error('Scratch settlement history service unavailable');
+    const endTime=Date.now();
+    const response=await gateway.getScratchHistory({...account,gameId,roomType:table.roomType,roomId:table.roomId,gameRoomId:table.gameRoomId,
+      size:100,startTime:endTime-WINDOW_MS,endTime});
+    if(!Array.isArray(response?.records))throw new Error('Invalid scratch ES history response');
+    const seen=new Set(),winInfo=[];
+    for(const row of response.records){
+      const data=Number(row?.gameId)===gameId?decodeRecord(row,table,account):null;
+      if(data&&!seen.has(data.serialNo)){seen.add(data.serialNo);winInfo.push(data);}
+      if(winInfo.length===100)break;
+    }
+    const result={gameRoomId:table.gameRoomId,winInfo:winInfo.reverse()};
+    try{await bus?.setCache(key,JSON.stringify(result),TTL_SECONDS);}catch{ /* ES remains authoritative. */ }
+    return result;
+  })();
+  state.pending.set(key,task);
+  try{return await task;}finally{if(state.pending.get(key)===task)state.pending.delete(key);}
 }

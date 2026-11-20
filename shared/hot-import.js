@@ -2,8 +2,11 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {registerHooks} from 'node:module';
 import {installHotResolver} from './hot-loader.js';
+import {createCollectibleEntryLoader} from './hot-entry-factory.js';
 
 const resolver=installHotResolver(),selfURL=new URL('./hot-import.js',import.meta.url);
+const factories=createCollectibleEntryLoader({resolver});
+export function collectibleHotStats(){return factories.stats();}
 const root=fileURLToPath(new URL('../',import.meta.url));
 const directories=['game-server/src','hall/src','client-web/src','match/src','shared','cache'].map(p=>path.resolve(root,p));
 const within=file=>directories.some(dir=>{const rel=path.relative(dir,file);return !rel.startsWith('..')&&!path.isAbsolute(rel);});
@@ -46,17 +49,21 @@ function resolvedLocation(location,version){
 export function importHotModule(location,version='0'){
   // Canonicalize before import(), not just inside a resolve hook: otherwise
   // Node can retain a separate raw-specifier entry for every timestamp.
-  return import(resolvedLocation(location,version));
+  const canonical=resolvedLocation(location,version);
+  return factories.handles(canonical)?factories.load(canonical):import(canonical);
 }
-const linkedDependencies=globalThis[Symbol.for('gogame.hot.linked-dependencies.v2')] ||= new Map();
+const linkedDependencies=new Map(),MAX_LINKED_DEPENDENCIES=1024;
+// Report counts only; paths, module namespaces and runtime objects remain
+// private so diagnostics cannot retain an old graph or expose source details.
+export function hotImportStats(){
+  let dependencyLinks=0;for(const links of linkedDependencies.values())dependencyLinks+=links.size;
+  return {...resolver.stats(),linkedParents:linkedDependencies.size,dependencyLinks,maxLinkedParents:MAX_LINKED_DEPENDENCIES};
+}
 export function rel(metaURL,spec,version){
   const parent=new URL(metaURL),location=new URL(spec,parent).href;
-  // A running old handler keeps dependencies it has already imported. A
-  // changed dependency changes its parent's content hash on the next reload,
-  // so the new handler receives a separate dependency graph.
   if(!parent.searchParams.has('v'))return importHotModule(location,version);
   let dependencies=linkedDependencies.get(parent.href);
-  if(!dependencies){dependencies=new Map();linkedDependencies.set(parent.href,dependencies);}
+  if(!dependencies){dependencies=new Map();linkedDependencies.set(parent.href,dependencies);while(linkedDependencies.size>MAX_LINKED_DEPENDENCIES)linkedDependencies.delete(linkedDependencies.keys().next().value);}
   if(!dependencies.has(location))dependencies.set(location,resolvedLocation(location,version));
   return import(dependencies.get(location));
 }

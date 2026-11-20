@@ -25,7 +25,7 @@ export function createDevMatchPayments(runtime) {
     },
     async charge(plan) {
       if (ledger.has(plan.key)) return structuredClone(ledger.get(plan.key));
-      if (plan.ticketCount) throw new Error('development ticket payment is not configured');
+      if (plan.ticketCount||plan.ticketCredit) throw new Error('development ticket payment is not configured');
       const result = plan.total ? await runtime.rpc.common.debit(plan.userId,plan.total) : { ok: true };
       if (result?.ok !== true) throw Object.assign(new Error('余额不足'),{status:409});
       const receipt = { key:plan.key, paidGold:plan.gold, paidService:plan.service, currency:plan.currency, refunded:false };
@@ -35,7 +35,7 @@ export function createDevMatchPayments(runtime) {
       const receipt = ledger.get(plan.key);
       if (!receipt) return { key:plan.key,currency:plan.currency,refunded:0,uncharged:true };
       if (receipt.refunded) return structuredClone(receipt.refunded);
-      const amount = receipt.paidGold + (includeService ? receipt.paidService : 0);
+      const amount = receipt.paidGold + receipt.paidService;
       const result = amount ? await runtime.rpc.common.credit(plan.userId,amount) : { ok:true };
       if (result?.ok !== true) throw new Error('refund failed');
       receipt.refunded = { key:plan.key,refunded:amount,currency:receipt.currency };

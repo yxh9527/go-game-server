@@ -67,7 +67,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   if (deck.length < members.length * 3 || new Set(deck).size !== deck.length
       || deck.some(c => !Number.isInteger(c) || c < 0 || c > 51)) throw new Error('Invalid Sgay deck');
   table.currentInning++; table.phase = 'playing';
-  table.hand = { rules: structuredClone(table.roomRules), stage: 'deal', stageStartedAt: now, deck, pot: 0,
+  table.hand = { rules: structuredClone(table.roomRules), behaviorVersion:1, stage: 'deal', stageStartedAt: now, deck, pot: 0,
     deadline: now + table.roomRules.dealTimeMs, players: [], events: [],
     viewers: new Set([...(table.observers || []), ...members].map(m => Number(m.uid))) };
   table.hand.players = members.map((member, i) => {
@@ -101,6 +101,7 @@ export function bet(io, table, uid, multiple, now = Date.now(), automatic = fals
       || !Number.isInteger(multiple) || multiple < 1 || multiple > maxMultiple(table, p)) return false;
   const score = rules(table).ante * multiple;
   if (!validWager(score, p.member.point) || !Number.isSafeInteger(h.pot + score)) return false;
+  p.manualBet=!automatic;p.aboveMinimumBet=!automatic&&multiple>1;
   p.bet = score; p.member.point -= score; p.member.totalBet = score; p.member.lastOperation = 1; h.pot += score;
   h.events.push({ uid: p.uid, operationType: 1, operationData: multiple, bet: score, gameState: 4, time: now });
   io.broadcast(MSG.BET, { uid: p.uid, currentBetScore: score, totalBetScore: score,
@@ -136,9 +137,12 @@ export function settle(io, table, now = Date.now()) {
   const paid = new Map(payouts(balances, r.ante, r.taxPercent, r.maxTax).map(p => [p.uid, p]));
   const results = h.players.map(p => {
     const payout = paid.get(p.uid), profile = userInfoOf(p.member);
+    // A triple bonus can debit chips beyond the already committed wager.
+    // Record that actual extra debit in the same settlement stake total.
+    const extraDebit=Math.max(0,-(payout.gross+payout.bonus-payout.tax));
     p.member.point = payout.point; p.member.state = 2; p.member.totalBet = 0;
     return { uid: p.uid, pos: p.pos, banker: false, name: profile.name, icon: profile.icon,
-      xiaZhuData: p.bet, cardTypeId: p.result.cardTypeId, secondCardTypeId: 0,
+      xiaZhuData: p.bet+extraDebit, cardTypeId: p.result.cardTypeId, secondCardTypeId: 0,
       cardTypeInfo: cardTypeInfo(p.hole), showCards: p.hole.slice(), handPais: p.hole.slice(),
       playerStatus: 0, insuranceBet: 0, insuranceProfit: 0, winInsurance: 0,
       raiseMultiple: p.bet / r.ante, multipleAnte: p.bet, score: payout.score, point: payout.point,

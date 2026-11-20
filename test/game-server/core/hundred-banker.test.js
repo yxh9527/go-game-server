@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as banker from '../../../game-server/src/core/hundred-banker.js';
+const banker=await importHotModule(new URL('../../../game-server/src/core/hundred-banker.js',import.meta.url).href,'room-runtime-regression');
 import { BaccaratGame } from '../../../game-server/src/games/baccarat/BaccaratGame.js';
-import * as engine from '../../../game-server/src/games/baccarat/engine.js';
+import {importHotModule} from '../../../shared/hot-import.js';
+const engine=await importHotModule(new URL('../../../game-server/src/games/baccarat/engine.js',import.meta.url).href,'banker-engine-tests');
 import * as history from '../../../game-server/src/games/baccarat/history.js';
 
 const groups = [[1,2,3,9],[4,5,6,7,8]];

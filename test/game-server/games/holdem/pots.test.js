@@ -1,6 +1,7 @@
+import {importHotModule} from "../../../../shared/hot-import.js";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { awardPots } from '../../../../game-server/src/games/holdem/pots.js';
+const { awardPots }=await importHotModule(new URL("../../../../game-server/src/games/holdem/pots.js",import.meta.url).href,"pricing-selected-test/game-server/games/holdem/pots.test.js");
 
 function settle(rows, bankerId = 1) {
   const players = rows.map(([uid, totalBet, rank, folded = false], pos) => ({ uid, totalBet, rank, folded, pos }));

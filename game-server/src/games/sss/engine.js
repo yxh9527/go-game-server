@@ -55,7 +55,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   if (members.length < 2) { table.phase = 'idle'; return; }
   const deck = deckOverride || shuffle(handLogic.deckFor(table.playMode));
   table.currentInning++; table.phase = 'playing';
-  table.hand = { rules: structuredClone(table.roomRules), deck, players: [], settled: false,
+  table.hand = { rules: structuredClone(table.roomRules), behaviorVersion:1, deck, players: [], settled: false,
     deadline: now + rules(table).arrangeTime * 1000 + 4500, earliest: now + 6500,
     viewers: new Set([...(table.observers || []), ...members].map(p => Number(p.uid))) };
   table.hand.players = members.map((member, index) => {
@@ -63,7 +63,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     member.state = 4; member.totalBet = 0;
     return { uid: member.uid, pos: member.pos, name: member.name, icon: member.icon, member, bot: member.bot, hole,
       openingPoint: member.point, options: handLogic.arrange(hole, member.bot ? 12 : 3), result: null,
-      deadline: table.hand.deadline, extensionsLeft: rules(table).arrangeExtendCount,
+      deadline: table.hand.deadline, extensionsLeft: rules(table).arrangeExtendCount, arrangementExtensions:0,
       actAt: now + robot.thinkTime() };
   });
   features.beginHandStats(table, table.hand.players);
@@ -73,11 +73,14 @@ export function begin(io, table, now = Date.now(), deckOverride) {
   io.forEachPlayer?.(s => io.send(s.ws, PUSH.DEAL, table.hand.players.map(p => dealRow(table, p, s.userId, now))));
   io.broadcast(PUSH.STATE, 'ARRANGE_HANDS');
 }
-export function arrange(io, table, uid, body) {
+export function arrange(io, table, uid, body, automatic=false) {
   const p = owner(table, uid), hand = table.hand;
   if (!p || hand.settled || p.result || !handLogic.validArrangement(p.hole, body.front, body.middle, body.back)) return false;
   p.front = body.front.slice(); p.middle = body.middle.slice(); p.back = body.back.slice();
   p.result = handLogic.evaluate(p.front, p.middle, p.back);
+  // Native clients can auto-confirm special hands. This records transport
+  // origin, not a claim that a human manually arranged every submitted hand.
+  p.clientSubmittedArrangement=!automatic;
   // A legal thirteen-card multiset may be a foul. The rules score a foul as
   // a loss; accepting it does not substitute or silently reorder user cards.
   io.broadcast(PUSH.ARRANGE, { uid: p.uid, roomId: table.roomId, hasArranged: true,
@@ -89,6 +92,7 @@ export function addTime(io, table, uid, now = Date.now()) {
   const p = owner(table, uid), hand = table.hand;
   if (!p || hand.settled || p.result || now >= (p.deadline ?? hand.deadline) || !(p.extensionsLeft > 0)) return false;
   p.extensionsLeft--;
+  p.arrangementExtensions=(p.arrangementExtensions||0)+1;
   p.deadline += rules(table).arrangeExtendSeconds * 1000;
   hand.deadline = Math.max(hand.deadline, p.deadline);
   io.broadcast(PUSH.TIME, { uid: p.uid, arrangedLastTime: p.deadline - now, arrangedCount: p.extensionsLeft });
@@ -192,7 +196,7 @@ export function tick(io, table, now) {
   for (const p of hand.players) if (!p.result && (now >= (p.deadline ?? hand.deadline)
     || ((p.bot || p.member.pendingDeparture) && now >= p.actAt))) {
     const option = robot.choose(p.options, Math.random, p.bot ? robot.decisionContext(table, p) : null);
-    if (option) arrange(io, table, p.uid, option);
+    if (option) arrange(io, table, p.uid, option, true);
   }
   if (now >= hand.earliest && hand.players.every(p => p.result)) settle(io, table, now);
 }

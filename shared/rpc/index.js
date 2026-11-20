@@ -3,6 +3,7 @@ import { env, loadEnv } from "./env.js";
 import { prodDeps, setProdDeps } from "./implementations/prod/prodDeps.js";
 import { closeGogameStorageClient } from './utils/gogameStorageGrpc.js';
 import { closeDataCenterClient } from './utils/dataCenterGrpc.js';
+import { closeLotteryClients } from './utils/lotteryGrpc.js';
 
 /**
  * 统一 RPC 入口，对齐 fgServer `core/rpc`。
@@ -39,6 +40,7 @@ export async function closeRpc() {
   }
   closeGogameStorageClient();
   closeDataCenterClient();
+  await closeLotteryClients();
   setProdDeps({ redis: null });
   rpcService = null;
 }

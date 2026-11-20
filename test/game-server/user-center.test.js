@@ -1,3 +1,4 @@
+import {importHotModule} from '../../shared/hot-import.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -8,7 +9,7 @@ import {createHandler} from '../../game-server/src/create-handler.js';
 import {createApp} from '../../hall/src/create-app.js';
 import {createRegistry,findConfig} from '../../game-server/src/registry.js';
 import {createWallet} from '../../game-server/src/wallet/index.js';
-import {installUserCenter} from '../../game-server/src/core/user-center.js';
+const {installUserCenter}=await importHotModule(new URL('../../game-server/src/core/user-center.js',import.meta.url).href,'player-service-regression');
 import {seedRooms} from '../../cache/rpc/seed.js';
 import {encodeFrame,decodeFrame} from '../../game-server/src/codec.js';
 import scratch from '../../game-server/src/games/ggl-mjhl/index.js';
@@ -23,6 +24,29 @@ function nativeAPI(file,id,api){
  req.d=(exports,items)=>{for(const [key,value]of Object.entries(items))Object.defineProperty(exports,key,{get:value});};req.n=value=>()=>value;
  const mod={exports:{}};factory(mod,mod.exports,req);return mod.exports;
 }
+
+test('tournament hand replays are persisted separately and never appear as cash battle or fund entries',async()=>{
+ const registry=createRegistry(),written=[];
+ const runtime={env:'prod',registry,gateway:{writeUserCenter:async rows=>{written.push(...rows);return {durable:true,stored:rows.length}}},log:{error(){}}};
+ installUserCenter(runtime);
+ const members=[{uid:42,name:'one',pos:0,hole:[1,2],point:1100},{uid:43,name:'two',pos:1,hole:[3,4],point:900}];
+ const table={agentId:7,roomId:81000001,gameId:'holdem',roomType:101,kind:'normal',currentInning:1,mtt:{config:{currency:'USD'}},members,
+  smallBlind:5,bigBlind:10,hand:{participants:members,board:[],pot:20,replayActions:[],replayEvents:[]}};
+ registry.setTable(table.roomId,table,7,'holdem');table.recordUserCenter([{uid:42,score:100,xiaZhuData:10,showCards:[]},{uid:43,score:-100,xiaZhuData:10,showCards:[]}]);
+ await runtime.userCenterState.writeTask;
+ assert.equal(written.length,2);assert.ok(written.every(r=>r.replayOnly&&r.roomType===101&&r.currency==='USD'&&r.balance===undefined&&r.detail.replay));
+ assert.equal(runtime.userCenterState.records.size,0);
+});
+
+test('production ES failures are logged once and remove the attempted batch without retry',async()=>{
+ const registry=createRegistry(),calls=[],errors=[],runtime={env:'prod',registry,log:{error:(...args)=>errors.push(args)},gateway:{writeUserCenter:async rows=>{calls.push(rows.map(r=>r.id));throw Error('ES unavailable')}}};
+ const center=installUserCenter(runtime),state=runtime.userCenterState;
+ for(let i=0;i<101;i++)state.outgoing.set('original-'+i,{id:'original-'+i});
+ await center.flush();assert.equal(calls.length,1);assert.equal(state.outgoing.size,1);assert.equal(state.outgoing.has('original-0'),false);
+ await center.flush();await center.flush();assert.equal(calls.length,2);assert.equal(state.outgoing.size,0);assert.equal(errors.length,2);
+ assert.equal(state.retryAt,undefined);assert.equal(state.failures,undefined);
+ installUserCenter(runtime);await center.flush();assert.equal(calls.length,2,'hot reload must not resubmit failed reports');
+});
 
 test('real settled holdem hand appears through native battle and fund requests across hot reload',async t=>{
  const registry=createRegistry(),wallet=createWallet({mode:'local',local_balance:1000000});
@@ -42,7 +66,12 @@ test('real settled holdem hand appears through native battle and fund requests a
  const web=http.createServer(hall);await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>web.close(resolve)));
  const api=async params=>{const fields=new URLSearchParams({...params,userId:'101',token:'valid'}),param=Buffer.from(fields.toString()).toString('base64');const response=await fetch('http://127.0.0.1:'+web.address().port+'/internal/v1/do?param='+encodeURIComponent(param));assert.equal(response.headers.get('cache-control'),'no-store');return response.json();};
  const profile=await api({op:8165,uid:101});assert.equal(profile.msgCode,200);assert.equal(profile.data.name,'p101');
- assert.match(profile.data.imageUrl,/^\/avator\/\d+\.png$/);assert.equal((await fetch('http://127.0.0.1:'+web.address().port+profile.data.imageUrl)).status,200);
+ assert.match(profile.data.imageUrl,/^\/avator\/\d+\.png$/);
+ // Stay on this isolated hall. The development localhost redirect otherwise
+ // sends the avatar request to the unrelated resident lobby on port 11042.
+ const avatarStatus=await new Promise((resolve,reject)=>{
+  http.get({hostname:'127.0.0.1',port:web.address().port,path:profile.data.imageUrl,headers:{Host:'lobby.test'}},response=>{response.resume();response.once('end',()=>resolve(response.statusCode));}).once('error',reject);
+ });assert.equal(avatarStatus,200);
  const battle=nativeAPI('static/hall/_next/static/chunks/832-7498b6b2aa7730de.js',1474,api);
  const list=await battle.im(27,{roomType:19,pageNum:1,startDateDiff:0,endDateDiff:0});assert.equal(list.totalSize,1);assert.equal(list.infoList[0].currentScore,mine.net);assert.equal(list.infoList[0].gameRoomId,table.roomId);
  const empty=await battle.im(51,{roomType:58,pageNum:1,startDateDiff:0,endDateDiff:0});assert.equal(empty.totalSize,0);assert.equal(empty.infoList.length,0);
@@ -113,4 +142,14 @@ test('actual in-memory scratch settlement publishes the native winInfo and no du
  const serial=response.serialFull,record=[...runtime.userCenterState.records.values()][0];assert.equal(record.net,-100);assert.equal(record.balance,900);assert.equal(record.detail.winInfo.serialNo,serial);assert.equal(record.detail.winInfo.amount,-100);
  wallet.credit(session,100);await scratch.onMessage(ctx,3701,{revealMode:'SPECIFIED',serialFull:serial,faceValue:-999});assert.equal(response.code,0);
  assert.equal(runtime.userCenterState.records.size,1);assert.equal(record.balance,900);assert.equal(session.wallet,1000);
+});
+
+test('authoritative scratch report confirmation prevents duplicate display writes while old authorities keep the fallback',async()=>{
+ for(const confirmed of [true,false]){
+  let writes=0;const table=scratch.createTable(61010000,61,{});table.recordUserCenter=()=>writes++;
+  const paid={code:0,serialFull:'original-paid-ticket',faceValue:100,winAmount:50,walletAmount:950,huMask:[1,...Array(19).fill(2)],huCount:1,multiplier:.5,claimedAt:Date.now(),purchaseRoomId:table.roomId,...(confirmed?{finalReportStored:true}:{})};
+  const runtime={env:'prod',wallet:{},scratchTickets:{authoritative:true,reveal:async()=>paid},log:{error(){}}},session={userId:42,agentId:7,currency:'CNY',wallet:950};
+  let response;await scratch.onMessage({runtime,table,session,send:(_id,data)=>response=data},3701,{revealMode:'SPECIFIED',serialFull:paid.serialFull});
+  assert.equal(response.code,0);assert.equal(response.serialFull,paid.serialFull);assert.equal(writes,confirmed?0:1);
+ }
 });

@@ -1,7 +1,8 @@
+import {importHotModule} from '../../../shared/hot-import.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWallet, createRpcWallet } from '../../../game-server/src/wallet/index.js';
-import { CARRY_TTL_MS, cashTableKey } from '../../../game-server/src/wallet/carry.js';
+const {createWallet,createRpcWallet}=await importHotModule(new URL('../../../game-server/src/wallet/index.js',import.meta.url).href,'carry-facade-regression');
+const {CARRY_TTL_MS,cashTableKey}=await importHotModule(new URL('../../../game-server/src/wallet/carry.js',import.meta.url).href,'carry-facade-regression');
 import { SeatGame } from '../../../game-server/src/core/SeatGame.js';
 
 const table = roomId => ({ agentId: 5, gameId: 'holdem', kind: 'normal', roomType: 19, roomId });

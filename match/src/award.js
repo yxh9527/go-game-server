@@ -31,6 +31,7 @@ export function validateAwardJSON(raw) {
         if (!item.ticketId || !item.amount) {
           throw new Error("ticket reward requires ticketId and amount");
         }
+        if(!Number.isSafeInteger(Number(item.ticketId))||Number(item.ticketId)<=0||Number(item.amount)>1000)throw new Error('ticket reward exceeds transaction limit');
       } else {
         throw new Error(`unknown reward kind ${item.kind}`);
       }

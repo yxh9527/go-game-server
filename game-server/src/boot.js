@@ -9,6 +9,8 @@ import { watchHot } from "./hot.js";
 import { createRegistry, findConfig } from "./registry.js";
 import { createRpcWallet } from "./wallet/rpcWallet.js";
 import { MAX_FRAME_BYTES } from './codec.js';
+import {runResidentTick} from '../../shared/resident-tick.js';
+import {validateProductionFinance} from '../../shared/finance-policy.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -24,6 +26,7 @@ async function main() {
   const config = loadConfig();
   const log = console;
   const rpc = await initRpc(config, log);
+  if(!env.isDev)validateProductionFinance(config);
   const registry = createRegistry();
   const runtime = {
     config,
@@ -99,12 +102,9 @@ async function main() {
     });
   });
 
-  setInterval(() => {
-    try {
-      handler.tick();
-    } catch (err) {
-      log.error(err);
-    }
+  const tickLoop=runtime.residentTick||={task:null};
+  const tickTimer=setInterval(() => {
+    void runResidentTick(tickLoop,()=>handler.tick(),error=>log.error('game tick failed',error));
   }, 1000);
 
   const port = config.server_port || 11041;
@@ -113,6 +113,7 @@ async function main() {
   log.info(`[game-server] listening ws://${host}:${port} env=${runtime.env}`);
 
   const shutdown = async () => {
+    clearInterval(tickTimer);
     wss.close();
     server.close();
     await closeRpc();

@@ -1,6 +1,7 @@
+import {importHotModule} from "../../../shared/hot-import.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptySeat, memberListSeats, publicObserver, publicSeat, userInfoOf } from "../../../game-server/src/core/member.js";
+const { emptySeat, memberListSeats, publicObserver, publicSeat, userInfoOf }=await importHotModule(new URL("../../../game-server/src/core/member.js",import.meta.url).href,"core-helper-selected-test/game-server/core/member.test.js");
 
 test("publicSeat nests uid under userInfo", () => {
   const seat = publicSeat({ uid: 10001, name: "dev", pos: 0, point: 2000, state: 1 });

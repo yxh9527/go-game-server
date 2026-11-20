@@ -1,13 +1,14 @@
+import {importHotModule} from "../../../shared/hot-import.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { DragonTigerGame } from '../../../game-server/src/games/dragon-tiger/DragonTigerGame.js';
-import { BaccaratGame } from '../../../game-server/src/games/baccarat/BaccaratGame.js';
+const { DragonTigerGame }=await importHotModule(new URL("../../../game-server/src/games/dragon-tiger/DragonTigerGame.js",import.meta.url).href,"pricing-selected-test/game-server/games/dragon-tiger.test.js");
+const { BaccaratGame }=await importHotModule(new URL("../../../game-server/src/games/baccarat/BaccaratGame.js",import.meta.url).href,"pricing-selected-test/game-server/games/dragon-tiger.test.js");
 import config from '../../../game-server/src/games/dragon-tiger/config.js';
 import * as rules from '../../../game-server/src/games/dragon-tiger/rules.js';
-import * as pricing from '../../../game-server/src/games/dragon-tiger/odds.js';
-import * as engine from '../../../game-server/src/games/dragon-tiger/engine.js';
+const pricing=await importHotModule(new URL("../../../game-server/src/games/dragon-tiger/odds.js",import.meta.url).href,"pricing-selected-test/game-server/games/dragon-tiger.test.js");
+const engine=await importHotModule(new URL("../../../game-server/src/games/dragon-tiger/engine.js",import.meta.url).href,"pricing-selected-test/game-server/games/dragon-tiger.test.js");
 import * as owner from '../../../game-server/src/core/hundred-table-owner.js';
 import * as history from '../../../game-server/src/core/hundred-card-history.js';
 import { hundredLobbySnapshot } from '../../../game-server/src/core/hundred-lobby.js';
@@ -255,21 +256,15 @@ test('Dragon Tiger leaving retains unsettled bettors and history previous/next i
   assert.equal(await history.detail({...f.ctx,session:{userId:999}},1),null);
 });
 
-test('Dragon Tiger production review uses Redis then data-center with type59 and validates ownership', async () => {
-  const f=fixture(), cache=new Map(), calls=[];
-  const payload={gameRoomId:f.table.roomId,currInning:5,showdownPokers:{dragon:[0],tiger:[12]},
-    showdownTypes:{dragon:1,tiger:13},winAreaIds:[2,4,6,8,11,15],betDetailTableMap:{}};
-  const row={userId:71,agentId:7,gameId:59,hash:'lhd-safe',init:JSON.stringify(payload)};
-  const gateway={async getRecords(q){calls.push(['list',q]);return {data:[row,{...row,userId:72,hash:'foreign'}]};},
-    async getRecordDetail(q){calls.push(['detail',q]);return {found:true,data:row};}};
-  f.ctx.runtime={env:'prod',rpc:{gateway,bus:{async getCache(k){return cache.get(k)},async setCache(k,value,ttl){
-    assert.ok(k.startsWith('dragon-tiger:7:1720003:'));assert.ok([30,300].includes(ttl));cache.set(k,value);}}}};
-  assert.deepEqual((await history.list(f.ctx)).list,[5]);
-  const details=await Promise.all(Array.from({length:20},()=>history.detail(f.ctx,5)));assert.ok(details.every(d=>d.currInning===5));
-  assert.equal(calls.filter(c=>c[0]==='list').length,1);assert.equal(calls.filter(c=>c[0]==='detail').length,1);
-  assert.equal(calls[0][1].gameId,59);assert.equal(await history.detail({...f.ctx,session:{userId:72}},5),null);
+test('Dragon Tiger production review shares original settlement queries and scopes type59 account records',async()=>{
+ const f=fixture(),cache=new Map(),calls=[];f.ctx.session={...f.ctx.session,agentId:7,currency:'CNY'};f.table.agentId=7;
+ const payload={gameRoomId:f.table.roomId,currInning:5,showdownPokers:{dragon:[0],tiger:[12]},showdownTypes:{dragon:1,tiger:13},winAreaIds:[2,4,6],betDetailTableMap:{}};
+ const row={userId:71,agentId:7,currency:'CNY',roomType:59,roomId:f.table.roomId,inning:5,detail:payload};
+ f.ctx.runtime={env:'prod',rpc:{gateway:{getUserCenter:async q=>{calls.push(q);return {records:[row]};}},bus:{getCache:async k=>cache.get(k),setCache:async(k,v,ttl)=>{assert.equal(ttl,180);cache.set(k,v);}}}};
+ assert.deepEqual((await history.list(f.ctx)).list,[5]);const details=await Promise.all(Array.from({length:20},()=>history.detail(f.ctx,5)));
+ assert.ok(details.every(d=>d.currInning===5));assert.equal(calls.length,1);assert.equal(calls[0].roomType,59);
+ assert.equal(await history.detail({...f.ctx,session:{...f.ctx.session,userId:72}},5),null);
 });
-
 test('Dragon Tiger public robot bets and payouts use independent bankrolls without inspecting hidden cards', async () => {
   const f=fixture();fixed(f,12,0);f.table.cfg.robot_behavior={enabled:true,initialRobots:1,targetRobots:1,
     maxRobots:1,participationProbability:1,maxBetsPerRound:1,betMinMs:1000,betMaxMs:1000};

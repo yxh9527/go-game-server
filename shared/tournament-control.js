@@ -25,6 +25,6 @@ export function requestControl(address,secret,payload) {
     ws.on('open',()=>{try{ws.send(JSON.stringify(signControl(secret,payload)));}catch(error){finish(error);}});
     ws.on('error',error=>finish(controlError(503,error.message)));
     ws.on('close',()=>finish(controlError(503,'比赛游戏服连接关闭')));
-    ws.on('message',raw=>{try{const r=JSON.parse(String(raw));if(r.code!==200)throw controlError(r.code||503,r.error||'比赛调度失败');finish(null,r.data);}catch(error){finish(error);}});
+    ws.on('message',raw=>{try{const r=JSON.parse(String(raw));if(r.code!==200)throw Object.assign(controlError(r.code||503,r.error||'比赛调度失败'),{reason:r.reason});finish(null,r.data);}catch(error){finish(error);}});
   });
 }

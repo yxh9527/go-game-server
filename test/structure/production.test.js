@@ -38,6 +38,10 @@ test("actual production bundle loads without test/cache and never falls back to 
     for (const service of ["hall", "game-server", "match"]) {
       const config = yaml.load(await fs.readFile(path.join(outputDir, service, "config.yaml"), "utf8"));
       assert.equal(config.env, "prod");
+      if(service==='game-server'){
+        assert.equal(config.finance.provider,'lottery');
+        assert.deepEqual(config.finance.room_types,[19,24,25,26,27,28,30,31,32,50,51,52,53,54,55,56,57,58,59,60,62]);
+      }
       if (config.wallet) {
         assert.equal(config.wallet.mode, "online");
         assert.equal(config.wallet.local_balance, undefined);

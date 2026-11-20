@@ -4,6 +4,7 @@ const { SeatGame } = await rel(import.meta.url, '../../core/SeatGame.js', v);
 const { default: config, roomRules } = await rel(import.meta.url, './config.js', v);
 const { PROTOCOL } = await rel(import.meta.url, './messages.js', v);
 const engine = await rel(import.meta.url, './engine.js', v);
+const {queryNativeHistory}=await rel(import.meta.url,'../../core/game-history.js',v);
 export class MahjongGame extends SeatGame {
   constructor() { super(config); }
   extraTableFields(row) { const r = roomRules(row); return { roomRules: r, ante: r.diFen, carryMin: r.carryMin, playMode: r.playMode }; }
@@ -39,11 +40,11 @@ export class MahjongGame extends SeatGame {
       // A recorder sees only public discards and the requesting player's hand.
       ctx.send(msg.queryPush, r.family === 'hzxl' ? engine.recorder(ctx.table, ctx.session.userId) : p ? engine.tingMap(ctx.table, p) : {}); return true;
     }
-    if (id === msg.history) { ctx.send(msg.historyPush, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
+    if (id === msg.history) { if(ctx.runtime?.env==='prod')return queryNativeHistory(ctx,body).then(data=>{ctx.send(msg.historyPush,data);return true;}); ctx.send(msg.historyPush, engine.historyPayload(ctx.table, body, ctx.session.userId)); return true; }
     if (id === 5006) { this.queueStart(ctx.table); return true; }
     return false;
   }
-  startRound(ctx) { engine.begin(ctx.io, ctx.table); }
-  playTick(ctx, now) { engine.tick(ctx.io, ctx.table, now); }
+  startRound(ctx) { return engine.begin(ctx.io, ctx.table); }
+  playTick(ctx, now) { return engine.tick(ctx.io, ctx.table, now); }
 }
 export default new MahjongGame();

@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadGames } from '../../../game-server/src/games/catalog.js';
 import { seedRooms } from '../../../cache/rpc/seed.js';
-import { AREA_IDS, winningAreas, roomRules, betNet } from '../../../game-server/src/core/turntable-rules.js';
-import { engine, createHand } from '../../../game-server/src/core/turntable-engine.js';
+const { AREA_IDS, winningAreas, roomRules, betNet }=await importHotModule(new URL("../../../game-server/src/core/turntable-rules.js",import.meta.url).href,"pricing-selected-test/game-server/core/turntable.test.js");
+import {importHotModule} from '../../../shared/hot-import.js';
+const {engine,createHand}=await importHotModule(new URL('../../../game-server/src/core/turntable-engine.js',import.meta.url).href,'turntable-engine-tests');
 const games = await loadGames('arcade-test');
 function fixture(type = 53) {
   const game = games.byRoomType.get(type), row = seedRooms().find(r => r.room_type === type);

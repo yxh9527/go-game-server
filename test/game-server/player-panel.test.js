@@ -1,8 +1,9 @@
+import {importHotModule} from '../../shared/hot-import.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createPlayerPanel} from '../../game-server/src/core/player-panel.js';
+const {createPlayerPanel}=await importHotModule(new URL('../../game-server/src/core/player-panel.js',import.meta.url).href,'player-service-regression');
 import {createRegistry} from '../../game-server/src/registry.js';
-import {playerPanelStatistics,playerPanelWindows,playerPanelPersistedRecords,projectPlayerNotes} from '../../shared/player-panel.js';
+const {playerPanelStatistics,playerPanelWindows,playerPanelPersistedRecords,projectPlayerNotes}=await importHotModule(new URL('../../shared/player-panel.js',import.meta.url).href,'player-service-regression');
 import http from 'node:http';
 import {WebSocketServer} from 'ws';
 import {createHandler} from '../../game-server/src/create-handler.js';
@@ -129,6 +130,21 @@ test('human records keep their real seven-day window and production non-Holdem q
   assert.equal(calls[0].page,2);assert.equal(calls[0].size,1);assert.equal(calls[0].roomType,25);assert.equal(calls[0].agentId,7);
   assert.equal(calls[0].startTime,playerPanelWindows(now).sevenDays);
 });
+
+test('production non-Holdem recent records cache the actual China calendar window and refresh on the next day',async t=>{
+  let now=Date.UTC(2026,10,12,9);t.mock.method(Date,'now',()=>now);
+  const {runtime,table,session}=await fixture(),cache=new Map(),calls=[],ttls=[];
+  runtime.env='prod';table.roomType=25;table.gameId='zjh';session.gameId='zjh';
+  runtime.gateway={getUserCenter:async query=>{calls.push(query);return {records:[],total:0,totalScore:0,paged:true};}};
+  runtime.bus={getCache:async key=>cache.get(key),setCache:async(key,value,ttl)=>{cache.set(key,value);ttls.push(ttl);}};
+  const panel=await createPlayerPanel(runtime),first=now;
+  await panel.records(session,table,43);now+=1000;await panel.records(session,table,43);
+  assert.equal(calls.length,1);assert.equal(calls[0].startTime,playerPanelWindows(first).sevenDays);assert.equal(ttls[0],180);
+  assert.notEqual(calls[0].endTime-calls[0].startTime,7*86400000,'the original calendar scope is not a fixed 168-hour window');
+  now=Date.UTC(2026,10,12,16)+1;await panel.records(session,table,43);
+  assert.equal(calls.length,2);assert.equal(calls[1].startTime,playerPanelWindows(now).sevenDays);
+  assert.equal(cache.size,2);
+});
 test('non-Holdem robot avatar profiles use the same seated identity and stable nonzero statistics',async()=>{
  const {runtime,panel,table,session}=await fixture();table.roomType=25;table.gameId='zjh';session.gameId='zjh';
  table.members[2].name='Seat Robot';table.members[2].icon='/avator/90024.png';
@@ -228,4 +244,15 @@ test('production panel delegates real profiles, notes and paginated records to d
  const request=calls.find(c=>c.action==='records').input;assert.equal(request.userId,42);assert.equal(request.targetId,43);assert.equal(request.agentId,7);
  assert.equal(request.page,2);assert.equal(request.size,1);
  await assert.rejects(panel.quota(session,table),{status:503});
+});
+
+test('development native profiles use their real settled net results for winning hand counts',async()=>{
+ const {runtime,panel,table,session}=await fixture();
+ table.roomType=25;table.gameId='zjh';session.gameId='zjh';
+ for(const [inning,net]of [[1,10],[2,-5],[3,0]])runtime.userCenterState.records.set('native-'+inning,{
+  id:'native-'+inning,userId:43,agentId:7,currency:'CNY',roomType:25,roomId:table.roomId,inning,endedAt:Date.now(),net,effectiveBet:0,players:[],detail:{firstGameList:[]},
+ });
+ const profile=await panel.profile(session,table,43);
+ assert.equal(profile.totalHands,3);assert.equal(profile.netWinHands,1);assert.equal(profile.winPercent,33.33);
+ assert.equal(profile.joinPercent,'--');assert.equal(profile.flipManualBetPercent,'--');
 });

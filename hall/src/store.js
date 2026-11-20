@@ -1,8 +1,10 @@
 // Attach metadata in place: resident subscriptions and snapshot sequence checks
 // must survive upgrades from the previous store implementation.
 export function attachMatchMetadata(store) {
-  if (store.replaceMetadata) return store;
-  const awards = new Map(), blinds = new Map();
+  const key=Symbol.for('gogame.match.metadata');
+  if(store[key])return store;
+  const resident=store[key]||={awards:new Map(),blinds:new Map(),apply:store.applyEnvelope?.bind(store)};
+  const {awards,blinds}=resident;
   store.replaceMetadata = ({ awards: nextAwards, blinds: nextBlinds }) => {
     for (const [map, rows] of [[awards, nextAwards], [blinds, nextBlinds]]) {
       if (!rows) continue;
@@ -12,7 +14,7 @@ export function attachMatchMetadata(store) {
   };
   store.getAward = id => awards.get(Number(id));
   store.getBlinds = id => blinds.get(Number(id));
-  const apply = store.applyEnvelope?.bind(store);
+  const apply = resident.apply;
   store.applyEnvelope = raw => {
     let envelope, data;
     try {
@@ -21,7 +23,10 @@ export function attachMatchMetadata(store) {
       data = typeof envelope.data === 'string' ? JSON.parse(envelope.data) : envelope.data;
     } catch { return; }
     const map = data?.kind === 'award' ? awards : data?.kind === 'blinds' ? blinds : null;
-    if (map && data.row?.id != null) map.set(Number(data.row.id), data.row);
+    if (map && data.row?.id != null) {
+      if(data.row.deleted)map.delete(Number(data.row.id));
+      else map.set(Number(data.row.id), data.row);
+    }
   };
   return store;
 }
@@ -106,6 +111,10 @@ export function createMatchStore() {
         for(const [key,row] of players)if(Number(row.match_id)===id)players.delete(key);
         for(const row of data.players||[])players.set(playerKey(row.match_id,row.player_id),row);
         tables.set(id,data.tables||[]);
+      }
+      if(env.event==='match_delete'&&data?.id!=null){
+        const id=Number(data.id);matches.delete(id);tables.delete(id);sequences.delete(id);
+        for(const [key,row]of players)if(Number(row.match_id)===id)players.delete(key);
       }
       if (env.event === "match_upsert" || env.event === "match_state") {
         this.upsertMatch(data);

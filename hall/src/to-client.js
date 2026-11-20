@@ -1,5 +1,6 @@
 import { asMs, num, truthy } from "./decode.js";
 import { userInfoOf } from '../../game-server/src/core/member.js';
+import {lateRegistrationOpen} from '../../shared/tournament-registration.js';
 
 export const MATCH_STATE_DRAFT = 0;
 export const MATCH_STATE_REGISTERING = 1;
@@ -51,7 +52,11 @@ export function toClientMatch(row, opts = {}) {
   const playerStatus = player ? num(player.status, 1) : 0;
   const points=(opts.players||[]).filter(p=>[1,4].includes(Number(p.status))).map(p=>num(p.points,0));
   const levels = blindLevels(row, opts.blinds);
-  const currentLevel = Math.max(0, num(row.blind_level, 1) - 1);
+  const clock=state===MATCH_STATE_RUNNING?row.tournament_clock:null;
+  const currentLevel = Math.max(0, num(clock?.index,num(row.blind_level, 1)-1));
+  const resting=Boolean(clock?.restUntil>Date.now());
+  const lateOpen=lateRegistrationOpen(row,clock);
+  const lateSeconds=lateOpen&&num(row.delay_register_time,0)>0?Math.max(0,Math.ceil((startTime+Number(row.delay_register_time)*1000+Number(clock?.registrationDelayMs||0)-Date.now())/1000)):0;
   let championshipStatus = 1;
   let status = 1;
   if (state === MATCH_STATE_RUNNING) {
@@ -64,6 +69,12 @@ export function toClientMatch(row, opts = {}) {
   const domain = row.domain || opts.gameServer || "";
   return {
     id: num(row.id, 0),
+    invalidated:row.invalidated===true,
+    invalidReason:row.invalidated===true?String(row.invalidReason||''):'',
+    invalidAt:row.invalidated===true?num(row.invalidAt,0):0,
+    terminatedByAdmin:row.terminatedByAdmin===true,
+    terminationReason:row.terminatedByAdmin===true?String(row.terminationReason||''):'',
+    terminationAt:row.terminatedByAdmin===true?num(row.terminationAt,0):0,
     startDate: String(startTime),
     startTime,
     endTime: asMs(row.end_time),
@@ -83,8 +94,10 @@ export function toClientMatch(row, opts = {}) {
     createTime: String(asMs(row.create_time)),
     freeTypePot: num(row.free_type_pot, 0),
     reBuyTime: num(row.rebuy_time, 0),
+    reBuyRemain:Math.max(0,num(row.rebuy_time,0)-num(player?.reentries_used,0)),
     delayRegisterLevel: num(row.delay_register_level, 0),
-    delayRegisterTime: num(row.delay_register_time, 0),
+    delayRegisterTime: state===MATCH_STATE_RUNNING?lateSeconds:num(row.delay_register_time, 0),
+    lateRegistrationOpen:lateOpen,
     restTime: num(row.rest_time, 0),
     restTimeInterval: num(row.rest_time_interval, 0),
     sortIndex: num(row.sort_index, 0),
@@ -95,11 +108,11 @@ export function toClientMatch(row, opts = {}) {
     showTime: num(row.delay_register_time, 0),
     totalPot: num(row.total_pot, 0),
     bonusPot: num(row.bonus_pot, 0),
-    bigBlind: num(row.big_blind, 0),
+    bigBlind: num(clock?.bigBlind,num(row.big_blind, 0)),
     status,
     increaseBindTime: levels[currentLevel]?.interval > 0 ? levels[currentLevel].interval / 60 : num(row.increase_bind_time, 0),
     registerTimeLimit: num(row.register_time_limit, 0),
-    blindLevel: num(row.blind_level, 0),
+    blindLevel: num(clock?.currentBlindLv,num(row.blind_level, 0)),
     bountyPot: num(row.bounty_pot, 0),
     maxPlayer: num(row.max_player, 0),
     minPlayer: num(row.min_player, 0),
@@ -107,13 +120,13 @@ export function toClientMatch(row, opts = {}) {
     minPoint: points.length?Math.min(...points):0,
     avgPoint: points.length?Math.floor(points.reduce((n,p)=>n+p,0)/points.length):0,
     myRank: player ? num(player.rank, 0) : 0,
-    nextUpBlindTime: 0,
-    nextBlindLastTime: 0,
-    startRestTime: 0,
+    nextUpBlindTime: clock?.nextBlindAt?Math.floor(clock.nextBlindAt/1000):0,
+    nextBlindLastTime: clock?.nextBlindAt?Math.max(0,Math.ceil((clock.nextBlindAt-Date.now())/1000)):0,
+    startRestTime: resting?Math.floor(clock.restUntil/1000):0,
     forceShowCard: truthy(row.force_show_card),
     fixPot: truthy(row.fix_pot),
     register: Boolean(player),
-    rest: false,
+    rest: resting,
     domain,
     shield: row.shield || "",
     roomType: num(row.room_type, 101),

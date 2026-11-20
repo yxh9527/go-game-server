@@ -8,7 +8,7 @@ export function createDevTournamentWallet(runtime,ioOf) {
     const p=body.plan;
     if(!p||typeof p.key!=='string'||p.key.length>200||p.agentId!==body.agentId||p.matchId!==body.matchId
       ||!Number.isSafeInteger(p.userId)||p.userId<=0||p.currency!=='CNY')throw controlError(400,'本地比赛支付参数无效或币种未配置');
-    if(p.ticketCount)throw controlError(503,'本地比赛门票支付尚未配置');
+    if(p.ticketCount||p.ticketCredit)throw controlError(503,'本地比赛门票支付尚未配置');
     const profile=await runtime.gateway.getLoginData(p.userId);
     if(Number(profile.agentId)!==p.agentId)throw controlError(403,'比赛支付代理不匹配');
     const previous=state.ledger.get(p.key);
@@ -27,7 +27,7 @@ export function createDevTournamentWallet(runtime,ioOf) {
       receipt={key:p.key,paidGold:p.gold,paidService:p.service,currency:p.currency};
       state.ledger.set(p.key,{plan:structuredClone(p),receipt});
     }else if(body.operation==='refund'){
-      const amount=previous.receipt.paidGold+(body.includeService?previous.receipt.paidService:0);
+      const amount=previous.receipt.paidGold+previous.receipt.paidService;
       const result=runtime.wallet.credit(session,amount);if(result?.ok!==true)throw controlError(503,'退款失败');
       receipt={key:p.key,refunded:amount,currency:p.currency};previous.refund=receipt;
     }else if(body.operation==='award'){

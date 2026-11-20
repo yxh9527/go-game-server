@@ -1,5 +1,5 @@
-import { getDataCenterClient } from "../../utils/dataCenterGrpc.js";
 import { getGogameStorageClient } from '../../utils/gogameStorageGrpc.js';
+import { getLotteryClient } from '../../utils/lotteryGrpc.js';
 
 function unavailable() {
   throw Object.assign(new Error('Authoritative wallet mutations are not configured'), { code: 'WALLET_UNAVAILABLE' });
@@ -14,17 +14,38 @@ export function currencyToScore(value) {
 }
 
 export class CommonRpcProd {
+  constructor({lottery=getLotteryClient}={}){this.lottery=lottery;}
+  async matchPayment(operation,plan,includeService=false){
+    if(!['charge','refund','award','query'].includes(operation))throw new Error('Invalid tournament payment operation');
+    return (await getGogameStorageClient()).call('matchPayment',{operation,plan,includeService});
+  }
+  async tournamentTickets(account){return (await getGogameStorageClient()).call('tournamentTickets',account);}
+  async finance(method,request,agent=request.agent){
+    const allowed=['bet','prePay','renewReservation','settlement','getRoundFinanceState','cancelBet','getPoolControlDecision'];
+    if(!allowed.includes(method))throw new Error('Unsupported finance operation');
+    return (await this.lottery(agent))[method](request);
+  }
+  async scratch(operation,input){
+    if(!['state','search','allocate','issue','reveal','history'].includes(operation))throw new Error('Invalid scratch operation');
+    const response=await (await this.lottery(input.agent)).scratchAction({operation,payload:JSON.stringify(input)});
+    if(response.code!==0||response.success!==true)throw Object.assign(new Error(response.reason||'Scratch authority rejected request'),
+      {code:'SCRATCH_AUTHORITY_REJECTED',businessCode:response.code,status:503});
+    let result;try{result=JSON.parse(response.payload);}catch{throw Object.assign(new Error('Invalid scratch authority payload'),{status:503,uncertain:true});}
+    if(!result||typeof result!=='object'||Array.isArray(result))throw new Error('Invalid scratch authority response');
+    return result;
+  }
   async cashRead(account) {
     return (await getGogameStorageClient()).call('cashRead', account);
   }
   async cashApply(request) {
     return (await getGogameStorageClient()).call('cashApply', request);
   }
-  async getBalance(userId) {
-    const client = await getDataCenterClient();
-    const resp = await client.getPlayer({ PlayerId: Number(userId) || 0, Factory: 0 });
-    const player = resp.HumanPlayer || resp.humanPlayer || {};
-    return currencyToScore(player.GameCurrency ?? player.gameCurrency);
+  async getBalance(userId,agent) {
+    const resp=await (await this.lottery(agent)).getBalance({userId:Number(userId)});
+    if(resp.code!==0)throw Object.assign(new Error('Authoritative balance unavailable'),{code:resp.code,status:503});
+    const balance=currencyToScore(resp.currency);
+    if(String(balance)!==String(resp.currencyCent))throw new Error('Authoritative balance units disagree');
+    return balance;
   }
 
   debit(_userId, _amount) {

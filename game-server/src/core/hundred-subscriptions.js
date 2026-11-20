@@ -1,8 +1,9 @@
 // Both native multi-bet panels share one socket, but own separate customData contexts.
 // Keep the selected single table independent from those cross-game subscriptions.
-export function configuredHundredRooms(runtime, game, session) {
+export function configuredHundredRooms(runtime, game, session,checkConfig=()=>{}) {
   return (runtime.configs || []).filter(row => Number(row.state ?? 1) === 1
     && game.roomTypes.includes(Number(row.room_type))).map(row => {
+    checkConfig(row);
     const id = Number(row.game_room_config_id) * 10000 + Number(row.room_index || 0);
     let table = runtime.registry.getTable(id, session.agentId, game.id);
     if (!table) {
@@ -13,7 +14,7 @@ export function configuredHundredRooms(runtime, game, session) {
   });
 }
 
-export function createHundredSubscriptions(runtime, gameOf, ioFor) {
+export function createHundredSubscriptions(runtime, gameOf, ioFor,checkConfig) {
   const selected = (s, t) => s.hundredInRoom === true && s.hundredGameId === t.gameId
     && Number(s.hundredRoomId) === Number(t.roomId);
   function entries(session) {
@@ -62,7 +63,7 @@ export function createHundredSubscriptions(runtime, gameOf, ioFor) {
     const game = gameOf(Number(request.roomType));
     if (!game || !(game.kind === 'hundred' || game.multiRoomSnapshot)) return [];
     const ids = Array.isArray(request.roomIds) ? new Set(request.roomIds.map(Number)) : null;
-    return configuredHundredRooms(runtime, game, session).filter(t => !ids || ids.has(Number(t.roomId)));
+    return configuredHundredRooms(runtime, game, session,checkConfig).filter(t => !ids || ids.has(Number(t.roomId)));
   }
   return {
     rooms,

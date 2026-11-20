@@ -88,6 +88,7 @@ export function dzpkParams(table) {
     gameTime: lifecycle.ROOM_LIFETIME_SECONDS,
     smallBlind: table.smallBlind,
     bigBlind: table.bigBlind,
+    aofBet: table.aofBet||0,
     initialBet: table.initialBet ?? table.bigBlind,
     straddle: table.straddle ?? false,
     criticalFlag: Boolean(table.criticalFlag),
@@ -224,7 +225,7 @@ function maybeQueueStart(table) {
 }
 
 function seated(table) {
-  return table.members.filter((m) => m.point > 0);
+  return table.members.filter((m) => m.point > 0&&(Number(table.playMode)!==9||m.point>=table.aofBet));
 }
 
 export function tickTexas(io, table, now = Date.now()) {
@@ -239,6 +240,7 @@ export function tickPlaying(io, table, now = Date.now()) {
   if (table.phase !== "playing" || !table.hand) {
     return;
   }
+  if(table.hand.aof){tickAof(io,table,now);return;}
   const actor = currentActor(table);
   if (!actor) {
     return;
@@ -254,7 +256,7 @@ export function onTexasAction(io, table, session, body) {
   if (table.phase !== "playing" || !table.hand) {
     return;
   }
-  if (table.closing || table.hand.settled || !['BET_PERFLOP', 'BET_FLOP', 'BET_TURN', 'BET_RIVER'].includes(table.hand.street)
+  if (table.hand.aof||table.closing || table.hand.settled || !['BET_PERFLOP', 'BET_FLOP', 'BET_TURN', 'BET_RIVER'].includes(table.hand.street)
     || !beforeWagerDeadline(table.hand.deadline)) return;
   const uid = Number(session.userId);
   if (body?.uid != null && Number(body.uid) !== uid) return;
@@ -294,7 +296,9 @@ export function beginHand(io, table) {
     return;
   }
   const startTime = Date.now();
-  const handRules = nextHandRules(table, startTime);
+  const aof=Number(table.playMode)===9;
+  if(aof)assertHoldemPlayable({...table.cfg,play_mode:9,aof_bet:table.aofBet,initial_bet:table.initialBet,carry_min:table.carryMin},table.roomType);
+  const handRules = aof?{aof:true,critical:false,playMode:9,initialBet:0,aofBet:table.aofBet}:nextHandRules(table, startTime);
   table.phase = "playing";
   table.roomState = 2;
   table.currentInning += 1;
@@ -366,11 +370,20 @@ export function beginHand(io, table) {
     underTheGunUid: utg.uid,
   });
   io.broadcast(PUSH.QIPAI_RESULT, { result: true, currentInning: table.currentInning });
-  io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_FRONT");
-  for (const player of players) {
+  io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, aof?"BET_PERFLOP":"BET_FRONT");
+  if(aof){
+    table.hand.actorUid=0;table.hand.currentBet=0;
+    for(const player of players){
+      if(!payTo(player,table.hand,table.hand.aofBet))throw new Error('AOF fixed wager could not be funded');
+      player.allIn=player.point===0;
+      player.lastOperation=player.point===0?OP.ALL_IN:OP.BET;
+      recordReplayAction(table,player,player.lastOperation,table.hand.aofBet,REPLAY_GAME_STATE.BET_PERFLOP);
+      pushAction(io,table,player,player.lastOperation,table.hand.aofBet);
+    }
+  }else for (const player of players) {
     postInitialBet(io, table, player, handRules.initialBet);
   }
-  if (!handRules.critical) {
+  if (!handRules.critical&&!aof) {
     io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_BLIND");
     postBlind(io, table, sb, table.smallBlind, OP.BLIND);
     postBlind(io, table, bb, table.bigBlind, OP.BLIND);
@@ -391,12 +404,29 @@ export function beginHand(io, table) {
     }
   });
   table.hand.street = "BET_PERFLOP";
+  if(aof){table.hand.aofNextAt=startTime+1000;table.hand.deadline=table.hand.aofNextAt;return;}
   if (handRules.critical) {
     nextStreet(io, table);
     return;
   }
   io.broadcast(PUSH.BRNN_GAME_STATE_PUSH, "BET_PERFLOP");
   promptActor(io, table);
+}
+
+function tickAof(io,table,now){
+  const hand=table.hand;if(now<hand.aofNextAt)return;
+  if(hand.board.length===5){settle(io,table,live(table));return;}
+  const count=hand.board.length===0?3:1;
+  if(hand.burnBeforeBoard)hand.deckPos++;
+  for(let i=0;i<count;i++)hand.board.push(hand.deck[hand.deckPos++]);
+  const stage=hand.board.length===3?'FLOP':hand.board.length===4?'TURN':'RIVER';
+  recordReplayDeal(hand,REPLAY_GAME_STATE['DEAL_'+stage]);
+  io.broadcast(PUSH.BRNN_GAME_STATE_PUSH,'DEAL_'+stage);
+  io.broadcast(stage==='FLOP'?PUSH.DZPK_DEAL_FAN_PUSH:stage==='TURN'?PUSH.DZPK_DEAL_ZHUANG_PUSH:PUSH.DZPK_DEAL_HE_PUSH,
+    {cardList:stage==='FLOP'?hand.board.slice():[hand.board.at(-1)]});
+  hand.street='BET_'+stage;io.broadcast(PUSH.BRNN_GAME_STATE_PUSH,hand.street);
+  io.broadcast(PUSH.DZPK_BIANCHI_PUSH,buildPots(hand.participants).map(pot=>pot.amount));
+  hand.aofNextAt=now+1000;hand.deadline=hand.aofNextAt;
 }
 
 function postInitialBet(io, table, player, amount) {
@@ -836,7 +866,7 @@ function settle(io, table, contenders) {
     const evals = row?.eval;
     // Uncontested pots require no showdown. Folded holes must stay private
     // through every field, including the nested cardTypeInfo fallback.
-    const reveal = table.forceShowCard || (active.length > 1 && !m.folded)
+    const reveal = hand.aof||table.forceShowCard || (active.length > 1 && !m.folded)
       || m.selectedShowCards?.length === 2;
     const shownEval = reveal && hand.board.length === 5
       ? (evals || evaluate7([...m.hole, ...hand.board])) : null;
@@ -863,11 +893,11 @@ function settle(io, table, contenders) {
   if (localHistory && io.env !== "prod") localHistory.recordHand(table, hand, results);
   const revealed = results.filter((result) => result.showCards.length === 2);
   if (revealed.length) {
-    if (table.forceShowCard) {
+    if (table.forceShowCard&&!hand.aof) {
       io.broadcast(PUSH.DZPK_PLAYER_DIPAI_PUSH, revealed.map((result) => ({ uid: result.uid, cardList: result.showCards, pos: result.pos })));
     } else {
       for (const result of revealed) io.broadcast(PUSH.DZPK_ACTION_SHOWCARD_PUSH,
-        { uid: result.uid, cardList: result.showCards, pos: result.pos });
+        { uid: result.uid, cardList: result.showCards, pos: result.pos,...(hand.aof?{holeCardList:result.showCards,cardTypeInfo:result.cardTypeInfo}:{}) });
     }
   }
   features.finishHandStats(table, results);
@@ -883,6 +913,7 @@ function settle(io, table, contenders) {
 }
 
 export function foldIfPlaying(io, table, uid) {
+  if(table.hand?.aof)return;
   const member = table.members.find((m) => m.uid === uid);
   if (!member || table.phase !== "playing" || !table.hand || member.folded) {
     return;

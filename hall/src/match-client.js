@@ -4,7 +4,8 @@ export async function matchRequest(runtime,params,action='snapshot') {
   const base=/^https?:\/\//i.test(configured)?configured:'http://'+configured;
   const response=await fetch(new URL('/internal/v1/tournament',base),{
     method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(5000),
-    body:JSON.stringify({action,matchId:Number(params.championshipsConfigId),userId:Number(params.userId),token:params.token||params.userToken}),
+    body:JSON.stringify({action,matchId:Number(params.championshipsConfigId),userId:Number(params.userId),token:params.token||params.userToken,
+      ...(['register','reenter'].includes(action)?{paymentType:Number(params.type??2)}:{})}),
   });
   const body=await response.json();
   if(!response.ok||body.code!==0)throw Object.assign(new Error(body.msg||'比赛服务暂不可用'),{code:body.code||503});

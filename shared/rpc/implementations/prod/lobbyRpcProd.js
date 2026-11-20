@@ -9,6 +9,8 @@ export class LobbyRpcProd {
     return this.store.listRooms();
   }
 
+  listFinanceGames(){return this.store.listFinanceGames();}
+
   listMatches() {
     return this.store.listMatches();
   }
@@ -16,6 +18,9 @@ export class LobbyRpcProd {
   getMatch(id) {
     return this.store.getMatch(id);
   }
+  deleteMatch(id){return this.store.deleteMatch(id);}
+  deleteTicket(id){return this.store.deleteTicket(id);}
+  issueTickets(request){return this.store.issueTickets(request);}
 
   insertMatch(row) {
     return this.store.insertMatch(row);
@@ -72,6 +77,8 @@ export class LobbyRpcProd {
   updateBlinds(id, patch) {
     return this.store.updateBlinds(id, patch);
   }
+
+  deleteBlinds(id) { return this.store.deleteBlinds(id); }
 
   listMatchPlayers() {
     return this.store.listMatchPlayers();

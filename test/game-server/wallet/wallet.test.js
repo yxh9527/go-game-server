@@ -1,7 +1,7 @@
+import {importHotModule} from '../../../shared/hot-import.js';
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWallet, credit, debit, walletOf } from "../../../game-server/src/wallet/index.js";
-import { createRpcWallet } from '../../../game-server/src/wallet/rpcWallet.js';
+const {createWallet,credit,debit,walletOf,createRpcWallet}=await importHotModule(new URL('../../../game-server/src/wallet/index.js',import.meta.url).href,'wallet-facade-regression');
 import { loadEnv } from '../../../shared/rpc/env.js';
 
 test("local wallet does not require db and starts with local_balance", async () => {

@@ -1,7 +1,9 @@
 import express from "express";
 import { rel } from "../../shared/hot-import.js";
 import {installHotResolver} from '../../shared/hot-loader.js';
+import {installHotSourcePins} from '../../shared/hot-source-pins.js';
 installHotResolver();
+installHotSourcePins();
 
 export async function createApp(runtime) {
   const v = runtime.hotVersion;
@@ -9,6 +11,8 @@ export async function createApp(runtime) {
     const {refreshDataAccess}=await rel(import.meta.url,'../../shared/rpc/adapters/rpcAdapter.js',v);
     await refreshDataAccess(runtime);
   }
+  const {loadGameRoutes,resolveRoomGameRoute}=await rel(import.meta.url,'../../shared/rpc/game-routes.js',v);
+  const financeRoutes=await loadGameRoutes(runtime);
   if (runtime.env === "dev") {
     const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
     await localConfigs.refreshRoomConfigs(runtime);
@@ -65,6 +69,12 @@ export async function createApp(runtime) {
     next();
   });
   app.use(express.json({ limit: "1mb" }));
+  const {smartBetPage}=await rel(import.meta.url,'./smart-bet-page.js',v);
+  app.get('/smart-bet',(_req,res)=>res.set('Cache-Control','no-store').type('html').send(smartBetPage));
+  app.post('/internal/v1/smart-bet',async(req,res)=>{
+    try{const data=await roomPool.requestRoomPool(runtime,{userId:req.body?.userId,token:req.body?.token},'smart-bet',{request:req.body?.request||{}});res.set('Cache-Control','no-store').json({msgCode:200,errMsg:null,data});}
+    catch(error){res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null})}
+  });
   app.get("/health", (_req, res) => {
     res.json({
       code: 0,
@@ -97,9 +107,8 @@ export async function createApp(runtime) {
     }
     if ([42,43,48].includes(op)) {
       try {
-        if(op===48)throw Object.assign(new Error('比赛重入功能尚未开放'),{code:503});
-        if(op===42&&Number(params.type)!==2)throw Object.assign(new Error('该报名支付方式尚未开放'),{code:400});
-        await matchRequest(runtime,params,op===43?'unregister':'register');
+        if([42,48].includes(op)&&![1,2].includes(Number(params.type)))throw Object.assign(new Error('该报名支付方式尚未开放'),{code:400});
+        await matchRequest(runtime,params,op===43?'unregister':op===48?'reenter':'register');
         res.set('Cache-Control','no-store').json({msgCode:200,errMsg:null,data:[]});
       } catch(error) {
         res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null});
@@ -107,7 +116,7 @@ export async function createApp(runtime) {
       return;
     }
     if (op === 71) {
-      res.set("Cache-Control", "no-store").json(smartBet.smartBetResponse(params));
+      res.set("Cache-Control", "no-store").json(await smartBet.smartBetRequest(runtime,params));
       return;
     }
     if (op === 29) {
@@ -136,6 +145,18 @@ export async function createApp(runtime) {
       catch(error){res.set('Cache-Control','no-store').json({msgCode:error.code||503,errMsg:error.message,data:null});}
       return;
     }
+    if(op===46&&runtime.env==='prod'){
+      try{
+        const gateway=runtime.gateway||runtime.rpc?.gateway,userId=Number(params.userId),token=params.token||params.userToken;
+        if(!token||!Number.isSafeInteger(userId)||userId<=0)throw Object.assign(new Error('缺少登录凭证'),{status:401});
+        const auth=await gateway.authenticate(token,userId);if(!auth.success||Number(auth.userId)!==userId)throw Object.assign(new Error('登录凭证无效'),{status:401});
+        const profile=await gateway.getLoginData(userId);
+        const {queryGameHistoryDetail}=await rel(import.meta.url,'../../shared/game-history-detail.js',v);
+        const data=await queryGameHistoryDetail(runtime,{userId,agentId:Number(profile.agentId),currency:profile.currency?.symbol||'CNY'},params);
+        res.set('Cache-Control','no-store').json(data?{msgCode:200,errMsg:null,data}:{msgCode:404,errMsg:'没有找到授权范围内的完整牌局回放',data:null});
+      }catch(error){res.set('Cache-Control','no-store').json({msgCode:error.status||503,errMsg:error.message,data:null})}
+      return;
+    }
     if (op === 46 && runtime.env === "dev") {
       const gameRoomId = decode.num(params.gameRoomId, 0);
       const inningNum = decode.num(params.inningNum, 0);
@@ -154,8 +175,8 @@ export async function createApp(runtime) {
       }
       data = await dispatch(op, params, userId, req);
     } catch (error) {
-      if ([38, 45, 49, 53].includes(op) && error.code) {
-        res.set("Cache-Control", "no-store").json({ msgCode: error.code, errMsg: error.message, data: null });
+      if ([38, 45, 49, 53].includes(op) && error.code || op===44) {
+        res.set("Cache-Control", "no-store").json({ msgCode: Number.isInteger(error.code)?error.code:error.status||503, errMsg: error.message, data: null });
         return;
       }
       throw error;
@@ -174,6 +195,7 @@ export async function createApp(runtime) {
       case 42:
         return [];
       case 44:
+        return tournamentTickets(params,userId);
       case 62:
       case 63:
         return [];
@@ -263,9 +285,11 @@ export async function createApp(runtime) {
     if (!selected) {
       return [];
     }
+    resolveRoomGameRoute(financeRoutes,selected);
     const openHundredGame = [50, 51, 52, 60, 62].includes(Number(selected.room_type));
     const row = openHundredGame ? rooms.hundredHostRoom(runtime.roomStore.list(), selected.room_type) : selected;
     if (!row) throw new Error('No ordinary room is configured for this hundred-game host');
+    if(row!==selected)resolveRoomGameRoute(financeRoutes,row);
     if (Number(row.room_type) === 19) assertHoldemPlayable(row);
     const domain = web.publicWsHost(req, runtime.config, runtime.env);
     const payload = rooms.enterRoomPayload(row, openHundredGame ? {} : params, {
@@ -284,6 +308,22 @@ export async function createApp(runtime) {
         playMode: allocation.playMode };
     }
     return payload;
+  }
+
+  async function tournamentTickets(params,userId){
+    const common=runtime.rpc?.common,gateway=runtime.gateway||runtime.rpc?.gateway;
+    if(runtime.env==='dev'&&!common?.tournamentTickets)return [];
+    const token=params.token||params.userToken;
+    if(!token||!Number.isSafeInteger(Number(userId))||Number(userId)<=0)throw Object.assign(new Error('缺少登录凭证'),{status:401});
+    const auth=await gateway.authenticate(token,Number(userId));
+    if(!auth.success||Number(auth.userId)!==Number(userId))throw Object.assign(new Error('登录凭证无效'),{status:401});
+    const profile=await gateway.getLoginData(Number(userId));
+    if(!common?.tournamentTickets)throw Object.assign(new Error('正式门票查询尚未配置'),{status:503});
+    const currency=typeof profile.currency==='string'?profile.currency:profile.currency?.symbol;
+    if(!currency&&runtime.env==='prod')throw Object.assign(new Error('缺少权威账户币种'),{status:503});
+    const rows=await common.tournamentTickets({userId:Number(userId),agentId:Number(profile.agentId),currency:currency||'CNY'});
+    if(!Array.isArray(rows))throw Object.assign(new Error('无效的门票查询响应'),{status:503});
+    return rows;
   }
 
   async function wallet(userId,params={}) {

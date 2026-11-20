@@ -1,10 +1,11 @@
+import {importHotModule} from '../../../shared/hot-import.js';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createRegistry } from "../../../game-server/src/registry.js";
 import { HoldemGame } from "../../../game-server/src/games/holdem/HoldemGame.js";
 import { ZjhGame } from "../../../game-server/src/games/zjh/ZjhGame.js";
-import { createRoomPool } from "../../../game-server/src/core/room-pool.js";
-import { ROOM_LIFETIME_MS, capacitySnapshot, expansionCount, initializeLifetime, isExpired } from "../../../game-server/src/core/room-lifecycle.js";
+const { createRoomPool }=await importHotModule(new URL('../../../game-server/src/core/room-pool.js',import.meta.url).href,'room-runtime-regression');
+const { ROOM_LIFETIME_MS, capacitySnapshot, expansionCount, initializeLifetime, isExpired }=await importHotModule(new URL('../../../game-server/src/core/room-lifecycle.js',import.meta.url).href,'room-runtime-regression');
 
 function fixture() {
   const registry = createRegistry();

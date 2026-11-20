@@ -5,6 +5,8 @@ import express from "express";
 import { rel } from "../../shared/hot-import.js";
 import { env } from "../../shared/rpc/env.js";
 import {installHotResolver} from '../../shared/hot-loader.js';
+import {clientVersion} from '../../shared/client-version.js';
+export {clientVersion};
 installHotResolver();
 
 const v = new URL(import.meta.url).searchParams.get("v") || "0";
@@ -20,15 +22,6 @@ const { adaptHundredCleanupResponse } = await rel(import.meta.url, './hundred-cl
 const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");
 const LANG_MODULES = ["common", "login", "server", "web", "payment"];
-
-export function clientVersion() {
-  const dir = path.join(staticRoot, "client");
-  if (!fs.existsSync(dir)) {
-    return "2.0.1279";
-  }
-  const names = fs.readdirSync(dir).filter((name) => /^\d+\.\d/.test(name)).sort();
-  return names.at(-1) || "2.0.1279";
-}
 
 export function langModuleFiles(clientDir, name) {
   const dir = path.join(clientDir, "assets", `holdemGame_zh_cn_${name}`);

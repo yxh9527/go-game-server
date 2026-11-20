@@ -18,7 +18,8 @@ import { decodeFrame } from '../../game-server/src/codec.js';
 // Temporary test servers only: exercise the real RPC facade, protocol, wallet
 // and original native client without changing/restarting resident services.
 const failures = [], log = { info(){}, error(...args){ failures.push(args.map(String).join(' ')); } };
-const noShow = process.argv.includes('--no-show'), suffix = noShow ? '-no-show' : '';
+const aof=process.argv.includes('--aof');
+const noShow = !aof&&process.argv.includes('--no-show'), suffix = aof?'-aof':noShow?'-no-show':'';
 const rpc = await initRpc({ env: 'dev' }, log), registry = createRegistry();
 const runtime = { env:'dev', config:{}, hotVersion:'critical-browser', rpc, gateway:rpc.gateway,
   store:rpc.lobby, bus:rpc.bus, wallet:createRpcWallet(rpc), registry, findConfig,
@@ -46,7 +47,7 @@ let armed=false;
 const tick=setInterval(()=>{
   try {
     for(const t of registry.tables.values()){
-      if(!armed&&t.criticalFlag&&t.members.some(m=>m.uid===uid&&m.point>0)){
+      if(!aof&&!armed&&t.criticalFlag&&t.members.some(m=>m.uid===uid&&m.point>0)){
         // Move only this isolated test room's deadline. Live defaults remain
         // 5-8 minutes, verified separately by critical.test.js.
         t.criticalAt=Date.now()-1;armed=true;
@@ -91,38 +92,38 @@ try {
   assert.equal(await evalAt(`(()=>{for(const label of ${JSON.stringify(noShow ? ['德州不秀牌','不秀牌'] : ['德州秀牌','德州','秀牌'])}){const e=Array.from(document.querySelectorAll('*')).filter(e=>e.textContent.trim()===label).sort((a,b)=>a.querySelectorAll('*').length-b.querySelectorAll('*').length)[0];if(e){e.click();return true;}}return false;})()`),true);
   await delay(2500);
   console.log('NATIVE_ROOMS',JSON.stringify(await evalAt(`Array.from(document.querySelectorAll('[class*=roomList] li')).map(e=>e.innerText)`)));
-  const room=await evalAt(`(()=>{const list=Array.from(document.querySelectorAll('[class*=roomList] li'));if(list.length!==${noShow?6:13})return null;const e=list[${noShow?3:6}];e.click();return e.innerText;})()`);
+  const room=await evalAt(`(()=>{const list=Array.from(document.querySelectorAll('[class*=roomList] li'));if(list.length!==${noShow?6:13})return null;const e=list[${aof?9:noShow?3:6}];e.click();return e.innerText;})()`);
   assert.ok(room,'native critical room card exists');console.log('ROOM',JSON.stringify(room));
   await delay(18000);
   let session;for(const s of sessions){if(await evalAt('window.cc&&cc.director.getScene()?.name',s).catch(()=>null)==='gameHoldem')session=s;}
   assert.ok(session,'original client reaches gameHoldem');const evaluate=e=>evalAt(e,session);
   const entry=await evaluate(`(()=>{const g=cc.app.gameRoom;return {scene:cc.director.getScene().name,params:g.params,conf:g._conf,observer:g.getIsOb(),me:g.getMyMemberInfo()};})()`);
   console.log('ENTRY',JSON.stringify({scene:entry.scene,observer:entry.observer,mode:entry.conf.playMode,params:entry.params}));
-  assert.equal(entry.observer,true);assert.ok(!entry.me);assert.equal(entry.params.criticalFlag,true);assert.equal(entry.params.criticalAnte,100);
-  assert.ok(frames.some(f=>f.msgid===2201&&f.payload.conf?.gameRoomConfigId===(noShow?1928:1921)));
+  assert.equal(entry.observer,true);assert.ok(!entry.me);assert.equal(entry.params.criticalFlag,!aof);if(aof){assert.equal(entry.conf.playMode,9);assert.equal(entry.params.aofBet,100);}else assert.equal(entry.params.criticalAnte,100);
+  assert.ok(frames.some(f=>f.msgid===2201&&f.payload.conf?.gameRoomConfigId===(aof?1927:noShow?1928:1921)));
   assert.equal(entry.params.forceShowCard,!noShow);
-  await evaluate(`(()=>{for(const c of cc.director.getScene().getComponentsInChildren(cc.Component))if(c.node.activeInHierarchy&&cc.js.getClassName(c)==='GameCriticalHelpPanel')c.closeIt();return true;})()`);
+  await evaluate(`(()=>{for(const c of cc.director.getScene().getComponentsInChildren(cc.Component))if(c.node.activeInHierarchy&&cc.js.getClassName(c)===${JSON.stringify(aof?'GameAofBituiHelpPanel':'GameCriticalHelpPanel')})c.closeIt();return true;})()`);
   await evaluate(`cc.app.gameRoom.dispatchEventAll('HideAllPopupPanel');true`);
   assert.equal(await evaluate(`(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>typeof c.clickSeatDown==='function');const nodes=[],walk=n=>{if(Number.isInteger(n.seatIndex)&&n.activeInHierarchy&&n.getComponent(cc.Button)?.interactable)nodes.push(n);n.children.forEach(walk);};if(!c)return false;walk(c.node);if(!nodes.length)return false;c.clickSeatDown({target:nodes[0]});return true;})()`),true);
   await delay(500);
   assert.equal(await evaluate(`(()=>{const c=cc.director.getScene().getComponentsInChildren(cc.Component).find(c=>c.node.activeInHierarchy&&c._curdata&&typeof c.onDaiRuClick==='function');if(!c)return false;c._carryReqCount=100;c.onDaiRuClick();return true;})()`),true);
   const started=Date.now();let progress,criticalInning,settled=false,ordinaryAfter=false,animation=false;
   while(Date.now()-started<160000){
-    progress=await evaluate(`(()=>{const g=cc.app.gameRoom,all=cc.director.getScene().getComponentsInChildren(cc.Component);for(const c of all){if(c.node.activeInHierarchy&&cc.js.getClassName(c)==='GameCriticalHelpPanel')c.closeIt();}return {phase:g._curStatus,inning:g._conf.currentInning,me:g.getMyMemberInfo(),visibleErrors:all.filter(c=>c instanceof cc.Label&&c.node.activeInHierarchy&&/NaN|undefined/.test(c.string)).map(c=>c.string),critPanel:all.some(c=>c.node.activeInHierarchy&&c.node.name==='criticalStartPanel')};})()`);
+    progress=await evaluate(`(()=>{const g=cc.app.gameRoom,all=cc.director.getScene().getComponentsInChildren(cc.Component);for(const c of all){if(c.node.activeInHierarchy&&cc.js.getClassName(c)===${JSON.stringify(aof?'GameAofBituiHelpPanel':'GameCriticalHelpPanel')})c.closeIt();}return {phase:g._curStatus,inning:g._conf.currentInning,me:g.getMyMemberInfo(),visibleErrors:all.filter(c=>c instanceof cc.Label&&c.node.activeInHierarchy&&/NaN|undefined/.test(c.string)).map(c=>c.string),critPanel:all.some(c=>c.node.activeInHierarchy&&c.node.name==='criticalStartPanel')};})()`);
     animation ||= progress.critPanel;
-    const begin=frames.find(f=>f.msgid===3261&&f.payload.playMode===2&&f.payload.uidList.includes(uid));
+    const begin=frames.find(f=>f.msgid===3261&&f.payload.playMode===(aof?9:2)&&f.payload.uidList.includes(uid));
     if(begin){criticalInning=begin.payload.currentInning;
       const slice=frames.filter(f=>f.time>=begin.time),end=slice.find(f=>f.msgid===3432&&f.payload.some(p=>p.uid===uid));
       if(end&&!settled){settled=true;console.log('CRITICAL_RESULT',JSON.stringify({inning:criticalInning,results:end.payload}));
         await delay(1500);
-        const visual=await evaluate(`(()=>{const all=cc.director.getScene().getComponentsInChildren(cc.Component);return {phase:cc.app.gameRoom._curStatus,help:all.some(c=>c.node.activeInHierarchy&&cc.js.getClassName(c)==='GameCriticalHelpPanel'),labels:all.filter(c=>c instanceof cc.Label&&c.node.activeInHierarchy).map(c=>c.string)};})()`);
+        const visual=await evaluate(`(()=>{const all=cc.director.getScene().getComponentsInChildren(cc.Component);return {phase:cc.app.gameRoom._curStatus,help:all.some(c=>c.node.activeInHierarchy&&cc.js.getClassName(c)===${JSON.stringify(aof?'GameAofBituiHelpPanel':'GameCriticalHelpPanel')}),labels:all.filter(c=>c instanceof cc.Label&&c.node.activeInHierarchy).map(c=>c.string)};})()`);
         assert.equal(visual.help,false);console.log('SETTLE_VISUAL',JSON.stringify(visual));
         const shots=await send('Page.captureScreenshot');fs.writeFileSync('test/browser/holdem-critical'+suffix+'-settle.png',Buffer.from(shots.result.data,'base64'));
         const states=slice.slice(0,slice.indexOf(end)).filter(f=>f.msgid===3263).map(f=>f.payload);
-        assert.ok(!states.includes('BET_BLIND')&&!states.includes('BET_PERFLOP'));assert.ok(states.includes('BET_FLOP'));
+        assert.ok(!states.includes('BET_BLIND'));if(!aof)assert.ok(!states.includes('BET_PERFLOP'));assert.ok(states.includes('BET_FLOP'));if(aof){const wagers=slice.filter(f=>f.msgid===3440);assert.ok(wagers.length>=2);assert.ok(wagers.every(f=>f.payload.currentBetScore===100));}
         assert.equal(end.payload.reduce((sum,p)=>sum+p.score,0),0);
       }
-      ordinaryAfter=frames.some(f=>f.msgid===3261&&f.payload.currentInning>criticalInning&&f.payload.playMode===0);
+      ordinaryAfter=frames.some(f=>f.msgid===3261&&f.payload.currentInning>criticalInning&&f.payload.playMode===(aof?9:0));
     }
     const t=[...registry.tables.values()].find(t=>t.members.some(m=>m.uid===uid));
     if(t?.hand?.actorUid===uid){const me=t.members.find(m=>m.uid===uid),operation=me.streetBet<t.hand.currentBet?7:10;
@@ -145,8 +146,19 @@ try {
     if(history.found&&history.received)break;await delay(400);
   }
   console.log('HISTORY',JSON.stringify(history));assert.ok(history.found&&history.received);
-  assert.equal(history.initialBet,100);assert.ok(history.players>=2);
+  assert.equal(history.initialBet,aof?0:100);assert.ok(history.players>=2);
   const errors=logs.filter(m=>m.method==='Runtime.exceptionThrown');console.log('ERRORS',JSON.stringify(errors));assert.deepEqual(errors,[]);assert.deepEqual(failures,[]);
+  if(aof){
+    await evaluate(`cc.app.gameRoom.dispatchEventAll('HideAllPopupPanel');__require('SocketMgr').default.instance.send(5004);true`);
+    // The previous check deliberately paused a newly started hand to inspect
+    // replay. Honor the normal next-hand-stand rule before exiting.
+    for(let n=0;n<8;n++){
+      await delay(1100);await handler.tick();
+      const table=[...registry.tables.values()].find(t=>t.members.some(m=>m.uid===uid));
+      if(!table||!table.hand)break;
+    }
+    await handler.tick();
+  }
   await evaluate(`__require('SocketMgr').default.instance.send(2110);true`);await delay(1500);
   assert.equal(await evalAt(`(()=>{const f=document.querySelector('[class*=gameIframe]');return !f||getComputedStyle(f).visibility!=='visible';})()`),true);
 }catch(e){fs.writeFileSync('test/browser/holdem-critical'+suffix+'-failure.json',JSON.stringify({error:e.stack,logs,frames,failures}));throw e;}

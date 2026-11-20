@@ -6,14 +6,18 @@ import { BlackjackGame } from '../../../../game-server/src/games/blackjack/Black
 import * as engine from '../../../../game-server/src/games/blackjack/engine.js';
 import { makeShoe } from '../../../../game-server/src/games/blackjack/hand.js';
 import { SEND } from '../../../../game-server/src/games/blackjack/messages.js';
+import {createRegistry} from '../../../../game-server/src/registry.js';
+import {installUserCenter} from '../../../../game-server/src/core/user-center.js';
+import {queryNativeHistory} from '../../../../game-server/src/core/game-history.js';
 
-function settled(mode = 1) {
+function settled(mode = 1, observe) {
   const game = new BlackjackGame(), table = game.createTable(31100000, 31, { play_mode: mode, ante: 100 });
   table.members = Array.from({ length: mode ? 5 : 3 }, (_, pos) => ({
     uid: pos + 1, pos, name: 'player-' + pos, icon: '1', point: 5000, state: 2, bot: false,
   }));
   table.observers = [{ uid: 99, name: 'observer' }];
   const io = { env: 'dev', broadcast() {} };
+  observe?.(table);
   engine.begin(io, table, 1000, makeShoe());
   for (const p of table.hand.players) assert.ok(engine.act(io, table, p.uid, SEND.BET, { betAmount: 100 }, 1001));
   for (let i = 0; i < 100 && !table.hand.settled; i++) engine.tick(io, table, table.hand.deadline);
@@ -83,4 +87,20 @@ test('ordinary blackjack replay retains its own coordinates, permissions and pag
   assert.equal(engine.historyPayload(table, {}, 100).total, 0);
   assert.equal(engine.historyPayload(table, { gameRoomId: 1 }, 99).total, 0);
   assert.deepEqual(engine.historyPayload(table, { beginNum: 1 }, 99).gameBackInfo.inningInfo, [[]]);
+});
+
+test('the original casino history renderer accepts the production snapshot captured from a real settled hand',async()=>{
+  const records=[],registry=createRegistry();
+  const runtime={env:'prod',registry,wallet:{stageFinalReports:(_table,rows)=>records.push(...structuredClone(rows))},
+    gateway:{writeUserCenter:async rows=>({durable:true,stored:rows.length}),getUserCenter:async query=>({records:records.filter(r=>r.userId===query.userId)})},
+    log:{error:message=>assert.fail(message)}};
+  installUserCenter(runtime);
+  const {table}=settled(1,table=>{table.agentId=7;registry.setTable(table.roomId,table,7,'blackjack');});
+  await runtime.userCenterState.writeTask;
+  assert.equal(records.length,5);assert.ok(records.every(r=>r.detail.nativeHistory.row.firstGameList[0].banker));
+  table.hand=null;table.history=[];
+  const payload=await queryNativeHistory({runtime,table,session:{userId:1,agentId:7,currency:'CNY'}},{}),render=nativeItem();
+  const rows=payload.gameBackInfo.inningInfo[0].filter(row=>!row.banker);
+  assert.deepEqual(rows.map(row=>row.displaySeat),[1,2,3,5,6]);
+  for(const row of rows){const item=render(row);assert.ok(!/undefined|NaN/.test(item.areaLb.string+item.mName.string+item.mWinLose.string));assert.ok(row.handResults.every(hand=>hand.handCards.length>=2));}
 });

@@ -109,11 +109,12 @@ test('production missing ticket authority fails closed without simulated outcome
   f.runtime.scratchTickets = { reveal() { return null; } };
   assert.equal((await f.request(3701, { faceValue: 100, revealMode: 'RANDOM_BUY_REVEAL', serialFull: '' })).code, ERROR.STORAGE);
 });
-test('production history uses scoped Redis then data-center, merges requests and checks ownership', async () => {
+test('production history queries scoped ES through data-center and caches the request result for three minutes', async () => {
   const f = fixture(), cache = new Map(); let queries = 0;
-  const good = { userId: 9, agentId: 0, gameId: 61, init: JSON.stringify({ roomId: f.table.roomId, gameRoomId: f.table.gameRoomId, serialNo: 'ticket', faceValue: 100, amount: 1900, huCount: 9, multiplier: 20, huMask: mask(9) }) };
-  f.runtime.rpc = { bus: { getCache: async k => cache.get(k), setCache: async (k, v, ttl) => { assert.equal(ttl, 30); assert.ok(k.startsWith('scratch:0:61:')); cache.set(k, v); } },
-    gateway: { getRecords: async () => { queries++; await new Promise(r => setTimeout(r, 5)); return { data: [good, { ...good, userId: 11 }, { ...good, agentId: 2 }, { ...good, gameId: 63 }] }; } } };
+  f.table.agentId=1;f.ctx.session.currency='CNY';
+  const good = { userId: 9, agentId: 1, currency:'CNY',gameId:61,log:JSON.stringify({roomId:f.table.roomId,gameRoomId:f.table.gameRoomId,roomType:61,serialNo:'ticket',faceValue:100,amount:1900,huCount:9,multiplier:20,huMask:mask(9)})};
+  f.runtime.rpc = { bus: { getCache: async k => cache.get(k), setCache: async (k, v, ttl) => { assert.equal(ttl, 180); assert.match(k,/^scratch-history:v3:[a-f0-9]{64}$/); cache.set(k, v); } },
+    gateway: { getScratchHistory: async query => { assert.equal(query.agentId,1);assert.equal(query.currency,'CNY');assert.equal(query.gameId,61);queries++; await new Promise(r => setTimeout(r, 5)); return { records: [good, { ...good, userId: 11 }, { ...good, agentId: 2 }, { ...good, gameId:'ggl-queen' }] }; } } };
   const result = await Promise.all([list(f.ctx), list(f.ctx)]); assert.equal(queries, 1); assert.equal(result[0].winInfo.length, 1);
   assert.equal((await list(f.ctx)).winInfo.length, 1); assert.equal(queries, 1);
 });

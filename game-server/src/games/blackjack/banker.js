@@ -57,6 +57,7 @@ export function request(ctx, id, body = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
   const { table, session } = ctx, uid = session.userId;
   if (table.playMode !== 1 || session.bot) { tip(ctx.io, uid, 0, '当前玩法不支持上庄'); return true; }
+  if(walletOf(ctx).lotteryFor?.(table)&&!walletOf(ctx).bankerNetEnabled){ctx.send(id+49,{code:1,msg:'当前未启用真人上庄资金接口'});return true;}
   const s = state(table), e = find(table, uid, body.bankerType);
   const reply = (code, msg) => ctx.send(id + 49, { code, msg });
   if (!validType(body.bankerType)) { reply(id === REQUEST.CHANGE ? 3 : 1, '上庄区域错误'); return true; }
@@ -105,7 +106,8 @@ async function refunds(ctx) {
   const s = state(ctx.table);
   for (const r of [...(s.refunds || [])]) {
     if (!r.credited) {
-      const result = await credit(r.session, r.amount, ctx, { operation: r });
+      const wallet=walletOf(ctx);
+      const result=wallet.lotteryFor?.(ctx.table)&&!r.member?(wallet.releaseCarry(r.session,r.entry.collateralMember,r.amount),{ok:true}):await credit(r.session, r.amount, ctx, { operation: r });
       if (result?.ok === false) {
         if (r.purpose === 'reduce' && !r.failureNotified) {
           tip(ctx.io, r.entry.uid, 100114, '余额不足，带出失败'); r.failureNotified = true;
@@ -126,7 +128,10 @@ async function refunds(ctx) {
         ctx.table.observers.push({ uid: r.entry.uid, name: r.entry.name, icon: r.entry.icon, point: r.session.wallet, bot: false });
       ctx.io.broadcast(3436, r.entry.uid);
     }
-    if (r.purpose === 'down') s.entries = s.entries.filter(e => e !== r.entry);
+    if (r.purpose === 'down') {
+      s.entries = s.entries.filter(e => e !== r.entry);
+      if(!s.entries.some(e=>e.uid===r.entry.uid))s.collaterals?.delete(r.entry.uid);
+    }
   }
 }
 // All transfers have resident ledgers. Retrying persist never repeats credit/debit.
@@ -140,7 +145,13 @@ async function persistFunding(ctx) {
   }
 }
 function fund(ctx, e, amount) {
-  const result = debit(e.session, amount, ctx);
+  const wallet=walletOf(ctx),s=state(ctx.table);
+  let result;
+  if(wallet.lotteryFor?.(ctx.table)){
+    s.collaterals||=new Map();
+    const member=s.collaterals.get(e.uid)||{uid:e.uid,point:0,bot:false};s.collaterals.set(e.uid,member);e.collateralMember=member;
+    result=wallet.reserveCarry(e.session,member,ctx.table,amount);
+  }else result=debit(e.session, amount, ctx);
   if (!result.ok) {
     if (Number.isSafeInteger(result.balance) && result.balance >= 0) e.session.wallet = result.balance;
     balance(ctx, e.session);
@@ -236,6 +247,11 @@ export function freeze(table) {
   table.hand.bankers = state(table).entries.filter(e => e.onBanker && !e.removed)
     .map(entry => ({ entry, uid: entry.uid, bankerType: entry.bankerType, cap: cap(entry), proportion: 0, score: 0 }));
 }
+export function registerFinance(io,table){
+ const wallet=walletOf(io);if(!wallet.lotteryFor?.(table))return;
+ const byUid=new Map();for(const b of table.hand?.bankers||[]){const value=byUid.get(b.uid)||{session:b.entry.session,member:b.entry.collateralMember,cap:0};value.cap+=b.cap;byUid.set(b.uid,value)}
+ for(const value of byUid.values())wallet.registerBanker(table,table.hand,value.session,value.member,value.cap);
+}
 export function ready(table) {
   return table.playMode !== 1 || !table.casinoBankers
     || (!state(table).task && !state(table).refunds?.length
@@ -277,5 +293,6 @@ export function settle(table, results) {
   }
   for (const [i, samples] of state(table).history.entries()) { samples.push(h.bankerExposure[i]); if (samples.length > 10) samples.shift(); }
   const stats = [...byUid.values()];
+  for(const row of stats)row.xiaZhuData=Math.abs(row.score);
   return stats;
 }

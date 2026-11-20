@@ -9,12 +9,12 @@ export { hasCarry, cashTableKey, CARRY_TTL_MS, CARRY_RENEW_MS } from './carry.js
 export { OnlineWallet, createRpcWallet };
 
 const require = createRequire(import.meta.url);
-let sessionOnly;
 const tableWallet = Symbol.for('gogame.test.table.wallet');
-function localWallet(options) {
+function localWallet(options, sessionOnly = false) {
   if (!env.isDev) throw new Error("Local wallet is only available in dev; configure a production wallet");
-  const { LocalWallet } = require("../../../cache/wallet/LocalWallet.js");
-  return enableCarry(new LocalWallet(options));
+  const { LocalWallet, sessionOnlyWallet } = require("../../../cache/wallet/LocalWallet.js");
+  const create=()=>enableCarry(new LocalWallet(options));
+  return sessionOnly ? sessionOnlyWallet(create) : create();
 }
 
 export function createWallet(config = {}, deps = {}) {
@@ -38,15 +38,15 @@ export function walletOf(host) {
   if (wallet) return enableCarry(wallet);
   if (!env.isDev) throw new Error("A production wallet is required");
   if (host?.table) return host.table[tableWallet] ||= localWallet({ localBalance: 0 });
-  return sessionOnly ||= localWallet({ localBalance: 0 });
+  return localWallet({ localBalance: 0 }, true);
 }
 
 export function debit(session, amount, host, meta) {
-  return walletOf(host).debit(session, amount, meta);
+  return walletOf(host).debit(session, amount, {...meta,table:host?.table||host?.io?.table||host?.lotteryTable});
 }
 
 export function credit(session, amount, host, meta) {
-  return walletOf(host).credit(session, amount, meta);
+  return walletOf(host).credit(session, amount, {...meta,table:host?.table||host?.io?.table||host?.lotteryTable});
 }
 
 export function canDebit(session, amount, host) {

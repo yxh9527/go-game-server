@@ -1,4 +1,5 @@
 import { rel } from '../../rel.js';
+import reelProfile from './reel-config.js';
 const v = new URL(import.meta.url).searchParams.get('v') || '0';
 const { DENOMINATIONS, WIN_MULTIPLIERS } = await rel(import.meta.url, '../ggl-core/rules.js', v);
 export default {
@@ -13,6 +14,7 @@ export default {
   defaultRoomIndex: 26,
   defaultMaxBet: 100000000,
   maskSize: 20,
+  reelProfile,
   winMultipliers: WIN_MULTIPLIERS,
   denominations: DENOMINATIONS,
 };

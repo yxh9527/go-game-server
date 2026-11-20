@@ -570,15 +570,15 @@ export class SeatGame extends GameBase {
     if(table.mtt){
       if(table.mtt.finished||table.mtt.paused||table.mtt.closed)return;
       const now=Date.now();
-      if(table.phase==='playing')this.playTick(ctx,now);
-      else if(this.seated(table).length>=this.minPeople(table)&&now>=table.startAt)this.startRound(ctx);
+      if(table.phase==='playing')return this.playTick(ctx,now);
+      else if(!table.mtt.clock?.pauseRequested&&table.mtt.clock?.waitingIndex==null&&this.seated(table).length>=this.minPeople(table)&&now>=table.startAt)return this.startRound(ctx);
       return;
     }
     if (table.admissionTask || table.roundAdmission || table.partialCarryOut) return;
     const now = Date.now();
     this.expirePendingCarry(ctx, now);
     if (lifecycle.isExpired(table, now)) {
-      if (!table.closing && table.phase === "playing") this.playTick(ctx, now);
+      if (!table.closing && table.phase === "playing") return this.playTick(ctx, now);
       return;
     }
     if (table.standby) return;
@@ -590,11 +590,10 @@ export class SeatGame extends GameBase {
       // Rotate spectator wire coordinates only between hands, after the
       // settlement delay. Incremental bot joins must not reset a live scene.
       ctx.io.prepareRoundSeats?.(this.roomInfo(table));
-      this.startRound(ctx);
-      return;
+      return this.startRound(ctx);
     }
     if (table.phase === "playing") {
-      this.playTick(ctx, now);
+      return this.playTick(ctx, now);
     }
   }
 

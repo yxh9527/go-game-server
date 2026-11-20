@@ -1,8 +1,9 @@
+import {importHotModule} from '../../../shared/hot-import.js';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { HoldemGame } from "../../../game-server/src/games/holdem/HoldemGame.js";
 import { ZjhGame } from "../../../game-server/src/games/zjh/ZjhGame.js";
-import * as robot from "../../../game-server/src/core/robot.js";
+const robot=await importHotModule(new URL('../../../game-server/src/core/robot.js',import.meta.url).href,'room-runtime-regression');
 import { SeatGame } from "../../../game-server/src/core/SeatGame.js";
 import { PUSH } from "../../../game-server/src/messages.js";
 import { OP } from "../../../game-server/src/games/holdem/op.js";

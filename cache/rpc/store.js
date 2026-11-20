@@ -23,6 +23,8 @@ export function createMemoryStore() {
   const blinds = new Map(seedBlinds().map((row) => [row.id, row]));
   const matchPlayers = [];
   const matchRooms = [];
+  const issuedTickets=new Map();
+  const operatorTicketHolds=new Map();
 
   return {
     async listRooms() {
@@ -34,6 +36,11 @@ export function createMemoryStore() {
     async getMatch(id) {
       const row = matches.get(Number(id));
       return row ? clone(row) : null;
+    },
+    async deleteMatch(id){
+      const old=matches.get(Number(id));if(!old)return null;
+      if(Number(old.state)!==0)throw Object.assign(new Error('only draft matches can be deleted'),{status:409});
+      matches.delete(Number(id));return clone(old);
     },
     async insertMatch(row) {
       const id = row.id || nextId(matches);
@@ -56,6 +63,15 @@ export function createMemoryStore() {
     },
     async listTickets() {
       return [...tickets.values()].sort((a, b) => a.id - b.id).map(clone);
+    },
+    async deleteTicket(id){const old=tickets.get(Number(id));if(!old)throw Object.assign(new Error('ticket not found'),{status:404});old.disabled=true;return clone(old);},
+    async issueTickets(request){
+      const old=issuedTickets.get(request.requestId);
+      if(old){if(JSON.stringify(old)!==JSON.stringify(request))throw Object.assign(new Error('issuance request conflict'),{status:409});return {requestId:request.requestId,issued:request.count,replayed:true};}
+      const ticket=tickets.get(request.id);if(!ticket||ticket.disabled||ticket.remain<request.count)throw Object.assign(new Error('门票未开放或库存不足'),{status:409});
+      ticket.remain-=request.count;
+      for(let ordinal=1;ordinal<=request.count;ordinal++)operatorTicketHolds.set(request.requestId+':'+ordinal,{ticket_id:request.id,owner:request.userId,is_use:0,create_time:Math.floor(Date.now()/1000)});
+      issuedTickets.set(request.requestId,clone(request));return {requestId:request.requestId,issued:request.count,replayed:false};
     },
     async insertTicket(row) {
       const id = nextId(tickets);
@@ -131,11 +147,17 @@ export function createMemoryStore() {
     async listMatchPlayers() {
       return matchPlayers.map(clone);
     },
+    async deleteBlinds(id) {
+      if([...matches.values()].some(row=>Number(row.blinds_id)===Number(id)))throw Object.assign(new Error('blinds in use'),{status:409});
+      const old=blinds.get(Number(id));
+      if(!old)return null;
+      blinds.delete(Number(id));return clone(old);
+    },
     async listMatchRooms() {
       return matchRooms.map(clone);
     },
-    async countUnusedTickets(_userId) {
-      return 0;
+    async countUnusedTickets(userId) {
+      return [...operatorTicketHolds.values()].filter(h=>h.owner===Number(userId)&&h.is_use===0).length;
     },
   };
 }

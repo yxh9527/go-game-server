@@ -1,7 +1,9 @@
 import { rel } from "../../shared/hot-import.js";
 import { randomUUID } from 'node:crypto';
 import {installHotResolver} from '../../shared/hot-loader.js';
+import {installHotSourcePins} from '../../shared/hot-source-pins.js';
 installHotResolver();
+installHotSourcePins();
 
 export async function createHandler(runtime) {
   const v = runtime.hotVersion;
@@ -9,6 +11,8 @@ export async function createHandler(runtime) {
     const {refreshDataAccess}=await rel(import.meta.url,'../../shared/rpc/adapters/rpcAdapter.js',v);
     await refreshDataAccess(runtime);
   }
+  const {loadGameRoutes,resolveRoomGameRoute}=await rel(import.meta.url,'../../shared/rpc/game-routes.js',v);
+  const financeRoutes=await loadGameRoutes(runtime);
   if (runtime.env === "dev") {
     const localConfigs = await rel(import.meta.url, "../../cache/rpc/room-configs.js", v);
     await localConfigs.refreshRoomConfigs(runtime);
@@ -27,7 +31,8 @@ export async function createHandler(runtime) {
   const features = await rel(import.meta.url, "./core/room-features.js", v);
   const seatView = await rel(import.meta.url, "./core/seat-view.js", v);
   const subscriptionsModule = await rel(import.meta.url, "./core/hundred-subscriptions.js", v);
-  const subscriptions = subscriptionsModule.createHundredSubscriptions(runtime, gameOf, tableIo);
+  const subscriptions = subscriptionsModule.createHundredSubscriptions(runtime, gameOf, tableIo,
+    cfg=>resolveRoomGameRoute(financeRoutes,cfg));
   const { createTournamentControl } = await rel(import.meta.url, './core/tournament.js', v);
   const tournament = await createTournamentControl(runtime, gameOf, tableIo);
   const localHttp = runtime.env === "dev"
@@ -54,7 +59,13 @@ export async function createHandler(runtime) {
   const sessions = createSessionControl(runtime, { send, close: onClose, kickId: PUSH.USER_LOGIN_KICKOUT });
   if (runtime.rpc?.common && runtime.wallet) {
     const { createRpcWallet } = await rel(import.meta.url, './wallet/rpcWallet.js', v);
-    Object.assign(runtime.wallet, createRpcWallet(runtime.rpc));
+    Object.defineProperties(runtime.wallet,Object.getOwnPropertyDescriptors(createRpcWallet(runtime.rpc)));
+  }
+  if(runtime.env==='prod'&&runtime.config?.finance?.provider==='lottery'){
+    const {createRoundFinance}=await rel(import.meta.url,'./wallet/round-finance.js',v);
+    runtime.wallet.configureLottery(createRoundFinance(runtime.rpc.common,{routes:financeRoutes}),runtime.config.finance.room_types,runtime);
+    const {createRpcScratchTickets}=await rel(import.meta.url,'./games/ggl-core/rpc-tickets.js',v);
+    runtime.scratchTickets=createRpcScratchTickets(runtime.rpc.common,{routes:financeRoutes});
   }
   const pool = poolModule.createRoomPool(runtime, gameOf);
   const { walletOf, hasCarry } = await rel(import.meta.url, './wallet/index.js', v);
@@ -64,6 +75,8 @@ export async function createHandler(runtime) {
   const userCenter = installUserCenter(runtime,legacyCenter?.legacyUserCenterRecords);
   const {createPlayerPanel}=await rel(import.meta.url,'./core/player-panel.js',v);
   const playerPanel=await createPlayerPanel(runtime);
+  const {createSmartBet}=await rel(import.meta.url,'./core/smart-bet.js',v);
+  const smartBet=createSmartBet(runtime,gameOf,tableIo);
   const {projectPlayerNotes}=await rel(import.meta.url,'../../shared/player-panel.js',v);
   for (const table of runtime.registry.tables.values()) {
     playerPanel.syncRoomBots(table);
@@ -105,7 +118,14 @@ export async function createHandler(runtime) {
           conf: { ...payload.conf, hundredSwitch: true } };
       }
       const frame = codec.encodeFrame(msgid, payload);
-      const deliver = () => { if (ws.readyState === 1) ws.send(frame); };
+      const deliver = () => {
+        const held=Boolean(table?.fairPersistence?.pending.size);
+        fair.deliverAfterFairProof(table,ws,frame,()=>{
+          if(held&&runtime.registry.session(ws)!==session)return;
+          if(held&&table&&runtime.registry.getTable(session?.roomId,session?.agentId,session?.gameId)!==table)return;
+          if(ws.readyState===1)ws.send(frame);
+        });
+      };
       if (runtime.wallet.deliver) runtime.wallet.deliver(deliver); else deliver();
     }
   }
@@ -136,7 +156,9 @@ export async function createHandler(runtime) {
     }
     return {
       env: runtime.env,
+      lotteryTable:table,
       wallet: runtime.wallet,
+      writeFairProof:record=>(runtime.gateway||runtime.rpc?.gateway).fairProof('write',{record}),
       send,
       prepareRoundSeats(roomInfo) {
         for (const [ws, session] of runtime.registry.sessions) {
@@ -225,6 +247,7 @@ export async function createHandler(runtime) {
     let table = game ? runtime.registry.getTable(roomId, agentId, game.id) : null;
     if (table) {
       if(roomType&&Number(table.roomType)!==Number(roomType))return null;
+      if(Number(table.roomType)!==101)resolveRoomGameRoute(financeRoutes,table.cfg);
       if (table.agentId == null) table.agentId = Number(agentId) || 0;
       return table;
     }
@@ -236,6 +259,7 @@ export async function createHandler(runtime) {
       ||Math.floor(Number(roomId)/10000)!==Number(cfg.game_room_config_id)
       ||Number(roomId)%10000!==Number(cfg.room_index||0)))return null;
     if(!cfg&&runtime.env==='prod')return null;
+    resolveRoomGameRoute(financeRoutes,cfg);
     if (!game) {
       throw new Error(`no game for roomType=${roomType}`);
     }
@@ -258,6 +282,7 @@ export async function createHandler(runtime) {
     const requestedId = Number(body.roomId);
     if (requestedId) {
       const existing = runtime.registry.getTable(requestedId, session.agentId, game.id);
+      if(existing)resolveRoomGameRoute(financeRoutes,existing.cfg);
       if (existing && Number(existing.roomType) === roomType) return existing;
     }
     const row = runtime.configs.find(row => Number(row.state ?? 1) === 1
@@ -290,6 +315,10 @@ export async function createHandler(runtime) {
       }
       const profile = await runtime.gateway.getLoginData(uid);
       const agentId = Number(profile?.agentId) || 0;
+      if(body.action==='smart-bet'){
+        try{respond({code:200,data:await smartBet.command({userId:uid,agentId,currency:profile.currency?.symbol||profile.currencyType||'CNY'},body.request||{})});}
+        catch(error){respond({code:error.status||503,error:error.message});}return;
+      }
       if(body.action==='player-profile'){
         const roomId=Number(body.roomId);
         const viewer=[...runtime.registry.sessions.values()].find(s=>Number(s.userId)===uid&&Number(s.agentId)===agentId
@@ -308,7 +337,7 @@ export async function createHandler(runtime) {
         try{respond({code:200,data:await playerPanel.records(viewer,table,Number(body.targetUid),Number(body.pageNum||1),Number(body.pageSize||10))});}
         catch(error){respond({code:error.status||503,error:error.message});}return;
       }
-      if(body.action==='fair-code'&&runtime.env==='dev'){
+      if(body.action==='fair-code'){
         const roomId=Number(body.gameRoomId),inning=Number(body.currentInning);
         if(!Number.isSafeInteger(roomId)||roomId<=0||!Number.isSafeInteger(inning)||inning<=0
           ||body.roomType!=null&&(!Number.isSafeInteger(Number(body.roomType))||Number(body.roomType)<=0)){
@@ -316,7 +345,11 @@ export async function createHandler(runtime) {
         }
         const candidates=runtime.registry.listAgentGameRooms(agentId).filter(table=>Number(table.roomId)===roomId
           &&(body.roomType==null||Number(table.roomType)===Number(body.roomType))&&!table.closing);
-        const data=candidates.length===1?fair.fairCodeDetail(candidates[0],uid,inning):null;
+        let data=candidates.length===1?fair.fairCodeDetail(candidates[0],uid,inning):null;
+        if(runtime.env==='prod'){
+          const saved=await (runtime.gateway||runtime.rpc?.gateway).fairProof('read',{agentId,userId:uid,roomId,inning,roomType:Number(body.roomType)||0});
+          data=saved?fair.fairCodeDetail({currentInning:inning,fairCodes:new Map([[inning,fair.restoreFairProof(saved)]])},uid,inning):null;
+        }
         respond(data?{code:200,data}:{code:404,error:'Fair-code record not found or not authorized'});return;
       }
       if (body.action === 'wallet' && runtime.env === 'dev') {
@@ -352,6 +385,7 @@ export async function createHandler(runtime) {
         respond({ code: 404, error: "未找到房间配置" });
         return;
       }
+      if(Number(cfg.room_type)!==101)resolveRoomGameRoute(financeRoutes,cfg);
       const allocationGame = gameOf(cfg.room_type);
       if (allocationGame?.kind === 'normal' && Number(cfg.room_type) !== 101
         && !(allocationGame.id === 'blackjack' && Number(cfg.play_mode) === 1)) {
@@ -460,13 +494,26 @@ export async function createHandler(runtime) {
     // the entire room graph for each player's ordinary heartbeat.
     const heartbeat=raw.length===8&&raw[0]===0xc0&&raw.readUInt32BE(4)===0
       &&[SEND.PING,SEND.ROOM_PING].includes(raw.readInt16BE(2));
-    const action=()=>runtime.wallet.authoritative&&!heartbeat
+    // Ticket authority owns its atomic money/ownership transaction. Its native
+    // request IDs cannot be wrapped in a second staged cash transaction.
+    const scratchAuthority=runtime.env==='prod'&&runtime.scratchTickets?.authoritative&&raw.length>=8&&raw[0]===0xc0
+      &&[3701,3702,3703,3704,6127,6121,6221].includes(raw.readInt16BE(2));
+    const cashRequest=runtime.wallet.authoritative&&!heartbeat&&!scratchAuthority;
+    const admission=cashRequest?(runtime.cashRequestAdmission||={pending:0}):null;
+    // Bound client closures across sockets before they reach lease/wallet
+    // queues. Already accepted work, ticks and close cleanup are not dropped.
+    if(admission&&admission.pending>=256){
+      send(ws,9999,{msgCode:0,errorMsg:'资金请求处理中，请稍后重试'});
+      return Promise.resolve();
+    }
+    if(admission)admission.pending++;
+    const action=()=>cashRequest
       ?runtime.wallet.run(()=>processMessage(ws,data),runtime):processMessage(ws,data);
     socket.pendingMessages=(socket.pendingMessages||0)+1;
     let task;
     try{task=Promise.resolve(runtime.bus?.gameSessions?sessions.withSession(ws,action):action());}
-    catch(error){socket.pendingMessages--;return Promise.reject(error);}
-    const finished=()=>{socket.pendingMessages--;};task.then(finished,finished);
+    catch(error){socket.pendingMessages--;if(admission)admission.pending--;return Promise.reject(error);}
+    const finished=()=>{socket.pendingMessages--;if(admission)admission.pending--;};task.then(finished,finished);
     // Closing waits for business actions that already passed authentication.
     const login = raw.length >= 8 && raw[0] === 0xc0 && raw.readInt16BE(2) === SEND.ROOM_LOGIN;
     if (!login) {
@@ -478,7 +525,21 @@ export async function createHandler(runtime) {
     return task;
   }
 
+  async function finishPendingJoin(session){
+    const task=session.roomJoinTask;if(!task)return;
+    try{return await task;}
+    finally{if(session.roomJoinTask===task)delete session.roomJoinTask;}
+  }
+  const leaveTaskStatus=runtime.leaveTaskStatus||=new WeakMap();
+  async function finishPendingLeave(session){
+    const task=session.leaveTask;if(!task)return;
+    const status=leaveTaskStatus.get(task)||{settled:false};leaveTaskStatus.set(task,status);
+    try{return await task;}
+    finally{status.settled=true;if(session.leaveTask===task)delete session.leaveTask;}
+  }
+
   async function processMessage(ws, data) {
+    if(sessions.socketState(ws).closed)return;
     const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (raw[0] === 0x7b) {
       if (raw.length > 1024 * 1024) return;
@@ -579,10 +640,14 @@ export async function createHandler(runtime) {
     if (!session) {
       return;
     }
-    if (session.authenticated === false || session.superseded || sessions.socketState(ws).closed) return;
+    const currentSession=()=>runtime.registry.session(ws)===session&&session.authenticated!==false&&!session.superseded&&!sessions.socketState(ws).closed;
+    if (!currentSession()) return;
     if (runtime.env === 'prod') await cashWallet.refreshCarry(session);
-    if (session.roomJoinTask && msgid !== SEND.SEND_JOIN_ROOM) await session.roomJoinTask;
-    if (session.superseded) return;
+    if (!currentSession()) return;
+    while(session.roomJoinTask&&msgid!==SEND.SEND_JOIN_ROOM){
+      await finishPendingJoin(session);if(!currentSession())return;
+    }
+    if (!currentSession()) return;
     // Inline shortcuts intentionally subscribe to OTHER games (60 -> 58, 62 -> 50).
     // Discovery and registration must follow the request, without changing the selected table.
     if (msgid === SEND.GR_GET_ALL_ROOMS_REQ
@@ -700,6 +765,7 @@ export async function createHandler(runtime) {
       const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
       const game = table ? gameOf(table.roomType) : null;
       if (table && game) await game.afterRound?.(ctxOf(ws, session, table));
+      if (!currentSession()) return;
       if (table?.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
         await expireRoom(table);
         return;
@@ -713,8 +779,8 @@ export async function createHandler(runtime) {
     }
     if (msgid === SEND.SEND_JOIN_ROOM) {
       await sessions.promote(ws, session);
-      if (session.superseded) return;
-      while (session.roomJoinTask) await session.roomJoinTask;
+      if (!currentSession()) return;
+      while (session.roomJoinTask){await finishPendingJoin(session);if(!currentSession())return;}
       const joining = (async () => {
         const body = payload || {};
         const roomId = Number(body.roomId || session.roomId);
@@ -738,13 +804,14 @@ export async function createHandler(runtime) {
           send(ws, PUSH.ROOM_DISSMISS, { roomId: table.roomId });
           return;
         }
-        if (session.leaveTask) await session.leaveTask;
+        if (session.leaveTask) await finishPendingLeave(session);
         if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
-        if (session.superseded) return;
+        if (!currentSession()) return;
         const previous = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);
         if (session.inRoom !== false && previous && previous !== table) {
           await leaveTable(ws, session, previous, gameOf(previous.roomType));
         }
+        if (!currentSession()) return;
         session.openHundredGame = Boolean(body.openHundredGame ?? session.openHundredGame);
         session.roomId = roomId;
         session.gameId = table.gameId;
@@ -776,7 +843,7 @@ export async function createHandler(runtime) {
     // inRoom=false intentionally stops subsequent room traffic to this socket.
     // Also recover clients whose earlier exit completed without its receipt.
     if (msgid === SEND.SEND_LEVEL_OUT && session.inRoom === false) {
-      if (session.leaveTask) await session.leaveTask;
+      if (session.leaveTask) await finishPendingLeave(session);
       else if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
       else sendLeaveResult(ws, session);
       return;
@@ -786,6 +853,7 @@ export async function createHandler(runtime) {
       return;
     }
     if (session.inRoom === false) return;
+    if(runtime.env==='prod'&&table.fairPersistence?.pending.size){void fair.flushFairProof(table);send(ws,9999,{msgCode:503,errorMsg:'验牌数据保存中，请稍后重试'});return;}
     if (msgid !== SEND.SEND_LEVEL_OUT) {
       try { cashWallet.guardCashTable(table); }
       catch (error) { send(ws, 9999, { msgCode: 0, errorMsg: error.message }); return; }
@@ -802,6 +870,7 @@ export async function createHandler(runtime) {
       return;
     }
     await game.afterRound?.(ctxOf(ws, session, table));
+    if (!currentSession()) return;
     if (table.kind === "normal" && lifecycle.isExpired(table) && table.phase !== "playing") {
       await expireRoom(table);
       return;
@@ -863,7 +932,7 @@ export async function createHandler(runtime) {
   }
 
   function leaveTable(ws, session, table, game) {
-    if (session.leaveTask) return session.leaveTask;
+    if (session.leaveTask) return finishPendingLeave(session);
     const state = session.roomLeave ||= { table, detached: false, credited: false, persisted: false, cash: 0 };
     const task = (async () => {
       if (!state.detached) {
@@ -899,14 +968,17 @@ export async function createHandler(runtime) {
     })();
     // Keep the in-flight operation on the resident session across hot reloads.
     session.leaveTask = task;
-    const clearTask = () => { if (session.leaveTask === task) delete session.leaveTask; };
+    const status={settled:false};leaveTaskStatus.set(task,status);
+    const clearTask = () => {status.settled=true;if (session.leaveTask === task) delete session.leaveTask;};
     task.then(clearTask, clearTask);
     return task;
   }
 
   function tick(onlyTable) {
     if(!onlyTable){
+      tournament.tick();
       void userCenter.flush();
+      void smartBet.flush();
       // Lease liveness is independent of a slow wallet batch, but overlapping
       // renewals must not pile up either. Never renew every user per table.
       if(runtime.bus?.gameSessions&&!runtime.sessionRenewTask){
@@ -925,9 +997,19 @@ export async function createHandler(runtime) {
     }
     const closing = [];
     for (const [ws, session] of runtime.registry.sessions) {
-      if (!session.roomLeave || session.leaveTask) continue;
+      if (!session.roomLeave) continue;
       const table = session.roomLeave.table;
       if (onlyTable && table !== onlyTable) continue;
+      if(session.leaveTask){
+        const status=leaveTaskStatus.get(session.leaveTask);
+        if(status?.settled)delete session.leaveTask;
+        else{
+          // Observe an unknown legacy/restored tail once. Do not make the
+          // resident tick await it or attach another waiter on every tick.
+          if(!status)void finishPendingLeave(session).catch(error=>runtime.log?.error?.('original room leave failed',error.message));
+          continue;
+        }
+      }
       closing.push(leaveTable(ws, session, table, gameOf(table.roomType)).then(() => {
         if (ws.readyState !== 1) runtime.registry.drop(ws);
       }).catch(error => runtime.log.error('room cash-out failed; will retry', error.message)));
@@ -936,6 +1018,10 @@ export async function createHandler(runtime) {
       if (onlyTable && table !== onlyTable) continue;
       const game = gameOf(table.roomType);
       const context = { runtime, io: tableIo(table), table };
+      const currentTable=()=>runtime.registry.getTable(table.roomId,table.agentId,table.gameId)===table;
+      // Keep accepted hands settling, but stop adding new reporting work if
+      // data-center has not durably acknowledged the existing backlog.
+      if(runtime.env==='prod'&&table.fairPersistence?.pending.size){void fair.flushFairProof(table);continue;}
       try { cashWallet.guardCashTable(table); }
       catch (error) { runtime.log.error('cash table paused', error.message); continue; }
       const admission = game?.afterRound?.(context);
@@ -947,10 +1033,36 @@ export async function createHandler(runtime) {
         closing.push(expireRoom(table));
         continue;
       }
+      if(runtime.env==='prod'&&runtime.userCenterState?.outgoing.size>=50000&&table.kind==='normal'&&!table.hand)continue;
       if (game) {
+        if(table.smartTasks?.size){
+          closing.push((async()=>{
+            await smartBet.tick(table);
+            if(!currentTable())return;
+            await game.tick(context);
+            if(!currentTable())return;
+            playerPanel.syncRoomBots(table);
+            await game.afterRound?.(context);
+            if(currentTable()&&table.retired)runtime.registry.removeTable(table.roomId,table.agentId,table.gameId);
+          })());
+          continue;
+        }
         const ticking = game.tick(context);
+        if(ticking?.then){
+          closing.push(Promise.resolve(ticking).then(async()=>{
+            if(!currentTable())return;
+            playerPanel.syncRoomBots(table);
+            const settled=game.afterRound?.(context);
+            if(settled){await settled;return;}
+            if(table.kind==='normal'&&lifecycle.isExpired(table)&&table.phase!=='playing')await expireRoom(table);
+            if(currentTable()&&table.kind!=='normal'&&table.retired)runtime.registry.removeTable(table.roomId,table.agentId,table.gameId);
+          },error=>{
+            runtime.log.error('game tick failed',error.message);
+            if(runtime.wallet.authoritative)throw error;
+          }));
+          continue;
+        }
         playerPanel.syncRoomBots(table);
-        if (ticking?.then) closing.push(ticking.catch(error => runtime.log.error('game tick failed', error.message)));
         const settled = game.afterRound?.(context);
         if (settled) {
           closing.push(settled);
@@ -990,8 +1102,8 @@ export async function createHandler(runtime) {
       runtime.registry.drop(ws);
       return;
     }
-    if (session.roomJoinTask) await session.roomJoinTask;
-    if (session.leaveTask) await session.leaveTask;
+    if (session.roomJoinTask) await finishPendingJoin(session).catch(error=>runtime.log?.error?.('closing after room join failed',error.message));
+    if (session.leaveTask) await finishPendingLeave(session);
     if (session.roomLeave) await leaveTable(ws, session, session.roomLeave.table, gameOf(session.roomLeave.table.roomType));
     leaveHundred(ws, session);
     const table = runtime.registry.getTable(session.roomId, session.agentId, session.gameId);

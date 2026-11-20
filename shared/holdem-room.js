@@ -36,6 +36,13 @@ export function assertHoldemPlayable(row, roomType = row?.room_type ?? 19) {
   if (Number(roomType) === 101) return;
   const mode = holdemRoomSettings(row).playMode;
   if ([0, 1, 2, 3].includes(mode)) return;
+  if([8,9].includes(mode)){
+    const rules=holdemRoomSettings(row);
+    if(!Number.isSafeInteger(rules.aofBet)||rules.aofBet<=0||rules.initialBet!==0||rules.criticalFlag
+      ||!Number.isSafeInteger(rules.carryMin)||rules.carryMin<rules.aofBet)
+      throw Object.assign(new Error('Invalid AOF fixed wager or minimum buy-in'),{code:400});
+    return;
+  }
   const name = [8, 9].includes(mode) ? 'AOF必推' : '该德州';
   throw Object.assign(new Error(`${name}玩法尚未开放`), { code: 503 });
 }

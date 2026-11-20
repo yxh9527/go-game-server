@@ -7,8 +7,10 @@ export function userCenterMatch(row,state,query){
   const reward=uid=>(state.prizes||[]).filter(p=>p.status==='paid'&&p.receipt&&p.receipt.amount===p.plan.amount&&p.receipt.currency===p.plan.currency&&Number(p.plan.userId)===Number(uid));
   const amounts=uid=>({point:reward(uid).filter(p=>p.plan.kind==='money'&&p.plan.currency===query.currency).reduce((n,p)=>n+p.plan.amount,0),ticketNum:reward(uid).filter(p=>p.plan.kind==='ticket').reduce((n,p)=>n+p.plan.amount,0)});
   const ranks=Object.values(state.registrations||{}).filter(e=>e.rank>0&&!['pending','failed','refunded'].includes(e.status)).map(e=>({uid:e.userId,rank:e.rank,userName:e.name||String(e.userId),icon:e.avatar||'',...amounts(e.userId)})).sort((a,b)=>a.rank-b.rank);
-  const mine=amounts(own.userId),paid=Number(own.receipt?.paidGold||0)+Number(own.receipt?.paidService||0),refund=Number(own.refund?.refunded||0);
+  const payments=[own,...(own.reentries||[])];
+  const mine=amounts(own.userId),paid=payments.reduce((n,e)=>n+Number(e.receipt?.paidGold||0)+Number(e.receipt?.paidService||0),0),refund=payments.reduce((n,e)=>n+Number(e.refund?.refunded||0),0);
   return {id:Number(row.id),championshipName:row.championship_name,roomType:101,gameType:Number(row.game_type)||19,startDate:start,
+    ...(state.invalidated?{invalidated:true,invalidReason:state.invalidated.reason,invalidAt:state.invalidated.at}:{}),
     status:Number(row.state),myRank:own.rank>0?own.rank:Number(row.state)===3?0:-1,rewardAmount:mine.point,ticketNum:mine.ticketNum,
     currentPlayer:Number(row.current_player)||0,initPoint:Number(row.init_point)||0,registerGold:Number(row.register_gold)||0,
     blindType:Number(row.blind_type)||0,forceShowCard:Boolean(Number(row.force_show_card)),gameTime:Math.max(0,asMs(row.end_time)-start),

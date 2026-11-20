@@ -12,9 +12,13 @@ const {loadGames}=await rel(import.meta.url,'../../game-server/src/games/catalog
 
 const duration=Number(process.argv.find(a=>a.startsWith('--seconds='))?.split('=')[1]||120);
 const concurrent=Number(process.argv.find(a=>a.startsWith('--clients='))?.split('=')[1]||100);
+const output=process.argv.find(a=>a.startsWith('--output='))?.slice('--output='.length)||'cache/three-fixes-load.json';
+if(!/^cache\/[a-zA-Z0-9_-]+\.json$/.test(output))throw Error('Load result must be a JSON file inside cache');
 const registry=createRegistry(),runtime={env:'dev',hotVersion:'load-start',registry,configs:[],findConfig:()=>null,
   wallet:{authoritative:true,run(){throw Error('heartbeat touched monetary transaction');}},log:{info(){},warn(){},error(){}}};
+console.log('LOAD_START',JSON.stringify({duration,concurrent}));
 const handler=await createHandler(runtime),server=http.createServer(),wss=new WebSocketServer({server});
+console.log('LOAD_HANDLER_READY');
 let nextUser=1;const errors=[],clients=[],samples=[];
 wss.on('connection',socket=>{
   registry.bind(socket,{userId:nextUser++,agentId:7,authenticated:true,inRoom:false});
@@ -27,11 +31,18 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const loop=monitorEventLoopDelay({resolution:20});loop.enable();
 const ping=encodeFrame(1200);let requests=0,reloads=0;
 try{
-  await Promise.all(Array.from({length:concurrent},async()=>{
+  async function connectClient(){
     const client=new WebSocket('ws://127.0.0.1:'+server.address().port);
-    client.on('error',e=>errors.push(e.message));await new Promise(resolve=>client.once('open',resolve));
+    client.on('error',e=>errors.push(e.message));await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{client.terminate();reject(Error('client connection deadline exceeded'));},10000);
+      client.once('open',()=>{clearTimeout(timer);resolve()});client.once('error',error=>{clearTimeout(timer);reject(error)});
+    });
     clients.push(client);
-  }));
+  }
+  // Ramp connections without overflowing the operating system's listen backlog.
+  // The measured interval starts only after all requested clients are connected.
+  for(let start=0;start<concurrent;start+=64)await Promise.all(Array.from({length:Math.min(64,concurrent-start)},connectClient));
+  console.log('LOAD_CLIENTS_READY');
   await loadGames('load-warm');global.gc?.();
   const started=performance.now();let lastSample=0,lastReload=0;
   while(performance.now()-started<duration*1000){
@@ -58,6 +69,6 @@ try{
   const result={scope:'isolated heartbeat plus unchanged-content hot import',durationSeconds:duration,clients:concurrent,requests,reloads,
     heapSamples:samples,afterCloseHeapBytes:process.memoryUsage().heapUsed,remainingSessions:registry.sessions.size,
     eventLoopP99Ms:loop.percentile(99)/1e6,eventLoopMaxMs:loop.max/1e6,errors};
-  fs.writeFileSync('cache/three-fixes-load.json',JSON.stringify(result,null,2));console.log('LOAD_RESULT',JSON.stringify(result));
+  fs.writeFileSync(output,JSON.stringify(result,null,2));console.log('LOAD_RESULT',JSON.stringify(result));
   if(errors.length||registry.sessions.size)process.exitCode=1;
 }

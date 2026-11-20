@@ -73,7 +73,7 @@ test("folded opponent holes, undealt board, and all remaining deck keys stay pri
   assert.equal(fairCodeList(table, 99)[0].notarizationCode, "");
 });
 
-test("proofs survive module hot loading, expire, and never masquerade as production proofs", async () => {
+test("proofs survive hot loading and expire; production waits for persistence", async () => {
   const { table, io } = proofFixture();
   const reloaded = await import("../../../game-server/src/core/fair-code.js?v=shared-feature-test");
   assert.deepEqual(reloaded.fairCodeDetail(table, 1, 1), fairCodeDetail(table, 1, 1));
@@ -82,7 +82,8 @@ test("proofs survive module hot loading, expire, and never masquerade as product
   assert.equal(fairCodeDetail(table, 1, 1), null);
   table.currentInning = 2;
   beginFairHand({ ...io, env: "prod" }, table, table.members, 2);
-  assert.equal(table.fairCodes.size, 0);
+  assert.equal(table.fairCodes.size,1);
+  assert.equal(table.fairPersistence.pending.size,1);
 });
 
 test("proof history keeps at most 128 hands including the current hand", () => {

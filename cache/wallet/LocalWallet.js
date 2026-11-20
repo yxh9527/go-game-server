@@ -1,6 +1,11 @@
 import { applyCredit, applyDebit, WalletAdapter } from "../../game-server/src/wallet/WalletAdapter.js";
 import { bindBalance, walletOperation } from '../../game-server/src/wallet/operations.js';
 
+const sessionWalletKey=Symbol.for('gogame.dev.wallet.session-only.v1');
+// The fallback is only used after the production guard in wallet/index.js.
+// Keep its original store across code replacement; never retain the factory.
+export function sessionOnlyWallet(create){return globalThis[sessionWalletKey] ||= create();}
+
 export class LocalWallet extends WalletAdapter {
   constructor(options = {}) {
     super(options);

@@ -1,7 +1,8 @@
+import {importHotModule} from '../../../shared/hot-import.js';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SeatGame } from "../../../game-server/src/core/SeatGame.js";
-import { beginHandStats, finishHandStats, observerList, ranking, pushRanking } from "../../../game-server/src/core/room-features.js";
+const { beginHandStats, finishHandStats, observerList, ranking, pushRanking }=await importHotModule(new URL('../../../game-server/src/core/room-features.js',import.meta.url).href,'room-runtime-regression');
 import { HoldemGame } from "../../../game-server/src/games/holdem/HoldemGame.js";
 import { createTexasTable, beginHand, onTexasAction } from "../../../game-server/src/games/holdem/engine.js";
 import { OP } from "../../../game-server/src/games/holdem/op.js";

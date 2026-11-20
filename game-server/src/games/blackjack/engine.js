@@ -134,6 +134,7 @@ export function begin(io, table, now = Date.now(), deckOverride) {
     viewers: new Set([...(table.observers || []), ...members].filter(m => !m.bot).map(m => m.uid)) };
   table.hand.players = members.sort((a,b) => a.pos - b.pos).map((m, i) => newPlayer(m, i, now));
   banker.freeze(table);
+  banker.registerFinance(io,table);
   features.beginHandStats(table, table.hand.players);
   // Variable length hands commit the real remaining shoe, without assigning
   // undealt cards to any player. Only actually issued indices are disclosed.
@@ -296,6 +297,7 @@ export function settle(io, table, now = Date.now()) {
   // The original client starts its player animation before banker overlays.
   // Banker accounting is appended below after 4551, using the same hand.
   const bankerResults = banker.settle(table, results);
+  casino.settleFinance(io,table,results,bankerResults);
   if (bankerResults.length) h.statsPlayers.push(...bankerResults);
   features.finishHandStats(table, [...results, ...bankerResults]); fair.finishFairHand(table, results);
   history?.record(table, h, results);

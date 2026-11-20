@@ -554,7 +554,7 @@ test("legacy holdem detail reconstructs public-card street rows", () => {
   assert.deepEqual(rounds.filter((round) => [5, 7, 9].includes(round.gameState)).map((round) => round.pot), [80, 90, 100]);
 });
 
-test("game back request returns room memory only in dev", async () => {
+test("game back request uses room memory in dev and scoped persistent records in prod", async () => {
   const { HoldemGame } = await import("../../../../game-server/src/games/holdem/HoldemGame.js");
   const { SEND } = await import("../../../../game-server/src/messages.js");
   const game = new HoldemGame();
@@ -566,7 +566,9 @@ test("game back request returns room memory only in dev", async () => {
   assert.equal(replies[0].data.totalNum, 1);
 
   ctx.runtime.env = "prod";
-  game.onMessage(ctx, SEND.DZPK_SEND_GAME_BACK_REQ, { roomId: table.roomId });
+  ctx.session={userId:10001,agentId:1,currency:'CNY'};
+  ctx.runtime.gateway={getUserCenter:async query=>{assert.equal(query.userId,10001);assert.equal(query.roomId,table.roomId);return {records:[]}}};
+  await game.onMessage(ctx, SEND.DZPK_SEND_GAME_BACK_REQ, { roomId: table.roomId });
   assert.equal(replies[1].data.totalNum, 0);
 });
 

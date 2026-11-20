@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { clientVersion } from "../../client-web/src/app.js";
+import { clientVersion } from "../../shared/client-version.js";
 import { env } from "../../shared/rpc/env.js";
 import { rel } from "./rel.js";
 

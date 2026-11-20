@@ -1,6 +1,7 @@
+import {importHotModule} from "../../../shared/hot-import.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { humanCards, sampleDeals } from '../../../game-server/src/core/robot-cards.js';
+const { humanCards, sampleDeals }=await importHotModule(new URL("../../../game-server/src/core/robot-cards.js",import.meta.url).href,"core-helper-selected-test/game-server/core/robot-cards.test.js");
 
 test('human projection excludes bot cards and unknown deals exclude every known card', () => {
   const bot = { uid: 3, bot: true };

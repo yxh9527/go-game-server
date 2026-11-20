@@ -1,9 +1,10 @@
+import {importHotModule} from "../../../../shared/hot-import.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HoldemGame } from '../../../../game-server/src/games/holdem/HoldemGame.js';
 import { beginHand, createTexasTable, onTexasAction, pushPlayingSnapshot, texasConf,
   texasHistoryDetail, texasHistoryPayload } from '../../../../game-server/src/games/holdem/engine.js';
-import { initializeCritical, nextHandRules } from '../../../../game-server/src/games/holdem/critical.js';
+const { initializeCritical, nextHandRules }=await importHotModule(new URL("../../../../game-server/src/games/holdem/critical.js",import.meta.url).href,"pricing-selected-test/game-server/games/holdem/critical.test.js");
 import { OP } from '../../../../game-server/src/games/holdem/op.js';
 import { PUSH } from '../../../../game-server/src/messages.js';
 

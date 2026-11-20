@@ -23,10 +23,9 @@ export async function refreshDataAccess(runtime) {
   }
   if(rpc.gatewayService){
     const nextGateway=new gateway.GatewayRpcProd();
-    rpc.gatewayService.getLoginData=nextGateway.getLoginData.bind(nextGateway);
-    rpc.gatewayService.getUserCenter=nextGateway.getUserCenter.bind(nextGateway);
-    rpc.gatewayService.playerPanel=nextGateway.playerPanel.bind(nextGateway);
-    rpc.gatewayService.writeUserCenter=nextGateway.writeUserCenter.bind(nextGateway);
+    for(const name of Object.getOwnPropertyNames(Object.getPrototypeOf(nextGateway))){
+      if(name!=='constructor')rpc.gatewayService[name]=nextGateway[name].bind(nextGateway);
+    }
   }
 }
 

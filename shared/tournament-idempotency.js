@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {ensureTournamentDedupTimer} from './tournament-dedup-timer.js';
 
 export const TOURNAMENT_DEDUP_TTL_MS = 60 * 60 * 1000;
 export const TOURNAMENT_DEDUP_SWEEP_MS = 60 * 1000;
@@ -18,10 +19,7 @@ export function createTournamentIdempotency(runtime) {
     for(const [key,entry] of state.entries)if(entry.expiresAt<=at)state.entries.delete(key);
   }
   state.sweep=sweep;
-  if(!state.timer){
-    state.timer=setInterval(()=>state.sweep(),TOURNAMENT_DEDUP_SWEEP_MS);
-    state.timer.unref?.();
-  }
+  ensureTournamentDedupTimer(state,TOURNAMENT_DEDUP_SWEEP_MS);
   sweep();
   async function run(key,work) {
     const old=state.entries.get(key);

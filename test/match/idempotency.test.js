@@ -1,6 +1,7 @@
+import {importHotModule} from '../../shared/hot-import.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createTournamentIdempotency,tournamentRequestKey,TOURNAMENT_DEDUP_TTL_MS as TTL,TOURNAMENT_DEDUP_SWEEP_MS as SWEEP} from '../../shared/tournament-idempotency.js';
+const {createTournamentIdempotency,tournamentRequestKey,TOURNAMENT_DEDUP_TTL_MS:TTL,TOURNAMENT_DEDUP_SWEEP_MS:SWEEP}=await importHotModule(new URL('../../shared/tournament-idempotency.js',import.meta.url).href,'tournament-regression');
 import {createDevMatchPayments} from '../../cache/match/payments.js';
 import {createDevTournamentWallet} from '../../cache/match/wallet.js';
 
@@ -59,9 +60,9 @@ test('local payments keep authoritative receipts after the one-hour request cach
   await Promise.all([payments.charge(plan),payments.charge(plan)]);assert.equal(debits,1);
   at+=TTL;runtime.tournamentIdempotency.sweep();payments=createDevMatchPayments(runtime);
   assert.equal((await payments.charge(plan)).paidGold,100);assert.equal(debits,1);
-  await payments.refund(plan,false);assert.equal(credits,1);
+  await payments.refund(plan,true);assert.equal(credits,1);
   at+=TTL;runtime.tournamentIdempotency.sweep();
-  assert.equal((await payments.refund(plan,false)).refunded,100);assert.equal(credits,1);
+  assert.equal((await payments.refund(plan,true)).refunded,110);assert.equal(credits,1);
   assert.equal(runtime.tournamentPayments.size,1,'payment journal must not expire with disposable responses');
 });
 
@@ -79,5 +80,5 @@ test('game-process wallet cannot repeat a charge, refund or prize after cached c
   const award={agentId:1,matchId:9,operation:'award',plan:{...plan,key:'match:1:9:award:10001:0',kind:'money',amount:50}};
   await wallet(award);wallet=createDevTournamentWallet(runtime,()=>{});
   await wallet(request('charge'));await wallet(request('refund'));await wallet(award);
-  assert.equal(balance,1040);assert.equal(debits,1);assert.equal(credits,2);
+  assert.equal(balance,1050);assert.equal(debits,1);assert.equal(credits,2);
 });

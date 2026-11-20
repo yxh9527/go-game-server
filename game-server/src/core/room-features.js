@@ -51,12 +51,15 @@ export function beginHandStats(table, players) {
   // Keep participant references when somebody leaves before this hand settles.
   // Their committed bets still belong to this hand, even after seat removal.
   table.hand.statsPlayers = players.slice();
+  table.beginSeatFinance?.(table.hand,players);
 }
 
 export function finishHandStats(table, results, publicResult) {
   const data = state(table);
   const inning = number(table.currentInning);
   if (inning <= data.settledInning) return;
+  if([24,26,27,28,30].includes(Number(table.roomType)))for(const result of results)result.xiaZhuData=Math.abs(Number(result.score));
+  table.finishSeatFinance?.(table.hand,results,publicResult);
   const participants = table.hand?.statsPlayers || (table.members || []).filter((member) => member.hole?.length);
   const byUid = new Map(results.map((result) => [Number(result.uid), result]));
   let stream = 0;
@@ -75,7 +78,7 @@ export function finishHandStats(table, results, publicResult) {
   data.maxPot = Math.max(data.maxPot || 0, number(table.hand?.pot));
   data.settledInning = inning;
   recordRoomPlayerHand(table, results, publicResult);
-  table.recordUserCenter?.(results);
+  table.recordUserCenter?.(results,{publicResult});
 }
 
 export function observerList(table) {

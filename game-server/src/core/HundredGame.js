@@ -4,6 +4,7 @@ const { SEND, PUSH } = await rel(import.meta.url, '../messages.js', version);
 const { debit, walletOf } = await rel(import.meta.url, '../wallet/index.js', version);
 const { scoreAmount, validWager, checkedTotal, beforeWagerDeadline } = await rel(import.meta.url, './wager.js', version);
 const {canAddHundredBettor}=await rel(import.meta.url,'../../../shared/cash-limits.js',version);
+const {wagerFinance}=await rel(import.meta.url,'./hundred-finance.js',version);
 const { GameBase } = await rel(import.meta.url, './GameBase.js', version);
 const robots = await rel(import.meta.url, './robot.js', version);
 
@@ -92,6 +93,12 @@ export class HundredGame extends GameBase {
   }
 
   placeBet(ctx, body, responseId = PUSH.BET_RESPONSE) {
+    if(ctx.runtime?.env==='prod'&&ctx.runtime.userCenterState?.outgoing.size>=50000){
+      ctx.send(responseId,{roomType:ctx.table.roomType,roomId:ctx.table.roomId,code:1,points:ctx.session.wallet,errorMsg:'战绩保存繁忙，请稍后重试'});return false;
+    }
+    if(!ctx.smartBet&&[...(ctx.table.smartTasks?.values()||[])].some(task=>task.userId===ctx.session.userId&&task.status==='running')){
+      ctx.send(responseId,{roomType:ctx.table.roomType,roomId:ctx.table.roomId,code:1,points:ctx.session.wallet,errorMsg:'固定任务运行中，请先停止任务'});return false;
+    }
     if(!canAddHundredBettor(ctx.table,ctx.session.userId)){
       ctx.send(responseId,{roomType:ctx.table.roomType,roomId:ctx.table.roomId,code:1,points:ctx.session.wallet,
         customData:body?.customData??2,myBets:ctx.table.playerBets.get(ctx.session.userId)||[]});return false;
@@ -121,7 +128,7 @@ export class HundredGame extends GameBase {
       || [...cumulative.values()].some(amount => !Number.isSafeInteger(amount) || amount > options.maxBet)
       || body.roomId != null && Number(body.roomId) !== Number(table.roomId)
       || body.roomType != null && Number(body.roomType) !== Number(table.roomType)
-      || !validWager(total, walletOf(ctx).available(session)) || !debit(session, total, ctx).ok) {
+      || !validWager(total, walletOf(ctx).available(session)) || !debit(session, total, ctx,wagerFinance(walletOf(ctx),table,normalized,1,ctx.smartAttemptId)).ok) {
       send(responseId, { customData, points: session.wallet, roomType: table.roomType, code: 1,
         myBets: table.playerBets.get(session.userId) || [], roomId: table.roomId });
       return false;
@@ -183,12 +190,29 @@ export class HundredGame extends GameBase {
   phasesFor(_table) { return this.config.timedPhases; }
 
   tick(ctx) {
-    this.beforeTick?.(ctx);
+    const table=ctx.table;
+    if(table.hundredCycleTask)return table.hundredCycleTask;
+    if(table.retired||(table.closing&&!table.hand))return;
+    const registry=ctx.runtime?.registry;
+    const registered=registry?.getTable?.(table.roomId,table.agentId,table.gameId)===table;
+    const preparation=this.beforeTick?.(ctx);
+    if(preparation?.then){
+      const task=Promise.resolve(preparation).then(()=>{
+        if(table.retired||(table.closing&&!table.hand))return;
+        if(registered&&registry.getTable(table.roomId,table.agentId,table.gameId)!==table)return;
+        return this.advanceCycle(ctx);
+      })
+        .finally(()=>{if(table.hundredCycleTask===task)table.hundredCycleTask=null;});
+      table.hundredCycleTask=task;return task;
+    }
+    return this.advanceCycle(ctx);
+  }
+
+  advanceCycle(ctx) {
     const table = ctx.table;
     const phases = this.phasesFor(table);
     if (phases?.length) {
       const now = Date.now();
-      if (table.hundredCycleTask) return table.hundredCycleTask;
       if (table.hundredPhaseIndex == null) {
         table.hundredPhaseIndex = Math.max(0, phases.findIndex(p => p.state === table.state));
         table.phaseEndsAt = now + phases[table.hundredPhaseIndex].seconds * 1000;
@@ -206,7 +230,7 @@ export class HundredGame extends GameBase {
         const result = this.onCycle(ctx, phase.cycle);
         if (result?.then) {
           const task = result.then(done).catch(error => { table.phaseEndsAt = Date.now(); throw error; })
-            .finally(() => { table.hundredCycleTask = null; });
+            .finally(() => { if(table.hundredCycleTask===task)table.hundredCycleTask = null; });
           table.hundredCycleTask = task; return task;
         }
         done(); return;
@@ -215,7 +239,12 @@ export class HundredGame extends GameBase {
     }
     table.tick = (table.tick || 0) + 1;
     const cycle = table.tick % (this.config.tickCycle || 8);
-    this.onCycle(ctx, cycle);
+    const result=this.onCycle(ctx, cycle);
+    if(result?.then){
+      const task=Promise.resolve(result).then(()=>{this.tickRobots(ctx);this.pushState(ctx);})
+        .finally(()=>{if(table.hundredCycleTask===task)table.hundredCycleTask=null;});
+      table.hundredCycleTask=task;return task;
+    }
     this.tickRobots(ctx);
     this.pushState(ctx);
   }
