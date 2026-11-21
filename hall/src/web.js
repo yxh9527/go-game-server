@@ -51,6 +51,10 @@ function isHallPath(gameType, subGameType) {
 
 export function withLoginQuery(url, version) {
   const u = new URL(url, "http://lobby.localhost");
+  // open-api owns the issued credential. Native clients read userToken;
+  // overwrite a stale/dev alias rather than let the two fields disagree.
+  const issuedToken = u.searchParams.get("token");
+  if (issuedToken) u.searchParams.set("userToken", issuedToken);
   if (!u.searchParams.get("userToken")) {
     u.searchParams.set("userId", u.searchParams.get("userId") || "10001");
     u.searchParams.set("userToken", "dev");
@@ -132,7 +136,8 @@ export function mountWeb(app, runtime) {
       res.redirect(302, withLoginQuery(`${hallEntry}${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`, version));
       return;
     }
-    if (!req.query.userToken || !req.query.v || !req.query.openId) {
+    if (!req.query.userToken || !req.query.v || !req.query.openId
+      || req.query.token && req.query.userToken !== req.query.token) {
       res.redirect(302, withLoginQuery(req.originalUrl, version));
       return;
     }

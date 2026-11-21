@@ -2,7 +2,33 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
-import { HALL_DEV_PATCH, withLoginQuery } from "../../hall/src/web.js";
+import http from 'node:http';
+import express from 'express';
+import { HALL_DEV_PATCH, withLoginQuery, mountWeb } from "../../hall/src/web.js";
+
+test('open-api token is authoritative over an absent, stale or development userToken',()=>{
+  const token='SESSION@audit+/=value&encoded';
+  for(const alias of [undefined,'dev','stale']){
+    const input=new URLSearchParams({userId:'42',token});if(alias!==undefined)input.set('userToken',alias);
+    const output=withLoginQuery('/21/0?'+input,'2.0.1279'),params=new URL(output,'http://test').searchParams;
+    assert.equal(params.get('token'),token);assert.equal(params.get('userToken'),token);assert.equal(params.get('openId'),'42');
+    assert.equal(withLoginQuery(output,'2.0.1279'),output,'canonicalization must be stable');
+  }
+});
+
+test('actual game and direct hall routes canonicalize open-api credentials before serving the client',async()=>{
+  const app=express();mountWeb(app,{config:{}});const server=http.createServer(app);
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const get=url=>new Promise((resolve,reject)=>http.get({host:'127.0.0.1',port:server.address().port,path:url,headers:{Host:'lobby.example'}},res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode,location:res.headers.location}));}).on('error',reject));
+  try{
+    for(const route of ['/game','/21/0','/2.0.1279/21/0']){
+      const query=new URLSearchParams({userId:'42',token:'SESSION@issued-token',userToken:'dev',openId:'42',v:'2.0.1279'});
+      const redirected=await get(route+'?'+query);assert.equal(redirected.status,302);
+      const target=new URL(redirected.location,'http://test');assert.equal(target.searchParams.get('userToken'),'SESSION@issued-token');assert.equal(target.searchParams.get('token'),'SESSION@issued-token');
+      assert.equal((await get(target.pathname+target.search)).status,200,'must not loop redirects');
+    }
+  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
 
 test("withLoginQuery fills openId from userId", () => {
   const out = withLoginQuery("/21/0?userId=10001&userToken=dev", "2.0.1279");
