@@ -61,13 +61,11 @@ test('a pending original report batch stays unique after source replacement and 
   }finally{release?.({durable:false,stored:0});f.close();}
 });
 
-test('completed tournament replay acknowledgement survives source replacement without becoming a cash settlement',async()=>{
-  const f=playerServiceFixture();let release;try{
-    const x=room(101),writes=[];Object.assign(x.table,{mtt:{checkedInning:1,config:{currency:'CNY'}},hand:{statsPlayers:x.table.members.slice(0,2),board:[],replayActions:[],replayEvents:[]}});Object.assign(x.runtime,{env:'prod',gateway:{writeUserCenter:rows=>new Promise(resolve=>{writes.push(rows);release=resolve;})}});
-    f.write(0);const old=await f.load('core/user-center.js',0);old.installUserCenter(x.runtime);x.table.recordUserCenter([{uid:42,score:10,xiaZhuData:20},{uid:43,score:-10,xiaZhuData:20}]);await turn();assert.equal(x.table.userCenterReportsReady(),false);const task=x.runtime.userCenterState.writeTask;
-    f.write(1);const next=await f.load('core/user-center.js',1),b=next.installUserCenter(x.runtime);assert.equal(x.table.userCenterReportsReady(),false);assert.equal(writes.length,1);assert.ok(writes[0].every(row=>row.replayOnly&&row.balance===undefined));
-    release({durable:true,stored:2});await task;assert.equal(x.table.userCenterReportsReady(),true);await b.flush();assert.equal(writes.length,1);assert.equal(x.runtime.userCenterState.records.size,0);
-  }finally{release?.({durable:true,stored:2});f.close();}
+test('tournament per-hand recording stays disabled across source replacement',async()=>{
+ const f=playerServiceFixture();try{
+ const x=room(101),writes=[];Object.assign(x.table,{mtt:{checkedInning:1,config:{currency:'CNY'}},hand:{statsPlayers:x.table.members.slice(0,2),board:[]}});Object.assign(x.runtime,{env:'prod',gateway:{writeUserCenter:async rows=>{writes.push(rows);return {durable:true,stored:rows.length}}}});
+ for(let revision=0;revision<2;revision++){f.write(revision);const module=await f.load('core/user-center.js',revision),center=module.installUserCenter(x.runtime);x.table.recordUserCenter([{uid:42,score:10,xiaZhuData:20}]);await center.flush();assert.equal(writes.length,0);assert.equal(x.table.userCenterReportsReady(),true);assert.equal(x.runtime.userCenterState.outgoing.size,0);}
+ }finally{f.close();}
 });
 
 test('match history uses only original confirmed payments, refunds and rewards across projection replacement',async()=>{

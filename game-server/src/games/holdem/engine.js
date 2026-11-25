@@ -890,7 +890,7 @@ function settle(io, table, contenders) {
       pos: m.pos,
     };
   });
-  if (localHistory && io.env !== "prod") localHistory.recordHand(table, hand, results);
+  if (localHistory && io.env !== "prod" && !table.mtt && Number(table.roomType)!==101) localHistory.recordHand(table, hand, results);
   const revealed = results.filter((result) => result.showCards.length === 2);
   if (revealed.length) {
     if (table.forceShowCard&&!hand.aof) {

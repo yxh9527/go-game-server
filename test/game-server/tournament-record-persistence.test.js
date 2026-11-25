@@ -38,78 +38,22 @@ async function fixture(){
     reload:async()=>{center=installUserCenter(runtime);control=await createTournamentControl(runtime,()=>game,io);}};
 }
 
-test('production tournament continues after its replay write attempt fails and does not resubmit it',async()=>{
-  const f=await fixture();f.finish();await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(f.writes.length,1);assert.equal((await f.call('status')).data.reportingPending,true);
-  f.writes[0].resolve({durable:false,stored:0});await f.runtime.userCenterState.writeTask;
-  assert.equal(f.errors.length,1);assert.equal(f.runtime.userCenterState.outgoing.size,0);
-  await f.reload();await f.center().flush();assert.equal(f.writes.length,1,'failed replay must not be retried');
-  const status=await f.call('status');assert.equal(status.data.ready,true);assert.equal(status.data.reportingPending,false);
-  const advanced=await f.call('advance',{revision:0});assert.equal(advanced.code,200);assert.equal(advanced.data.finished,true);
-  assert.equal((await f.call('awards',{results:[{uid:42,rank:1,award:0,ticketNum:0},{uid:43,rank:2,award:0,ticketNum:0}]})).code,200);
-  assert.equal((await f.call('cleanup')).data.released,true);
+test('production tournament advances, awards and cleans up without saving individual hands',async()=>{
+ const f=await fixture();f.finish();await f.center().flush();assert.equal(f.writes.length,0);assert.equal(f.runtime.userCenterState.records.size,0);assert.equal(f.runtime.userCenterState.outgoing.size,0);
+ const status=await f.call('status');assert.equal(status.data.reportingPending,false);assert.equal(status.data.ready,true);
+ assert.equal((await f.call('advance',{revision:0})).data.finished,true);
+ assert.equal((await f.call('awards',{results:[{uid:42,rank:1,award:0,ticketNum:0},{uid:43,rank:2,award:0,ticketNum:0}]})).code,200);assert.equal((await f.call('cleanup')).data.released,true);assert.equal(f.writes.length,0);
 });
 
-test('deferred record delivery cannot create a window with an apparently ready tournament',async()=>{
-  const f=await fixture(),deliveries=[];f.runtime.wallet={deliver:send=>deliveries.push(send)};
-  f.finish();assert.equal(f.runtime.userCenterState.outgoing.size,0);assert.equal(deliveries.length,1);
-  assert.equal((await f.call('status')).data.ready,false);
-  await f.reload();assert.equal((await f.call('status')).data.ready,false,'hot reload preserves a deferred delivery');
-  deliveries[0]();await new Promise(resolve=>setImmediate(resolve));
-  assert.equal((await f.call('status')).data.ready,false);
-  f.writes[0].resolve({durable:true,stored:2});await f.runtime.userCenterState.writeTask;
-  assert.equal((await f.call('status')).data.ready,true);
+test('hot replacement drops unsent tournament hands and obsolete barriers while retaining cash records',async()=>{
+ const f=await fixture(),state=f.runtime.userCenterState;
+ state.outgoing.set('old-hand',{id:'old-hand',roomType:101,replayOnly:true});state.outgoing.set('cash',{id:'cash',roomType:19});state.records.set('old-hand',{id:'old-hand',roomType:101});
+ f.table[Symbol.for('gogame.tournament.completedReports')]={pending:new Map([['old-hand',false]]),error:true};
+ await f.reload();assert.equal(state.outgoing.has('old-hand'),false);assert.equal(state.records.has('old-hand'),false);assert.equal(state.outgoing.has('cash'),true);assert.equal(f.table.userCenterReportsReady(),true);
+ f.finish();assert.equal((await f.call('status')).data.ready,true);assert.equal(f.writes.length,0);
 });
 
-test('missing or malformed participant replays block progression and invalidation still releases tables',async()=>{
-  const f=await fixture();f.finish();
-  await new Promise(resolve=>setImmediate(resolve));
-  f.writes[0].resolve({durable:true,stored:2});await f.runtime.userCenterState.writeTask;
-  // The second hand deliberately omits one real participant's final result.
-  f.table.currentInning=2;f.table.hand={participants:f.table.members,board:[]};
-  f.table.recordUserCenter([f.results[0]]);f.table.hand=null;f.table.mtt.checkedInning=2;
-  assert.ok(f.errors.some(args=>String(args[0]).includes('projection failed')));
-  assert.equal((await f.call('advance',{revision:0})).code,409);
-  assert.equal((await f.call('status')).data.reportingPending,true);
-  assert.equal((await f.call('invalidate')).data.released,true,'record failure must not prevent the original void/refund path');
-});
-
-test('first hot load adopts old pending replays and observes an old writer acknowledgement without nesting hooks',async()=>{
-  const f=await fixture();f.finish();await new Promise(resolve=>setImmediate(resolve));
-  // Simulate adoption before this protection existed on the resident table.
-  delete f.table[Symbol.for('gogame.tournament.completedReports')];
-  await f.reload();assert.equal((await f.call('status')).data.ready,false);
-  f.writes[0].resolve({durable:true,stored:2});await f.runtime.userCenterState.writeTask;
-  assert.equal((await f.call('status')).data.ready,true);
-  assert.equal(f.writes.length,1);assert.equal(f.runtime.registry.tables.size,1);
-});
-
-test('older room incarnations and other matches do not block a new table sharing its room number',async()=>{
-  const f=await fixture(),state=f.runtime.userCenterState;
-  state.outgoing.set('previous-table',{id:'previous-table',replayOnly:true,agentId:7,roomId:f.table.roomId,gameId:'holdem',room:{createdAt:f.table.userCenterCreatedAt-1}});
-  state.outgoing.set('other-match',{id:'other-match',replayOnly:true,agentId:8,roomId:f.table.roomId,gameId:'holdem'});
-  await f.reload();assert.equal(f.table.userCenterReportsReady(),true);
-  assert.equal(state.outgoing.size,2,'unrelated original records remain queued for their own retry');
-});
-
-test('already awarded resident tables cannot be reclaimed while their original completed replays still await storage',async()=>{
-  const f=await fixture();f.finish();await new Promise(resolve=>setImmediate(resolve));
-  // Adopt a terminal resident match that finished under the older module.
-  const match=f.runtime.tournamentRooms.matches.get('7:99');match.finished=true;match.awardsAcknowledged=true;
-  assert.equal((await f.call('cleanup')).data.released,false);
-  assert.equal(f.runtime.registry.tables.size,1);
-  f.writes[0].resolve({durable:true,stored:2});await f.runtime.userCenterState.writeTask;
-  assert.equal((await f.call('cleanup')).data.released,true);
-  assert.equal(f.runtime.registry.tables.size,0);
-});
-
-test('an ended inning with no captured participant reports cannot be declared ready',async()=>{
-  const f=await fixture();
-  f.table.currentInning=1;f.table.mtt.checkedInning=1;f.table.mtt.paused=true;
-  f.table.phase='idle';f.table.startAt=0;f.table.roomFeatures={settledInning:1};
-  assert.equal(f.runtime.userCenterState.outgoing.size,0);
-  const response=await f.call('status');assert.equal(response.data.ready,false);assert.equal(response.data.reportingPending,true);
-  assert.equal((await f.call('advance',{revision:0})).code,409);
-  f.table.hand={participants:[]};f.table.recordUserCenter([]);f.table.hand=null;
-  assert.equal((await f.call('status')).data.ready,false,'an empty projection is not a confirmed completed hand');
+test('a finished hand does not require participant replay capture before the next checkpoint',async()=>{
+ const f=await fixture();f.table.currentInning=1;f.table.mtt.checkedInning=1;f.table.mtt.paused=true;f.table.phase='idle';f.table.startAt=0;f.table.roomFeatures={settledInning:1};
+ assert.equal((await f.call('status')).data.reportingPending,false);assert.equal((await f.call('status')).data.ready,true);f.table.recordUserCenter([]);assert.equal(f.writes.length,0);
 });

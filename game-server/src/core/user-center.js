@@ -11,6 +11,9 @@ export function installUserCenter(runtime,legacyRecords) {
   const state=runtime.userCenterState ||= {records:new Map(),outgoing:new Map(),writeTask:null};
   // Older resident versions may have initialized only the local records map.
   state.records||=new Map();state.outgoing||=new Map();
+  const isTournamentRecord=r=>r.replayOnly||Number(r.roomType)===101;
+  // Drop unsent legacy per-hand tournament output; never touch cash records.
+  for(const map of [state.records,state.outgoing])for(const [id,r]of map)if(isTournamentRecord(r))map.delete(id);
   function prune(){const now=Date.now();for(const [id,r]of state.records)if(now-r.endedAt>TTL)state.records.delete(id);while(state.records.size>50000)state.records.delete(state.records.keys().next().value);}
   function sessionFor(table,uid,member){return member?.departureSession || member?.[carryKey]?.session
     || table.playerSessions?.get(uid) || [...runtime.registry.sessions.values()].find(s=>Number(s.userId)===uid&&Number(s.agentId)===Number(table.agentId));}
@@ -30,18 +33,17 @@ export function installUserCenter(runtime,legacyRecords) {
       .finally(()=>{for(const r of batch)if(state.outgoing.get(r.id)===r)state.outgoing.delete(r.id);});
     state.writeTask=task;task.finally(()=>{if(state.writeTask===task)state.writeTask=null;});return task;
   }
-  function remember(records,barrier){
+  function remember(records){
     const save=()=>{prune();for(const r of records){
+      if(isTournamentRecord(r))continue;
       if(!state.records.has(r.id)&&!state.outgoing.has(r.id)){
-        if(!r.replayOnly)state.records.set(r.id,r);if(runtime.env==='prod')state.outgoing.set(r.id,r);
+        state.records.set(r.id,r);if(runtime.env==='prod')state.outgoing.set(r.id,r);
       }
-      if(barrier&&state.outgoing.has(r.id))barrier.pending.set(r.id,true);
     }void flush();};
     if(runtime.wallet?.deliver)runtime.wallet.deliver(save);else save();
   }
   function record(table,results,extra={}) {
-    const replayOnly=Boolean(table.mtt||Number(table.roomType)===101);
-    if(replayOnly&&table.gameId!=='holdem')return;
+    if(table.mtt||Number(table.roomType)===101)return;
     const hand=table.hand,participants=hand?.statsPlayers || hand?.participants || hand?.players || table.members || [];
     const ownMember=uid=>{const p=participants.find(p=>Number(p.uid)===uid);return {p,member:p?.member||p||table.members?.find(m=>Number(m.uid)===uid)};};
     const records=[];
@@ -96,35 +98,17 @@ export function installUserCenter(runtime,legacyRecords) {
         players:players.map(p=>({uid:p.uid,score:p.score,userInfo:p.userInfo})),detail};
       const task=[...(table.smartTasks?.values()||[])].find(t=>t.userId===uid&&t.activeAttempt&&t.activeAttempt.inning===inning);
       if(task)r.smartTask={taskId:task.taskId,attemptId:task.activeAttempt.attemptId,inning};
-      const balance=result.walletAmount ?? (session&&!result.banker?Number(session.wallet)+(table.kind==='normal'&&!member?.[carryKey]?Number(member?.point)||0:0):undefined);if(!replayOnly&&isScore(balance))r.balance=balance;
-      if(replayOnly)r.replayOnly=true;
+      const balance=result.walletAmount ?? (session&&!result.banker?Number(session.wallet)+(table.kind==='normal'&&!member?.[carryKey]?Number(member?.point)||0:0):undefined);if(isScore(balance))r.balance=balance;
       records.push(r);
     }
-    const barrier=replayOnly&&runtime.env==='prod'?table[tournamentReportsKey]:null;
-    if(barrier){
-      const expected=new Set(participants.filter(p=>Number.isSafeInteger(Number(p.uid))&&Number(p.uid)>0&&Number(p.uid)<90000000
-        &&!(p.member||p).bot).map(p=>Number(p.uid)));
-      if(!expected.size||records.length!==expected.size||new Set(records.map(r=>r.userId)).size!==records.length||records.some(r=>!expected.has(r.userId)))
-        throw new Error('比赛已结束手牌的回放名单不完整');
-      barrier.capturedInning=Math.max(barrier.capturedInning,Number(table.currentInning)||0);
-      for(const r of records)if(!barrier.pending.has(r.id))barrier.pending.set(r.id,false);
-      delete barrier.error;
-    }
     runtime.wallet?.stageFinalReports?.(table,records);
-    remember(records,barrier);
+    remember(records);
   }
   function attach(table){
     if(!Number.isFinite(table.userCenterCreatedAt))Object.defineProperty(table,'userCenterCreatedAt',{value:table.createdAt||Date.now(),configurable:true});
-    if(runtime.env==='prod'&&(table.mtt||Number(table.roomType)===101)){
-      // These are acknowledgements for already completed display records, not
-      // financial intents. Keep them on the resident table across hot reload.
-      const barrier=table[tournamentReportsKey]||={pending:new Map(),capturedInning:Number(table.mtt?.checkedInning)||0};
-      Object.defineProperty(table,'userCenterReportsReady',{value:()=>{
-        // Also observe acknowledgements from a write started by an older hot
-        // module. A completed attempt removes its batch even if ES failed.
-        for(const [id,queued]of barrier.pending)if(queued&&!state.outgoing.has(id))barrier.pending.delete(id);
-        return !barrier.error&&!barrier.pending.size&&barrier.capturedInning>=Math.max(Number(table.mtt?.checkedInning)||0,Number(table.roomFeatures?.settledInning)||0);
-      },configurable:true});
+    if(table.mtt||Number(table.roomType)===101){
+      delete table[tournamentReportsKey];
+      Object.defineProperty(table,'userCenterReportsReady',{value:()=>true,configurable:true});
     }
     Object.defineProperty(table,'recordUserCenter',{value:(results,extra)=>{try{record(table,results,extra);}catch(error){
       const barrier=table[tournamentReportsKey];if(barrier)barrier.error=true;
@@ -134,12 +118,6 @@ export function installUserCenter(runtime,legacyRecords) {
   state.originalSetTable ||= runtime.registry.setTable.bind(runtime.registry);
   runtime.registry.setTable=(...args)=>attach(state.originalSetTable(...args));
   for(const table of runtime.registry.tables.values())attach(table);
-  // Adopt original queued records when this protection is first hot-loaded.
-  // Do not attach an older incarnation's room records to a newly created table.
-  for(const r of state.outgoing.values())if(r.replayOnly){
-    const table=runtime.registry.getTable(r.roomId,r.agentId,r.gameId),barrier=table?.[tournamentReportsKey];
-    if(barrier&&(!r.room?.createdAt||Number(r.room.createdAt)===Number(table.userCenterCreatedAt)))barrier.pending.set(r.id,true);
-  }
   return {flush,query(query){
     prune();const records=[...state.records.values()].filter(r=>r.userId===Number(query.userId)&&r.agentId===Number(query.agentId));
     const key=r=>[r.roomType,r.roomId,r.detail?.serialFull||r.inning,r.userId].join(':');const seen=new Map(records.map((r,i)=>[key(r),i]));

@@ -25,7 +25,7 @@ function nativeAPI(file,id,api){
  const mod={exports:{}};factory(mod,mod.exports,req);return mod.exports;
 }
 
-test('tournament hand replays are persisted separately and never appear as cash battle or fund entries',async()=>{
+test('tournament hands are not persisted as replays, cash battles or fund entries',async()=>{
  const registry=createRegistry(),written=[];
  const runtime={env:'prod',registry,gateway:{writeUserCenter:async rows=>{written.push(...rows);return {durable:true,stored:rows.length}}},log:{error(){}}};
  installUserCenter(runtime);
@@ -34,7 +34,7 @@ test('tournament hand replays are persisted separately and never appear as cash 
   smallBlind:5,bigBlind:10,hand:{participants:members,board:[],pot:20,replayActions:[],replayEvents:[]}};
  registry.setTable(table.roomId,table,7,'holdem');table.recordUserCenter([{uid:42,score:100,xiaZhuData:10,showCards:[]},{uid:43,score:-100,xiaZhuData:10,showCards:[]}]);
  await runtime.userCenterState.writeTask;
- assert.equal(written.length,2);assert.ok(written.every(r=>r.replayOnly&&r.roomType===101&&r.currency==='USD'&&r.balance===undefined&&r.detail.replay));
+ assert.equal(written.length,0);assert.equal(runtime.userCenterState.outgoing.size,0);
  assert.equal(runtime.userCenterState.records.size,0);
 });
 

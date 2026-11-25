@@ -16,7 +16,8 @@ export async function createTournamentControl(runtime,gameOf,ioOf) {
   const payment=runtime.env==='dev'?(await rel(import.meta.url,'../../../cache/match/wallet.js',runtime.hotVersion)).createDevTournamentWallet(runtime,ioOf):null;
   const keyOf=(agent,id)=>agent+':'+id;
   const now=()=>runtime.clock?.()??Date.now();
-  const reportsReady=m=>runtime.env!=='prod'||m.tables.every(t=>t.userCenterReportsReady?.()===true);
+  // Final competition results are persisted by match; per-hand reports are disabled.
+  const reportsReady=()=>true;
   function revivalWindow(m){return lateRegistrationOpen({state:2,start_time:m.config.startedAt,delay_register_level:m.config.lateLevel,delay_register_time:m.config.lateSeconds},{...m.clock,...blindAt(m.config,now(),m.clock)},now());}
   function canWaitForReentry(m){return Number(m.config.rebuyLimit)>0&&revivalWindow(m)&&m.roster.some(uid=>!m.tables.some(t=>t.members.some(p=>p.uid===uid&&p.point>0))&&(m.reentries?.get(uid)||0)<m.config.rebuyLimit);}
   const cleanupDelay=Number(runtime.config?.tournament_cleanup_delay_ms??60000);
