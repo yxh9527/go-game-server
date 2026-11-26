@@ -224,6 +224,7 @@ export async function createApp(runtime) {
         award: runtime.matchStore.getAward(row.award_id),
         blinds: runtime.matchStore.getBlinds(row.blinds_id),
         gameServer: runtime.config.game_server,
+        publicGameServer: runtime.config.public?.game_ws_url ? web.publicWsHost(null, runtime.config, runtime.env) : null,
       }));
   }
 
@@ -240,6 +241,7 @@ export async function createApp(runtime) {
       award: runtime.matchStore.getAward(row.award_id),
       blinds: runtime.matchStore.getBlinds(row.blinds_id),
       gameServer: runtime.config.game_server,
+      publicGameServer: runtime.config.public?.game_ws_url ? web.publicWsHost(null, runtime.config, runtime.env) : null,
     });
   }
 
@@ -274,7 +276,7 @@ export async function createApp(runtime) {
       }),
       maintenanceInfoMsg: "{\"endDate\":\"\",\"isWhite\":false,\"itemList\":[]}",
       privateRoomOpen: false,
-      hundredDomain: runtime.config.hundred_server || null,
+      hundredDomain: web.publicHundredWsHost(null, runtime.config, runtime.env) || null,
       hundredShield: null,
       classifications: null,
     }];

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { clientVersion } from "../../shared/client-version.js";
+import { clientVersion, browserEndpoints, browserSocketDomain } from "../../shared/client-version.js";
 import { env } from "../../shared/rpc/env.js";
 import { rel } from "./rel.js";
 
@@ -18,6 +18,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(here, "../../static");
 
 export function publicWsHost(req, config, env) {
+  const endpoint = browserEndpoints(config).game_ws_url;
+  if (endpoint) return browserSocketDomain(endpoint);
   if (env === "dev" && req) {
     const host = String(req.headers.host || "lobby.localhost:11042");
     const [name, port] = host.split(":");
@@ -32,6 +34,8 @@ export function publicWsHost(req, config, env) {
 }
 
 export function publicHundredWsHost(req, config, env) {
+  const endpoint = browserEndpoints(config).hundred_ws_url;
+  if (endpoint) return browserSocketDomain(endpoint);
   if (env === "dev" && req) {
     // Native SocketMgr suppresses RoomSocket2 when both public hosts match.
     // The existing dev WS proxy accepts both names on the same listener.
@@ -77,6 +81,7 @@ export function withLoginQuery(url, version) {
 }
 
 export function mountWeb(app, runtime) {
+  const endpoints = browserEndpoints(runtime.config);
   const version = clientVersion();
   const port = runtime.config.server_port || 11042;
   const template = hallTemplate();
@@ -92,7 +97,7 @@ export function mountWeb(app, runtime) {
 
   app.use((req, res, next) => {
     const hostname = String(req.headers.host || "").split(":")[0];
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
+    if (!endpoints.hall_url && (hostname === "localhost" || hostname === "127.0.0.1")) {
       const dest = withLoginQuery(req.originalUrl === "/" ? hallEntry : req.originalUrl, version);
       res.redirect(302, `http://lobby.localhost:${port}${dest}`);
       return;
@@ -101,7 +106,7 @@ export function mountWeb(app, runtime) {
   });
 
   app.get("/", (_req, res) => {
-    res.redirect(302, withLoginQuery(hallEntry, version));
+    res.redirect(302, (endpoints.hall_url || '') + withLoginQuery(hallEntry + (_req.url.includes('?') ? _req.url.slice(_req.url.indexOf('?')) : ''), version));
   });
 
   app.get(["/game", "/:ver/game"], (req, res, next) => {
@@ -147,6 +152,21 @@ export function mountWeb(app, runtime) {
   // Apply the current hall's common polling adapter to the served response,
   // without editing the original static bundle or changing protocol fields.
   const chunks = path.join(staticRoot, "hall/_next/static/chunks");
+  if (endpoints.client_url) {
+    const pages = path.join(chunks, 'pages');
+    for (const name of fs.readdirSync(pages).filter(name => /^_app[-.].*\.js$/.test(name))) {
+      const file = path.join(pages, name);
+      let modified = -1, adapted;
+      app.get('/_next/static/chunks/pages/' + name, (_req, res) => {
+        const current = fs.statSync(file).mtimeMs;
+        if (modified !== current) {
+          adapted = adaptClientOrigin(fs.readFileSync(file, 'utf8'), endpoints.client_url);
+          modified = current;
+        }
+        res.set('Cache-Control', 'no-store').type('js').send(adapted);
+      });
+    }
+  }
   if (fs.existsSync(chunks)) {
     const bundles = fs.readdirSync(chunks).filter(name => /^434[.-][a-f0-9]+\.js$/.test(name));
     for (const name of bundles) {
@@ -166,4 +186,10 @@ export function mountWeb(app, runtime) {
   app.use("/_next", express.static(path.join(staticRoot, "hall/_next")));
   app.use("/l01", express.static(path.join(staticRoot, "hall/l01")));
   app.use("/avator", express.static(path.join(staticRoot, "avator")));
+}
+
+export function adaptClientOrigin(source, origin) {
+  const original = 'let n=new URL("localhost"===window.location.hostname?"https://lobby-h5.yezoc.xyz":window.location.origin),r=n.hostname.split(".");r[0]="www",n.hostname=r.join(".");let a=n.origin';
+  if (!source.includes(original)) throw new Error('Hall iframe URL adapter does not match the current _app bundle');
+  return source.replace(original, `let n=new URL(${JSON.stringify(origin).replaceAll('<', '\\u003c')});let a=n.origin`);
 }

@@ -85,7 +85,8 @@ export const CLIENT_DEV_PATCH = `<script>
   function rewriteAssetUrl(url) {
     if (typeof url !== "string") return url;
     url = url.replace(/^https?:\\/\\/api\\.pansu\\.xyz(\\/internal\\/v1\\/do(?:\\?.*)?)$/i, function (_all, path) {
-      return "http://lobby.localhost" + (location.port ? ":" + location.port : "") + "/api" + path;
+      var hall = window.__GOGAME_ENDPOINTS__ && window.__GOGAME_ENDPOINTS__.hall_url;
+      return (hall || "http://lobby.localhost" + (location.port ? ":" + location.port : "")) + "/api" + path;
     });
     return url.replace(/\\/assets\\/(common|login|server|web|payment)\\/(config|index)(\\.[^/?]*)?(\\?.*)?$/, function (_all, mod, file, ext, query) {
       var mapped = mappedBundle(mod);
@@ -127,7 +128,7 @@ export const CLIENT_DEV_PATCH = `<script>
 
   var Orig = window.WebSocket;
   function Wrapped(url, protocols) {
-    if (typeof url === "string" && url.indexOf("wss://") === 0) {
+    if (!(window.__GOGAME_ENDPOINTS__ && window.__GOGAME_ENDPOINTS__.game_ws_url) && typeof url === "string" && url.indexOf("wss://") === 0) {
       url = "ws://" + url.slice(6);
     }
     step("WebSocket " + url);

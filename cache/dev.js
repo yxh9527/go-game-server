@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import yaml from 'js-yaml';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const publicConfig = yaml.load(fs.readFileSync(path.join(root, 'hall/config.yaml'), 'utf8')).public || {};
 
 const services = [
   { name: "match", file: "match/src/boot.js", color: "36" },
@@ -32,7 +34,7 @@ function ensureLocalHosts() {
   }
 }
 
-ensureLocalHosts();
+if (!publicConfig.hall_url || !publicConfig.client_url) ensureLocalHosts();
 
 const children = [];
 
@@ -75,6 +77,6 @@ process.on("SIGTERM", shutdown);
 
 console.log("dev 模式（内存，不连 data-center / MySQL / Redis）");
 console.log("浏览器打开：");
-console.log("  大厅 http://lobby.localhost:11042/21/0?userId=10001&userToken=dev&openId=10001&v=2.0.1279");
-console.log("  游戏静态站 http://localhost:4000/  （iframe 走 www.localhost:11042 → 转发到 4000）");
+console.log(`  大厅 ${publicConfig.hall_url || 'http://lobby.localhost:11042'}/21/0?userId=10001&userToken=dev&openId=10001&v=2.0.1279`);
+console.log(`  游戏静态站 ${publicConfig.client_url || 'http://localhost:4000'}/`);
 console.log("进德州：大厅里点「德州」");

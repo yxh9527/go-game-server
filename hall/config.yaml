@@ -4,12 +4,44 @@ redis:
   user: ''
   pwd: ''
 env: dev
+# data-center 内部 gRPC 地址，填写主机:端口，不带 http://。
 data_center: 127.0.0.1:50051
+# hall HTTP 本机监听地址；0.0.0.0 表示所有网卡，不是浏览器访问地址。
 server_ip: 0.0.0.0
+# hall 内部监听端口；nginx 代理大厅页面和 API 时转发到此端口。
 server_port: 11042
+# Node client-web 监听端口；直接访问时与 public.client_url 的端口一致。
+# 经 nginx 访问时，这是代理转发的内部端口，可与对外端口不同。
 client_web_port: 4000
+# client-web 工作进程数：auto 根据可用 CPU 自动选择，最多 4 个；也可填 1～64 的整数。
+# 一次启动自动创建多个 worker，共用上面的端口，无需为每个进程配置端口或 nginx。
+# 填 1 为单进程；该值启动时读取。每个 worker 独立执行原有业务模块热更新。
+client_web_workers: auto
+# hall 连接普通游戏服务的内部地址，填写主机:端口，不带 ws://。
+# 127.0.0.1 仅适用于 hall 与 game-server 同机；跨机器时填 game-server 内网 IP。
+# 用于服务间通信，不要改成游戏静态资源地址。
 game_server: 127.0.0.1:11041
+# hall 连接百人游戏服务的内部地址；共用 game-server 时与 game_server 一致。
 hundred_server: 127.0.0.1:11041
+# 浏览器使用的对外地址，允许同一 IP 或域名使用不同端口，无需多个域名。
+# 测试用 http/ws；nginx 配置 TLS 后，线上用 https/wss。
+# 填写这些字段不会自动启用 TLS 或修改 Node 监听端口，代理和端口映射需另行配置。
+# 字段在服务启动时读取；修改后按正常配置发布流程加载，已有页面需刷新。
+# 不配置 public 时兼容原来的 www.* 地址推导。
+public:
+  # 大厅与 HTTP API 的对外入口，游戏内 API 请求也发往此地址。
+  # 填完整 http(s)://主机:端口，不带 /21/0、查询参数或其他路径。
+  hall_url: http://172.21.211.216:11042
+  # Node client-web 对外入口，供大厅 iframe 加载游戏资源。
+  # 填完整 http(s)://主机:端口，不带 /2.0.1279；大厅自动拼接资源版本。
+  client_url: http://172.21.211.216:4000
+  # 普通游戏 WebSocket 对外地址，必须以 ws:// 或 wss:// 开头。
+  # 直接访问指向 game-server；经 nginx 时填对外 WebSocket 入口。
+  game_ws_url: ws://172.21.211.216:11041
+  # 百人游戏第二条 WebSocket 连接；同一服务通过 /hundred 路径区分两条连接。
+  # game-server 支持此路径；经 nginx 时需保留路径并启用 WebSocket 升级转发。
+  # 不填时回退 game_ws_url；需要独立第二条连接的玩法应保留不同路径。
+  hundred_ws_url: ws://172.21.211.216:11041/hundred
 log: ''
 wallet:
   mode: local

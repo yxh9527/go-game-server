@@ -66,7 +66,7 @@ export function toClientMatch(row, opts = {}) {
     championshipStatus = 3;
     status = 3;
   }
-  const domain = row.domain || opts.gameServer || "";
+  const domain = opts.publicGameServer || row.domain || opts.gameServer || "";
   return {
     id: num(row.id, 0),
     invalidated:row.invalidated===true,

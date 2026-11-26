@@ -5,7 +5,7 @@ import express from "express";
 import { rel } from "../../shared/hot-import.js";
 import { env } from "../../shared/rpc/env.js";
 import {installHotResolver} from '../../shared/hot-loader.js';
-import {clientVersion} from '../../shared/client-version.js';
+import {clientVersion, clientEndpointScript} from '../../shared/client-version.js';
 export {clientVersion};
 installHotResolver();
 
@@ -39,7 +39,7 @@ export function langModuleFiles(clientDir, name) {
 function serveIndex(clientDir, res) {
   const file = path.join(clientDir, "index.html");
   let html = fs.readFileSync(file, "utf8");
-  html = html.replace("<head>", `<head>${CLIENT_DEV_PATCH}`);
+  html = html.replace("<head>", `<head>${CLIENT_DEV_PATCH}${clientEndpointScript(env.config)}`);
   res.set("Cache-Control", "no-store").type("html").send(html);
 }
 
