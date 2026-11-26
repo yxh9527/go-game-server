@@ -1,0 +1,30 @@
+# Copy to the production package's hall/config.yaml and replace placeholders.
+env: prod
+server_ip: 127.0.0.1
+server_port: 11042
+# client-web reads this same file; it has no separate configuration file.
+client_web_port: 4000
+client_web_workers: auto
+
+data_center: 127.0.0.1:50051
+# Storage credential comes from GOGAME_DATA_CENTER_TOKEN in the service environment.
+redis:
+  host: [127.0.0.1:6379]
+  user: ''
+  pwd: 'REPLACE_REDIS_PASSWORD'
+lottery: 'REPLACE_LOTTERY_HOST:PORT'
+
+# Internal service addresses, never the public resource URL.
+game_server: 127.0.0.1:11041
+hundred_server: 127.0.0.1:11041
+match_server: 127.0.0.1:11040
+
+public:
+  hall_url: https://game.example.com
+  client_url: https://game.example.com:8444
+  game_ws_url: wss://game.example.com:8445
+  hundred_ws_url: wss://game.example.com:8445/hundred
+
+wallet:
+  mode: online
+log: ''
