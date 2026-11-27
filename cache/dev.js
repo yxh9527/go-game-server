@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from 'js-yaml';
+import { loadServiceConfig } from '../shared/rpc/env.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const publicConfig = yaml.load(fs.readFileSync(path.join(root, 'hall/config.yaml'), 'utf8')).public || {};
+const publicConfig = loadServiceConfig('hall', { environment: { GOGAME_ENV: 'dev', IS_DEV: '1' } }).public || {};
 
 const services = [
   { name: "match", file: "match/src/boot.js", color: "36" },

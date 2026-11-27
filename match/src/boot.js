@@ -1,19 +1,14 @@
-import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
-import { closeRpc, env, initRpc } from "../../shared/rpc/index.js";
+import { closeRpc, env, initRpc, loadServiceConfig } from "../../shared/rpc/index.js";
 import { watchHot } from "./hot.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 
 function loadConfig() {
-  const file = process.argv.includes("--config")
-    ? process.argv[process.argv.indexOf("--config") + 1]
-    : path.join(root, "config.yaml");
-  return yaml.load(fs.readFileSync(file, "utf8"));
+  return loadServiceConfig('match');
 }
 
 async function main() {

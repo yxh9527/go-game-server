@@ -5,7 +5,6 @@ import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -20,12 +19,11 @@ async function freePort() {
 async function launch(t, workers) {
   const directory = await fs.mkdtemp(path.join(root, '.tmp-client-cluster-'));
   const port = await freePort();
-  const config = path.join(directory, 'config.yaml');
-  await fs.writeFile(config, yaml.dump({ env: 'dev', server_ip: '127.0.0.1', client_web_port: port, client_web_workers: workers }));
-  const child = spawn(process.execPath, ['client-web/src/boot.js', '--config', config], {
+  const snapshot = JSON.stringify({ env: 'dev', server_ip: '127.0.0.1', client_web_port: port, client_web_workers: workers });
+  const child = spawn(process.execPath, ['client-web/src/boot.js'], {
     cwd: root, windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env: { ...process.env, GOGAME_ENV: 'dev', IS_DEV: '1' },
+    env: { ...process.env, GOGAME_ENV: 'dev', IS_DEV: '1', GOGAME_SERVICE_CONFIG: snapshot },
   });
   let output = '', status;
   const closed = new Promise(resolve => child.once('close', code => { status = code; resolve(code); }));

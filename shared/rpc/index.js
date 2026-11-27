@@ -46,4 +46,5 @@ export async function closeRpc() {
 }
 
 export { env, loadEnv, RpcAdapter };
+export { loadServiceConfig } from './env.js';
 export * from "./types/rpcTypes.js";

@@ -184,5 +184,6 @@ test('Node production trees contain no MySQL driver, SQL statements or MySQL con
   }
   const pkg=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
   assert.equal(pkg.dependencies.mysql2,undefined);
-  for(const service of ['hall','game-server','match'])assert.doesNotMatch(await fs.readFile(path.join(root,service,'config.yaml'),'utf8'),/^mysql:/m);
+  const {loadServiceConfig}=await import('../../../shared/rpc/env.js');
+  for(const service of ['hall','game-server','match'])assert.equal(loadServiceConfig(service).mysql,undefined);
 });

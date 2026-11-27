@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import yaml from "js-yaml";
+import { createRequire } from 'node:module';
 import { buildProduction, isProductionPath } from "../../scripts/build-prod.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -35,8 +35,25 @@ test("actual production bundle loads without test/cache and never falls back to 
     const manifest = JSON.parse(await fs.readFile(path.join(outputDir, "build-manifest.json"), "utf8"));
     assert.ok(manifest.files.every(isProductionPath));
     assert.equal(manifest.files.some(file => file.startsWith("cache/") || file.startsWith("test/")), false);
-    for (const service of ["hall", "game-server", "match"]) {
-      const config = yaml.load(await fs.readFile(path.join(outputDir, service, "config.yaml"), "utf8"));
+    assert.ok(manifest.files.includes('ecosystem.config.cjs'));
+    const ecosystem = createRequire(import.meta.url)(path.join(outputDir, 'ecosystem.config.cjs'));
+    assert.deepEqual(ecosystem.apps.map(app => app.name), ['gogame-game-server', 'gogame-match', 'gogame-client-web', 'gogame-hall']);
+    for (const app of ecosystem.apps) {
+      assert.equal(app.cwd, outputDir, 'PM2 must run the deployed bundle, not the source checkout');
+      assert.equal(app.script, path.join(outputDir, app.name.slice('gogame-'.length), 'src/boot.js'));
+      await fs.access(app.script);
+      assert.equal(app.exec_mode, 'fork');
+      assert.equal(app.instances, 1);
+      assert.equal(app.watch, false, 'business hot updates must not restart resident services');
+      assert.equal(app.env.GOGAME_ENV, 'prod');
+      assert.equal(app.env.IS_DEV, '0');
+      assert.equal(app.env.NODE_ENV, 'production');
+      assert.equal(app.env_development, undefined, 'production package must not expose a development launch profile');
+      assert.ok(app.kill_timeout >= 12000, 'allow client-web cluster to drain before force kill');
+    }
+    assert.equal(manifest.files.some(file => file.endsWith('config.yaml')), false);
+    for (const service of ["hall", "client-web", "game-server", "match"]) {
+      const config = JSON.parse(ecosystem.apps.find(app => app.name === `gogame-${service}`).env.GOGAME_SERVICE_CONFIG);
       assert.equal(config.env, "prod");
       if(service==='game-server'){
         assert.equal(config.finance.provider,'lottery');

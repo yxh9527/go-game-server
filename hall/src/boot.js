@@ -2,8 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
-import { closeRpc, env, initRpc } from "../../shared/rpc/index.js";
+import { closeRpc, env, initRpc, loadServiceConfig } from "../../shared/rpc/index.js";
 import { createRpcWallet } from "../../game-server/src/wallet/rpcWallet.js";
 import { attachGameProxy } from "./game-proxy.js";
 import { isGameStaticHost, isHallApiPath, proxyToClientWeb } from "./static-proxy.js";
@@ -15,10 +14,7 @@ const root = path.resolve(here, "..");
 const REDIS_CHANNEL_MATCH = "match";
 
 function loadConfig() {
-  const file = process.argv.includes("--config")
-    ? process.argv[process.argv.indexOf("--config") + 1]
-    : path.join(root, "config.yaml");
-  return yaml.load(fs.readFileSync(file, "utf8"));
+  return loadServiceConfig('hall');
 }
 
 async function loadSnapshot(runtime) {

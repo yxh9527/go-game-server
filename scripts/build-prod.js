@@ -1,8 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
-import {productionFinanceConfig} from '../shared/finance-policy.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const services = ["hall", "client-web", "game-server", "match"];
@@ -57,16 +55,12 @@ export async function buildProduction({ outputDir = path.join(root, "dist/produc
     const pkg = JSON.parse(await fs.readFile(path.join(root, service, "package.json"), "utf8"));
     pkg.scripts = { start: "node ../scripts/prod.js " + service };
     await write(service + "/package.json", JSON.stringify(pkg, null, 2) + "\n");
-    if (service !== "client-web") {
-      const config = yaml.load(await fs.readFile(path.join(root, service, "config.yaml"), "utf8"));
-      config.env = "prod";
-      if (config.wallet) { config.wallet.mode = "online"; delete config.wallet.local_balance; }
-      if(service==='game-server')config.finance=productionFinanceConfig(config.finance);
-      await write(service + "/config.yaml", yaml.dump(config));
-    }
   }
   await copy("shared");
   await copy("scripts/prod.js");
+  const ecosystem = await fs.readFile(path.join(root, 'ecosystem.config.cjs'), 'utf8');
+  if (!ecosystem.includes('const developmentEnabled = true;')) throw new Error('Missing ecosystem production build switch');
+  await write('ecosystem.config.cjs', ecosystem.replace('const developmentEnabled = true;', 'const developmentEnabled = false;'));
   if (includeStatic) await copy("static");
   const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
   pkg.scripts = Object.fromEntries(services.map(service => [service, "node scripts/prod.js " + service]));
@@ -75,7 +69,7 @@ export async function buildProduction({ outputDir = path.join(root, "dist/produc
   delete pkg.files;
   await write("package.json", JSON.stringify(pkg, null, 2) + "\n");
   await copy("package-lock.json");
-  await write("DEPLOY.md", "# Production bundle\n\nInstall dependencies with npm ci --omit=dev. Configure the service YAML files for production, then run npm run hall, npm run game-server, npm run match, and npm run client-web under your process manager.\n\nAll production database access is delegated to gogames data-center. Configure data_center and data_center_token (or GOGAME_DATA_CENTER_TOKEN); the data-center service must use the same token. Node services do not require MySQL connection settings. Deploy the matching GogameStorageService protocol, Go implementation and schema changes before enabling these Node adapters. Overlay tests alone do not apply the data-center changes or migrate the database. Authoritative payment integration must be verified separately.\n\nThe launchers force GOGAME_ENV=prod and IS_DEV=0. test/ and cache/ are intentionally absent. Existing runtime room/ranking state and production Redis caching remain in the service code.\n");
+  await write("DEPLOY.md", "# Production bundle\n\nInstall dependencies with npm ci --omit=dev and install the PM2 CLI on the deployment host. Configure all four services in ecosystem.config.cjs and supply credentials there or through the shell environment before starting PM2. No service config.yaml files are generated. The supplied ecosystem.config.cjs does not automatically load an env file.\n\nStart with pm2 start ecosystem.config.cjs, check each service's health and logs, then run pm2 save. Configure boot recovery using pm2 startup and the command it prints. All four applications use fork mode with one instance and PM2 watch disabled; client-web manages its own workers behind one port. The ecosystem configuration sets NODE_ENV=production, GOGAME_ENV=prod and IS_DEV=0. Do not restart or reload resident services for ordinary business-module updates; their own hot loaders handle those.\n\nAll production database access is delegated to gogames data-center. Configure data_center and data_center_token (or GOGAME_DATA_CENTER_TOKEN); the data-center service must use the same token. Node services do not require MySQL connection settings. Deploy the matching GogameStorageService protocol, Go implementation and schema changes before enabling these Node adapters. Overlay tests alone do not apply the data-center changes or migrate the database. Authoritative payment integration must be verified separately.\n\nThe existing npm run hall/game-server/match/client-web commands remain available as alternative production launchers; do not run them alongside the same PM2-managed services. test/ and cache/ are intentionally absent. Existing runtime room/ranking state and production Redis caching remain in the service code. The production package disables the development launch profile; online wallet and all cash finance room types are defined centrally. The source repository's doc/部署文档.md describes the outer nginx and full deployment sequence; its templates are distributed separately.\n");
   manifest.files.sort();
   await fs.writeFile(path.join(destination, "build-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return { directory: destination, files: manifest.files.length, includesStatic: includeStatic };

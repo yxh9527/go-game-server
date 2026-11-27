@@ -1,21 +1,16 @@
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
-import fs from "node:fs";
 import cluster from 'node:cluster';
 import { availableParallelism } from 'node:os';
 import { watchHot } from "../../hall/src/hot.js";
-import { env, loadEnv } from "../../shared/rpc/env.js";
+import { env, loadEnv, loadServiceConfig } from "../../shared/rpc/env.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 
 function loadConfig() {
-  const file = process.argv.includes("--config")
-    ? process.argv[process.argv.indexOf("--config") + 1]
-    : path.join(root, "hall/config.yaml");
-  return yaml.load(fs.readFileSync(file, "utf8"));
+  return loadServiceConfig('client-web');
 }
 
 function workerCount(config) {
